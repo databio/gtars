@@ -3937,6 +3937,34 @@ fn test_export_fasta_lazy_loads_only_requested_sequence() {
 }
 
 #[test]
+fn test_open_remote_uses_cached_manifest_when_offline() {
+    // Port 1 refuses connections, so the manifest refresh always fails.
+    let remote_url = "http://127.0.0.1:1/store";
+    let dir = tempdir().unwrap();
+    let cache_path = dir.path().join("cache");
+    let fasta_path = dir.path().join("test.fa");
+    fs::write(&fasta_path, ">chr1\nATGCATGC\n").unwrap();
+
+    // With nothing cached, an unreachable remote is still an error.
+    assert!(RefgetStore::open_remote(dir.path().join("empty"), remote_url).is_err());
+
+    // Simulate a cache left by an earlier online open of this remote.
+    let mut writer = RefgetStore::on_disk(&cache_path).unwrap();
+    let (collection, _) = writer
+        .add_sequence_collection_from_fasta(&fasta_path, FastaImportOptions::new())
+        .unwrap();
+    drop(writer);
+    fs::write(cache_path.join(".origin"), format!("{}\n", remote_url)).unwrap();
+
+    let mut store = RefgetStore::open_remote(&cache_path, remote_url)
+        .expect("a cached remote store should open offline");
+    let seq = store
+        .get_sequence_by_name(&collection.digest, "chr1")
+        .unwrap();
+    assert!(seq.is_loaded());
+}
+
+#[test]
 fn test_fd_cache_eviction_matches_resident_encoded() {
     run_fd_cache_eviction_for_mode(false);
 }

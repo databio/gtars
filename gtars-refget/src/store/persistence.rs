@@ -44,7 +44,7 @@
 use super::*;
 use super::readonly::{PendingChanges, ReadonlyRefgetStore};
 use super::alias::AliasKind;
-use super::atomic::atomic_write;
+use super::atomic::{atomic_write, atomic_write_bytes};
 use super::fhr_metadata;
 use super::lock::StoreLock;
 
@@ -76,6 +76,43 @@ const RGSI_HEADER: &str = "#name\tlength\talphabet\tsha512t24u\tmd5\tdescription
 
 /// Header line of a `collections.rgci` file.
 const RGCI_HEADER: &str = "#digest\tn_sequences\tnames_digest\tsequences_digest\tlengths_digest\tname_length_pairs_digest\tsorted_name_length_pairs_digest\tsorted_sequences_digest";
+
+fn remove_cached_artifact(path: &Path) -> Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.is_dir() => fs::remove_dir_all(path)
+            .with_context(|| format!("Failed to remove cached directory {}", path.display())),
+        Ok(_) => fs::remove_file(path)
+            .with_context(|| format!("Failed to remove cached file {}", path.display())),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error)
+            .with_context(|| format!("Failed to inspect cached artifact {}", path.display())),
+    }
+}
+
+fn remove_cached_indexes<'a, I>(cache_path: &Path, paths: I) -> Result<()>
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    let mut seen = HashSet::new();
+    for relative_path in paths {
+        ReadonlyRefgetStore::sanitize_relative_path(relative_path)?;
+        let full_path = cache_path.join(relative_path);
+        if seen.insert(full_path.clone()) {
+            remove_cached_artifact(&full_path)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_remote_manifest_paths(metadata: &StoreMetadata) -> Result<()> {
+    ReadonlyRefgetStore::sanitize_relative_path(&metadata.seqdata_path_template)?;
+    ReadonlyRefgetStore::sanitize_relative_path(&metadata.collections_path_template)?;
+    ReadonlyRefgetStore::sanitize_relative_path(&metadata.sequence_index)?;
+    if let Some(ref collection_index) = metadata.collection_index {
+        ReadonlyRefgetStore::sanitize_relative_path(collection_index)?;
+    }
+    Ok(())
+}
 
 // ============================================================================
 // ReadonlyRefgetStore disk I/O methods
@@ -826,27 +863,113 @@ impl ReadonlyRefgetStore {
         let cache_path = cache_path.as_ref();
         let remote_url = remote_url.as_ref().to_string();
 
-        create_dir_all(cache_path)?;
+        create_dir_all(cache_path)
+            .with_context(|| format!("Failed to create remote cache {}", cache_path.display()))?;
 
-        let index_data = Self::fetch_file(
+        let origin_path = cache_path.join(".origin");
+        match fs::read_to_string(&origin_path) {
+            Ok(recorded) => {
+                let recorded = recorded.strip_suffix('\n').unwrap_or(&recorded);
+                if recorded != remote_url {
+                    anyhow::bail!(
+                        "Remote cache {} belongs to {}, not requested origin {}",
+                        cache_path.display(),
+                        recorded,
+                        remote_url
+                    );
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let contents = format!("{}\n", remote_url);
+                atomic_write_bytes(&origin_path, contents.as_bytes()).with_context(|| {
+                    format!("Failed to record remote cache origin in {}", origin_path.display())
+                })?;
+            }
+            Err(error) => {
+                return Err(error).with_context(|| {
+                    format!("Failed to read remote cache origin {}", origin_path.display())
+                });
+            }
+        }
+
+        let manifest_path = cache_path.join("rgstore.json");
+        let cached_json = fs::read_to_string(&manifest_path).ok();
+        let old_metadata = cached_json
+            .as_deref()
+            .and_then(|json| serde_json::from_str::<StoreMetadata>(json).ok())
+            .filter(|metadata| validate_remote_manifest_paths(metadata).is_ok());
+
+        // Refresh the manifest on every open. If the remote is unreachable,
+        // fall back to the cached copy so an earlier-opened store works offline.
+        let json = match Self::fetch_file(
             &Some(cache_path.to_path_buf()),
             &Some(remote_url.clone()),
             "rgstore.json",
-            true,
             false,
-        )?;
-
-        let json =
-            String::from_utf8(index_data).context("Store metadata contains invalid UTF-8")?;
+            true,
+        ) {
+            Ok(bytes) => {
+                String::from_utf8(bytes).context("Store metadata contains invalid UTF-8")?
+            }
+            Err(error) => match (&old_metadata, cached_json) {
+                (Some(_), Some(json)) => {
+                    eprintln!(
+                        "Could not refresh {} ({}); using cached store metadata",
+                        remote_url, error
+                    );
+                    json
+                }
+                _ => return Err(error),
+            },
+        };
 
         let metadata: StoreMetadata =
             serde_json::from_str(&json).context("Failed to parse store metadata")?;
 
-        Self::sanitize_relative_path(&metadata.seqdata_path_template)?;
-        Self::sanitize_relative_path(&metadata.sequence_index)?;
-        if let Some(ref ci) = metadata.collection_index {
-            Self::sanitize_relative_path(ci)?;
+        validate_remote_manifest_paths(&metadata)?;
+
+        let collections_changed = old_metadata
+            .as_ref()
+            .map(|old| old.collections_digest != metadata.collections_digest)
+            .unwrap_or(true);
+        let sequences_changed = old_metadata
+            .as_ref()
+            .map(|old| old.sequences_digest != metadata.sequences_digest)
+            .unwrap_or(true);
+        let aliases_changed = old_metadata
+            .as_ref()
+            .map(|old| old.aliases_digest != metadata.aliases_digest)
+            .unwrap_or(true);
+        let fhr_changed = old_metadata
+            .as_ref()
+            .map(|old| old.fhr_digest != metadata.fhr_digest)
+            .unwrap_or(true);
+
+        if collections_changed {
+            let old_index = old_metadata
+                .as_ref()
+                .and_then(|old| old.collection_index.as_deref())
+                .unwrap_or("collections.rgci");
+            let new_index = metadata.collection_index.as_deref().unwrap_or("collections.rgci");
+            remove_cached_indexes(cache_path, [old_index, new_index])?;
+            remove_cached_artifact(&cache_path.join("collections"))?;
         }
+        if sequences_changed {
+            let old_index = old_metadata
+                .as_ref()
+                .map(|old| old.sequence_index.as_str())
+                .unwrap_or("sequences.rgsi");
+            remove_cached_indexes(cache_path, [old_index, metadata.sequence_index.as_str()])?;
+        }
+        if aliases_changed {
+            remove_cached_artifact(&cache_path.join("aliases"))?;
+        }
+        if fhr_changed {
+            remove_cached_artifact(&cache_path.join("fhr"))?;
+        }
+
+        atomic_write_bytes(&manifest_path, json.as_bytes())
+            .context("Failed to publish refreshed remote rgstore.json")?;
 
         let mut store = ReadonlyRefgetStore::new(metadata.mode);
         store.local_path = Some(cache_path.to_path_buf());
@@ -855,8 +978,6 @@ impl ReadonlyRefgetStore {
         store.persist_to_disk = true;
         store.ancillary_digests = metadata.ancillary_digests;
         store.attribute_index = metadata.attribute_index;
-        store.available_sequence_alias_namespaces = metadata.sequence_alias_namespaces;
-        store.available_collection_alias_namespaces = metadata.collection_alias_namespaces;
 
         // Defer sequence index loading — it can be 66+ MB and is only needed
         // when accessing individual sequences, not for browsing collections.
@@ -886,6 +1007,46 @@ impl ReadonlyRefgetStore {
             create_dir_all(&local_collections_dir)?;
             Self::load_collections_from_directory(&mut store, &local_collections_dir)?;
         }
+
+        for namespace in &metadata.sequence_alias_namespaces {
+            let relative_path = format!("aliases/sequences/{}.tsv", namespace);
+            Self::fetch_file(
+                &store.local_path,
+                &store.remote_source,
+                &relative_path,
+                true,
+                false,
+            )
+            .with_context(|| {
+                format!(
+                    "Remote {} advertised sequence alias namespace '{}' but it could not be loaded",
+                    remote_url, namespace
+                )
+            })?;
+        }
+        for namespace in &metadata.collection_alias_namespaces {
+            let relative_path = format!("aliases/collections/{}.tsv", namespace);
+            Self::fetch_file(
+                &store.local_path,
+                &store.remote_source,
+                &relative_path,
+                true,
+                false,
+            )
+            .with_context(|| {
+                format!(
+                    "Remote {} advertised collection alias namespace '{}' but it could not be loaded",
+                    remote_url, namespace
+                )
+            })?;
+        }
+        store.aliases.load_namespaces_from_dir(
+            &cache_path.join("aliases"),
+            &metadata.sequence_alias_namespaces,
+            &metadata.collection_alias_namespaces,
+        )?;
+        store.available_sequence_alias_namespaces = metadata.sequence_alias_namespaces;
+        store.available_collection_alias_namespaces = metadata.collection_alias_namespaces;
 
         Ok(store)
     }
