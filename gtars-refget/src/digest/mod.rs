@@ -38,7 +38,8 @@ pub use stream::FastaStreamHasher;
 pub use streaming_decoder::StreamingDecoder;
 pub use types::{
     ArrayElementComparison, AttributeComparison, CollectionLevel1, CollectionLevel2,
-    ComparisonDigests, FaiMetadata, SeqColComparison, SeqColDigestLvl1, SequenceCollection,
-    SequenceCollectionMetadata, SequenceCollectionRecord, SequenceMetadata, SequenceRecord,
+    CollectionNameMatch, ComparisonDigests, FaiMetadata, SeqColComparison, SeqColDigestLvl1,
+    SequenceCollection, SequenceCollectionMetadata, SequenceCollectionRecord, SequenceMetadata,
+    SequenceNameMatch, SequenceRecord,
     digest_sequence, digest_sequence_with_description, parse_rgci_line, parse_rgsi_line,
 };

@@ -1171,6 +1171,19 @@ class RefgetStore:
         """
         ...
 
+    def match_sequence_names(self, digest_a: str, digest_b: str) -> dict[str, Any]:
+        """Match collection-local names by sequence content.
+
+        Returns:
+            A mapping with collection_a, collection_b, matches, a_only, and
+            b_only. Each row has digest, length, names_a, and names_b; repeated
+            content may have many names.
+
+        Raises:
+            KeyError: If either collection digest is unknown.
+        """
+        ...
+
     def compare(self, digest_a: str, digest_b: str) -> dict:
         """Compare two collections by digest.
 
@@ -1528,6 +1541,16 @@ class ReadonlyRefgetStore:
 
     def get_collection_level2(self, digest: str) -> dict:
         """Get level 2 representation (full arrays) for a collection."""
+        ...
+
+    def match_sequence_names(self, digest_a: str, digest_b: str) -> dict[str, Any]:
+        """Match collection-local names by sequence content.
+
+        Each result row has digest, length, names_a, and names_b.
+
+        Raises:
+            KeyError: If either collection digest is unknown.
+        """
         ...
 
     def compare(self, digest_a: str, digest_b: str) -> dict:

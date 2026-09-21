@@ -162,6 +162,21 @@ impl RefgetStore {
         self.inner.compare(digest_a, digest_b)
     }
 
+    /// Lazily load two collection records and match their local names by content.
+    pub fn match_sequence_names(
+        &mut self,
+        digest_a: &str,
+        digest_b: &str,
+    ) -> Result<crate::digest::CollectionNameMatch> {
+        if !self.inner.is_collection_loaded(digest_a) {
+            self.inner.load_collection(digest_a)?;
+        }
+        if !self.inner.is_collection_loaded(digest_b) {
+            self.inner.load_collection(digest_b)?;
+        }
+        self.inner.match_sequence_names(digest_a, digest_b)
+    }
+
     /// Lazy-loading get_attribute.
     pub fn get_attribute(
         &mut self,

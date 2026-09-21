@@ -143,6 +143,17 @@ impl ReadonlyRefgetStore {
         Ok(coll_a.compare(&coll_b))
     }
 
+    /// Match collection-local names by identical sequence content.
+    pub fn match_sequence_names(
+        &self,
+        digest_a: &str,
+        digest_b: &str,
+    ) -> Result<crate::digest::CollectionNameMatch> {
+        let coll_a = self.get_collection(digest_a)?;
+        let coll_b = self.get_collection(digest_b)?;
+        coll_a.match_sequence_names(&coll_b)
+    }
+
     /// Compare a stored collection (by digest) against an externally-provided level-2 body.
     ///
     /// Used for the seqcol spec `POST /comparison/:digest1` endpoint where the client

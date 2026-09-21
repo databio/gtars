@@ -11,14 +11,38 @@ use pyo3::types::{IntoPyDict, PyBytes, PyString, PyType};
 
 use gtars_refget::collection::SequenceCollectionExt;
 use gtars_refget::digest::{
-    FaiMetadata, SeqColDigestLvl1, SequenceCollection, SequenceCollectionMetadata,
-    SequenceMetadata, SequenceRecord,
+    CollectionNameMatch, FaiMetadata, SeqColDigestLvl1, SequenceCollection,
+    SequenceCollectionMetadata, SequenceMetadata, SequenceNameMatch, SequenceRecord,
 };
 use gtars_refget::digest::{md5, sha512t24u, AlphabetType};
 use gtars_refget::fasta::FaiRecord;
 use gtars_refget::store::{FastaImportOptions, ImportReport, ReadonlyRefgetStore, RefgetStore, StorageMode, SyncStrategy};
 use gtars_refget::{expand_fasta_inputs, FastaInputs};
 // use gtars::refget::store::RetrievedSequence; // This is the Rust-native struct
+
+fn name_match_to_python(py: Python<'_>, result: &CollectionNameMatch) -> PyResult<Py<PyAny>> {
+    fn groups(py: Python<'_>, values: &[SequenceNameMatch]) -> PyResult<Vec<Py<PyAny>>> {
+        values
+            .iter()
+            .map(|value| {
+                let item = pyo3::types::PyDict::new(py);
+                item.set_item("digest", &value.digest)?;
+                item.set_item("length", value.length)?;
+                item.set_item("names_a", &value.names_a)?;
+                item.set_item("names_b", &value.names_b)?;
+                Ok(item.into())
+            })
+            .collect()
+    }
+
+    let dict = pyo3::types::PyDict::new(py);
+    dict.set_item("collection_a", &result.collection_a)?;
+    dict.set_item("collection_b", &result.collection_b)?;
+    dict.set_item("matches", groups(py, &result.matches)?)?;
+    dict.set_item("a_only", groups(py, &result.a_only)?)?;
+    dict.set_item("b_only", groups(py, &result.b_only)?)?;
+    Ok(dict.into())
+}
 
 /// Compute the GA4GH SHA-512/24u digest for a sequence.
 ///
@@ -2338,6 +2362,20 @@ impl PyRefgetStore {
         Ok(dict.into())
     }
 
+    /// Match collection-local sequence names by identical content digest.
+    fn match_sequence_names(
+        &mut self,
+        py: Python<'_>,
+        digest_a: &str,
+        digest_b: &str,
+    ) -> PyResult<Py<PyAny>> {
+        let result = self
+            .inner
+            .match_sequence_names(digest_a, digest_b)
+            .map_err(|e| pyo3::exceptions::PyKeyError::new_err(format!("{}", e)))?;
+        name_match_to_python(py, &result)
+    }
+
     /// Compare two collections by digest.
     ///
     /// Returns a dict following the seqcol spec comparison format with keys:
@@ -3274,6 +3312,20 @@ impl PyReadonlyRefgetStore {
         dict.set_item("lengths", &lvl2.lengths)?;
         dict.set_item("sequences", &lvl2.sequences)?;
         Ok(dict.into())
+    }
+
+    /// Match collection-local sequence names by identical content digest.
+    fn match_sequence_names(
+        &self,
+        py: Python<'_>,
+        digest_a: &str,
+        digest_b: &str,
+    ) -> PyResult<Py<PyAny>> {
+        let result = self
+            .store
+            .match_sequence_names(digest_a, digest_b)
+            .map_err(|e| pyo3::exceptions::PyKeyError::new_err(format!("{}", e)))?;
+        name_match_to_python(py, &result)
     }
 
     /// Compare two collections by digest.

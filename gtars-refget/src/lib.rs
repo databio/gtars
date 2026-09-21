@@ -42,6 +42,7 @@ pub use digest::{
     Alphabet,
     AlphabetGuesser,
     AlphabetType,
+    CollectionNameMatch,
     DNA_2BIT_ALPHABET,
     DNA_3BIT_ALPHABET,
     DNA_IUPAC_ALPHABET,
@@ -56,6 +57,7 @@ pub use digest::{
     SequenceCollectionRecord,
     SequenceEncoder,
     SequenceMetadata,
+    SequenceNameMatch,
     StreamingDecoder,
     // Types
     SequenceRecord,

@@ -504,6 +504,25 @@ pub struct ArrayElementComparison {
     pub a_and_b_same_order: HashMap<String, Option<bool>>,
 }
 
+/// Names attached to one sequence digest while matching two collections.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SequenceNameMatch {
+    pub digest: String,
+    pub length: usize,
+    pub names_a: Vec<String>,
+    pub names_b: Vec<String>,
+}
+
+/// Content-based mapping of collection-local sequence names.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CollectionNameMatch {
+    pub collection_a: String,
+    pub collection_b: String,
+    pub matches: Vec<SequenceNameMatch>,
+    pub a_only: Vec<SequenceNameMatch>,
+    pub b_only: Vec<SequenceNameMatch>,
+}
+
 /// A single Sequence Collection, which may or may not hold data.
 #[derive(Clone, Debug)]
 pub struct SequenceCollection {
@@ -516,6 +535,87 @@ pub struct SequenceCollection {
 }
 
 impl SequenceCollection {
+    /// Match collection-local names by sequence content digest.
+    ///
+    /// Shared and A-only groups follow collection A's FASTA order; B-only
+    /// groups follow collection B's order. Repeated content is grouped so the
+    /// result naturally represents one-to-many name mappings.
+    pub fn match_sequence_names(&self, other: &Self) -> anyhow::Result<CollectionNameMatch> {
+        use std::collections::{HashMap, HashSet};
+
+        fn groups(collection: &SequenceCollection) -> anyhow::Result<Vec<SequenceNameMatch>> {
+            let mut positions: HashMap<String, usize> = HashMap::new();
+            let mut result: Vec<SequenceNameMatch> = Vec::new();
+            for record in &collection.sequences {
+                let md = record.metadata();
+                if let Some(&index) = positions.get(&md.sha512t24u) {
+                    if result[index].length != md.length {
+                        anyhow::bail!(
+                            "Inconsistent lengths for sequence digest {}: {} and {}",
+                            md.sha512t24u,
+                            result[index].length,
+                            md.length
+                        );
+                    }
+                    result[index].names_a.push(md.name.clone());
+                } else {
+                    positions.insert(md.sha512t24u.clone(), result.len());
+                    result.push(SequenceNameMatch {
+                        digest: md.sha512t24u.clone(),
+                        length: md.length,
+                        names_a: vec![md.name.clone()],
+                        names_b: Vec::new(),
+                    });
+                }
+            }
+            Ok(result)
+        }
+
+        let a_groups = groups(self)?;
+        let b_groups = groups(other)?;
+        let b_by_digest: HashMap<&str, &SequenceNameMatch> = b_groups
+            .iter()
+            .map(|group| (group.digest.as_str(), group))
+            .collect();
+        let mut seen = HashSet::new();
+        let mut matches = Vec::new();
+        let mut a_only = Vec::new();
+        for mut group in a_groups {
+            if let Some(b_group) = b_by_digest.get(group.digest.as_str()) {
+                if group.length != b_group.length {
+                    anyhow::bail!(
+                        "Inconsistent lengths for sequence digest {}: {} and {}",
+                        group.digest,
+                        group.length,
+                        b_group.length
+                    );
+                }
+                group.names_b = b_group.names_a.clone();
+                seen.insert(group.digest.clone());
+                matches.push(group);
+            } else {
+                a_only.push(group);
+            }
+        }
+        let b_only = b_groups
+            .into_iter()
+            .filter(|group| !seen.contains(&group.digest))
+            .map(|group| SequenceNameMatch {
+                names_a: Vec::new(),
+                names_b: group.names_a,
+                digest: group.digest,
+                length: group.length,
+            })
+            .collect();
+        Ok(CollectionNameMatch {
+            collection_a: self.metadata.digest.clone(),
+            collection_b: other.metadata.digest.clone(),
+            matches,
+            a_only,
+            b_only,
+        })
+    }
+
     /// Create a SequenceCollection from a vector of SequenceRecords.
     pub fn from_records(records: Vec<SequenceRecord>) -> Self {
         // Compute metadata from the sequence records (with ancillary digests)
@@ -1260,5 +1360,37 @@ mod tests {
         for attr in &result.attributes.a_and_b {
             assert_eq!(result.array_elements.a_and_b_same_order[attr], None);
         }
+    }
+
+    #[test]
+    fn test_match_sequence_names_groups_duplicates_preserves_order_and_reports_unmatched() {
+        let a = SequenceCollection::from_records(vec![
+            digest_sequence("chr2L", b"ACGT"),
+            digest_sequence("chr2L_copy", b"ACGT"),
+            digest_sequence("chr3", b"GGCC"),
+            digest_sequence("chr4", b"CCCC"),
+        ]);
+        let b = SequenceCollection::from_records(vec![
+            digest_sequence("4", b"CCCC"),
+            digest_sequence("2L", b"ACGT"),
+            digest_sequence("2L_alt", b"ACGT"),
+            digest_sequence("extra", b"TTAA"),
+        ]);
+
+        let result = a.match_sequence_names(&b).unwrap();
+
+        assert_eq!(result.matches.len(), 2);
+        assert_eq!(result.matches[0].digest, sha512t24u(b"ACGT"));
+        assert_eq!(result.matches[0].names_a, ["chr2L", "chr2L_copy"]);
+        assert_eq!(result.matches[0].names_b, ["2L", "2L_alt"]);
+        assert_eq!(result.matches[1].digest, sha512t24u(b"CCCC"));
+        assert_eq!(result.matches[1].names_a, ["chr4"]);
+        assert_eq!(result.matches[1].names_b, ["4"]);
+        assert_eq!(result.a_only.len(), 1);
+        assert_eq!(result.a_only[0].digest, sha512t24u(b"GGCC"));
+        assert_eq!(result.a_only[0].names_a, ["chr3"]);
+        assert_eq!(result.b_only.len(), 1);
+        assert_eq!(result.b_only[0].digest, sha512t24u(b"TTAA"));
+        assert_eq!(result.b_only[0].names_b, ["extra"]);
     }
 }
