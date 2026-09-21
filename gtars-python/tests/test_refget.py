@@ -1320,8 +1320,9 @@ def test_remote_three_flows(tmp_path):
     assert len(seq_files()) == 1, "flow 3 should persist the sequence to cache"
 
 
-def test_remote_store_len_and_iter_see_every_sequence(tmp_path):
-    """len() and iteration must load a remote store's deferred sequence index."""
+def test_remote_store_lookups_load_deferred_index(tmp_path):
+    """len(), iteration, and metadata lookup must load a remote store's
+    deferred sequence index."""
     import re
     import subprocess
     import sys
@@ -1345,5 +1346,7 @@ def test_remote_store_len_and_iter_see_every_sequence(tmp_path):
         assert len(RefgetStore.open_remote(str(tmp_path / "c1"), url)) == 2
         names = [m.name for m in RefgetStore.open_remote(str(tmp_path / "c2"), url)]
         assert sorted(names) == ["chr1", "chr2"]
+        store = RefgetStore.open_remote(str(tmp_path / "c3"), url)
+        assert store.get_sequence_metadata(sha512t24u_digest("GGCC")).length == 4
     finally:
         server.kill()

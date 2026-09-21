@@ -1762,11 +1762,15 @@ impl PyRefgetStore {
     ///
     /// Returns:
     ///     Optional[SequenceMetadata]: Sequence metadata if found, None otherwise.
-    fn get_sequence_metadata(&self, digest: &str) -> Option<PySequenceMetadata> {
+    fn get_sequence_metadata(&mut self, digest: &str) -> PyResult<Option<PySequenceMetadata>> {
         let digest = strip_sq_prefix(digest);
         self.inner
+            .load_sequence_index()
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e)))?;
+        Ok(self
+            .inner
             .get_sequence_metadata(digest.as_bytes())
-            .map(|meta| PySequenceMetadata::from(meta.clone()))
+            .map(|meta| PySequenceMetadata::from(meta.clone())))
     }
 
     /// Extract a substring from a sequence (flow 1: lean partial read).
