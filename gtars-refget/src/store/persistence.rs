@@ -907,7 +907,15 @@ impl ReadonlyRefgetStore {
                 let record = SequenceRecord::Stub(seq_metadata.clone());
 
                 let sha512_key = seq_metadata.sha512t24u.to_key();
-                store.sequence_store.insert(sha512_key, record);
+                // A deferred index load may run after a sequence was already
+                // fetched into memory; never demote that record to a stub.
+                let already_loaded = store
+                    .sequence_store
+                    .get(&sha512_key)
+                    .is_some_and(|existing| existing.is_loaded());
+                if !already_loaded {
+                    store.sequence_store.insert(sha512_key, record);
+                }
 
                 let md5_key = seq_metadata.md5.to_key();
                 store.md5_lookup.insert(md5_key, sha512_key);

@@ -801,7 +801,7 @@ fn test_disk_persistence() {
 #[test]
 fn test_export_fasta_all_sequences() {
     let temp_dir = tempdir().expect("Failed to create temporary directory");
-    let (store, collection_digest) = setup_export_test_store(temp_dir.path());
+    let (mut store, collection_digest) = setup_export_test_store(temp_dir.path());
 
     let output_path = temp_dir.path().join("exported_all.fa");
     store
@@ -816,7 +816,7 @@ fn test_export_fasta_all_sequences() {
 #[test]
 fn test_export_fasta_subset_sequences() {
     let temp_dir = tempdir().expect("Failed to create temporary directory");
-    let (store, collection_digest) = setup_export_test_store(temp_dir.path());
+    let (mut store, collection_digest) = setup_export_test_store(temp_dir.path());
 
     let output_path = temp_dir.path().join("exported_subset.fa");
     store
@@ -879,7 +879,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCC
 #[test]
 fn test_export_fasta_by_digests() {
     let temp_dir = tempdir().expect("Failed to create temporary directory");
-    let (store, _) = setup_export_test_store(temp_dir.path());
+    let (mut store, _) = setup_export_test_store(temp_dir.path());
 
     let digests: Vec<String> = store
         .sequence_store
@@ -898,7 +898,7 @@ fn test_export_fasta_by_digests() {
 #[test]
 fn test_export_fasta_error_handling() {
     let temp_dir = tempdir().expect("Failed to create temporary directory");
-    let (store, collection_digest) = setup_export_test_store(temp_dir.path());
+    let (mut store, collection_digest) = setup_export_test_store(temp_dir.path());
 
     let output_path = temp_dir.path().join("should_fail.fa");
 
@@ -1063,6 +1063,7 @@ fn test_disk_size_calculation() {
 
     let manual: usize = store
         .list_sequences()
+        .unwrap()
         .iter()
         .map(|m| (m.length * m.alphabet.bits_per_symbol()).div_ceil(8))
         .sum();
@@ -1191,11 +1192,6 @@ fn test_collection_explicit_loading() {
     assert_eq!(stats_before.n_collections_in_memory, 0);
 
     let seq = loaded_store.get_sequence_by_name(&digest, "chr1");
-    assert!(seq.is_err());
-
-    loaded_store.load_collection(&digest).unwrap();
-
-    let seq = loaded_store.get_sequence_by_name(&digest, "chr1");
     assert!(seq.is_ok());
     assert_eq!(seq.unwrap().metadata().name, "chr1");
 
@@ -1277,11 +1273,6 @@ fn test_get_sequence() {
 
     let seq_before = loaded_store.sequence_store.get(&seq_digest.to_key()).unwrap();
     assert!(!seq_before.is_loaded());
-
-    let loaded_seq = loaded_store.get_sequence(&seq_digest).unwrap();
-    assert!(!loaded_seq.is_loaded());
-
-    loaded_store.load_sequence(&seq_digest).unwrap();
 
     let loaded_seq = loaded_store.get_sequence(&seq_digest).unwrap();
     assert!(loaded_seq.is_loaded());
@@ -1582,18 +1573,18 @@ fn test_remove_nonexistent_collection() {
 fn test_remove_without_orphan_cleanup_keeps_sequences() {
     let (mut store, digest) = store_with_one_collection(">chr1\nACGT\n>chr2\nTTTT\n");
 
-    assert_eq!(store.list_sequences().len(), 2);
+    assert_eq!(store.list_sequences().unwrap().len(), 2);
     store.remove_collection(&digest, false).unwrap();
-    assert_eq!(store.list_sequences().len(), 2);
+    assert_eq!(store.list_sequences().unwrap().len(), 2);
 }
 
 #[test]
 fn test_remove_with_orphan_cleanup_removes_sequences() {
     let (mut store, digest) = store_with_one_collection(">chr1\nACGT\n>chr2\nTTTT\n");
 
-    assert_eq!(store.list_sequences().len(), 2);
+    assert_eq!(store.list_sequences().unwrap().len(), 2);
     store.remove_collection(&digest, true).unwrap();
-    assert_eq!(store.list_sequences().len(), 0);
+    assert_eq!(store.list_sequences().unwrap().len(), 0);
 }
 
 #[test]
@@ -1613,12 +1604,12 @@ fn test_remove_with_orphan_cleanup_retains_shared_sequences() {
         .unwrap();
 
     assert_eq!(store.list_collections(0, usize::MAX, &[]).unwrap().results.len(), 2);
-    assert_eq!(store.list_sequences().len(), 3);
+    assert_eq!(store.list_sequences().unwrap().len(), 3);
 
     store.remove_collection(&meta1.digest, true).unwrap();
 
     assert_eq!(store.list_collections(0, usize::MAX, &[]).unwrap().results.len(), 1);
-    assert_eq!(store.list_sequences().len(), 2);
+    assert_eq!(store.list_sequences().unwrap().len(), 2);
 
     let coll = store.get_collection(&meta2.digest).unwrap();
     assert_eq!(coll.sequences.len(), 2);
@@ -1628,12 +1619,12 @@ fn test_remove_with_orphan_cleanup_retains_shared_sequences() {
 fn test_remove_with_orphan_cleanup_clears_md5_lookup() {
     let (mut store, digest) = store_with_one_collection(">chr1\nACGT\n>chr2\nTTTT\n");
 
-    assert_eq!(store.list_sequences().len(), 2);
+    assert_eq!(store.list_sequences().unwrap().len(), 2);
     assert_eq!(store.md5_lookup.len(), 2);
 
     store.remove_collection(&digest, true).unwrap();
 
-    assert_eq!(store.list_sequences().len(), 0);
+    assert_eq!(store.list_sequences().unwrap().len(), 0);
     // Regression: md5_lookup must be emptied along with the sequences.
     assert_eq!(store.md5_lookup.len(), 0);
 }
@@ -1673,7 +1664,7 @@ fn test_remove_with_orphan_cleanup_md5_lookup_retains_shared_sequences() {
     // And the surviving collection is still fully readable.
     let coll = store.get_collection(&meta2.digest).unwrap();
     assert_eq!(coll.sequences.len(), 2);
-    assert_eq!(store.list_sequences().len(), 2);
+    assert_eq!(store.list_sequences().unwrap().len(), 2);
 }
 
 #[test]
@@ -3834,6 +3825,118 @@ fn test_load_all_sequences_triggers_index_load() {
 }
 
 #[test]
+fn test_lazy_sequence_reads_load_only_requested_records() {
+    let dir = tempdir().unwrap();
+    let store_path = dir.path().join("store");
+    let fasta_path = dir.path().join("test.fa");
+    fs::write(&fasta_path, ">chr1\nATGCATGC\n>chr2\nGGGGAAAA\n").unwrap();
+
+    let mut writer = RefgetStore::on_disk(&store_path).unwrap();
+    let (collection, _) = writer
+        .add_sequence_collection_from_fasta(&fasta_path, FastaImportOptions::new())
+        .unwrap();
+    let first = writer
+        .get_sequence_by_name(&collection.digest, "chr1")
+        .unwrap()
+        .metadata()
+        .clone();
+    let second = writer
+        .get_sequence_by_name(&collection.digest, "chr2")
+        .unwrap()
+        .metadata()
+        .clone();
+    drop(writer);
+
+    // Recreate the deferred remote-index state against a local fixture.
+    let mut store = RefgetStore::open_local(&store_path).unwrap();
+    store.inner.sequence_store.clear();
+    store.inner.md5_lookup.clear();
+    store.inner.sequence_index_loaded = false;
+    store.inner.sequence_index_path = Some("sequences.rgsi".to_string());
+
+    // By-name retrieval works before the index arrives: it loads the
+    // collection (registering stubs) and then only chr1's body.
+    let by_name = store
+        .get_sequence_by_name(&collection.digest, "chr1")
+        .unwrap();
+    assert_eq!(by_name.metadata().name, "chr1");
+    assert!(by_name.is_loaded());
+    assert!(!store.inner.sequence_index_loaded);
+    assert!(store.inner.is_sequence_loaded(&first.sha512t24u));
+    assert!(!store.inner.is_sequence_loaded(&second.sha512t24u));
+
+    // Listing loads the index; regression: that must not demote chr1,
+    // which was fetched into memory before the index was loaded.
+    let listed = store.list_sequences().unwrap();
+    assert_eq!(listed.len(), 2);
+    assert!(store.inner.sequence_index_loaded);
+    assert!(store.inner.is_sequence_loaded(&first.sha512t24u));
+    assert!(!store.inner.is_sequence_loaded(&second.sha512t24u));
+
+    let by_md5 = store.get_sequence(&second.md5).unwrap();
+    assert!(by_md5.is_loaded());
+    assert_eq!(by_md5.metadata().name, "chr2");
+    assert!(store.inner.is_sequence_loaded(&second.sha512t24u));
+}
+
+#[test]
+fn test_export_fasta_lazy_loads_only_requested_sequence() {
+    // Same deferred-remote-index simulation as
+    // test_lazy_sequence_reads_load_only_requested_records, but exercising
+    // the mutable export_fasta wrapper directly from the deferred state
+    // (before anything else has touched the collection or its sequences).
+    let dir = tempdir().unwrap();
+    let store_path = dir.path().join("store");
+    let fasta_path = dir.path().join("test.fa");
+    fs::write(&fasta_path, ">chr1\nATGCATGC\n>chr2\nGGGGAAAA\n").unwrap();
+
+    let mut writer = RefgetStore::on_disk(&store_path).unwrap();
+    let (collection, _) = writer
+        .add_sequence_collection_from_fasta(&fasta_path, FastaImportOptions::new())
+        .unwrap();
+    let first = writer
+        .get_sequence_by_name(&collection.digest, "chr1")
+        .unwrap()
+        .metadata()
+        .clone();
+    let second = writer
+        .get_sequence_by_name(&collection.digest, "chr2")
+        .unwrap()
+        .metadata()
+        .clone();
+    drop(writer);
+
+    // Recreate the deferred remote-index state against a local fixture.
+    let mut store = RefgetStore::open_local(&store_path).unwrap();
+    store.inner.sequence_store.clear();
+    store.inner.md5_lookup.clear();
+    store.inner.sequence_index_loaded = false;
+    store.inner.sequence_index_path = Some("sequences.rgsi".to_string());
+
+    assert!(!store.inner.is_sequence_loaded(&first.sha512t24u));
+    assert!(!store.inner.is_sequence_loaded(&second.sha512t24u));
+
+    let output_path = dir.path().join("export_chr1.fa");
+    store
+        .export_fasta(&collection.digest, &output_path, Some(vec!["chr1"]), None)
+        .expect("export_fasta should lazily load only the requested sequence");
+
+    let exported = fs::read_to_string(&output_path).unwrap();
+    assert!(exported.contains(">chr1"));
+    assert!(exported.contains("ATGCATGC"));
+    assert!(!exported.contains(">chr2"));
+
+    assert!(
+        store.inner.is_sequence_loaded(&first.sha512t24u),
+        "chr1 should be loaded after exporting it"
+    );
+    assert!(
+        !store.inner.is_sequence_loaded(&second.sha512t24u),
+        "chr2 should remain unloaded: it was not requested"
+    );
+}
+
+#[test]
 fn test_fd_cache_eviction_matches_resident_encoded() {
     run_fd_cache_eviction_for_mode(false);
 }
@@ -4611,7 +4714,7 @@ fn test_interleaved_writers_preserve_sequence_rows() {
     drop(writer_b);
 
     let reopened = RefgetStore::open_local(&store_dir).unwrap();
-    let names: std::collections::HashSet<String> = reopened
+    let names: std::collections::HashSet<String> = std::ops::Deref::deref(&reopened)
         .list_sequences()
         .iter()
         .map(|m| m.name.clone())
@@ -5038,6 +5141,7 @@ fn test_no_dangling_sequence_rows_after_a_stale_commit() {
     let mut reopened = RefgetStore::open_local(&store_dir).unwrap();
     let digests: Vec<String> = reopened
         .list_sequences()
+        .unwrap()
         .iter()
         .map(|m| m.sha512t24u.clone())
         .collect();

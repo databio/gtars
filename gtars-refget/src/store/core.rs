@@ -162,6 +162,52 @@ impl RefgetStore {
         self.inner.compare(digest_a, digest_b)
     }
 
+    /// List sequence metadata, loading the deferred sequence index if needed.
+    ///
+    /// This only populates metadata-only records; sequence bodies remain lazy.
+    pub fn list_sequences(&mut self) -> Result<Vec<crate::digest::SequenceMetadata>> {
+        self.inner.ensure_sequence_index_loaded()?;
+        Ok(self.inner.list_sequences())
+    }
+
+    /// Retrieve one sequence, loading only its body when necessary.
+    ///
+    /// The readonly lookup accepts MD5 aliases, but the disk loader needs the
+    /// canonical SHA-512/24u key, so resolve before loading.
+    pub fn get_sequence<K: AsRef<[u8]>>(&mut self, digest: K) -> Result<SequenceRecord> {
+        self.inner.ensure_sequence_index_loaded()?;
+        let canonical_digest = self
+            .inner
+            .get_sequence(digest.as_ref())
+            .map(|record| record.metadata().sha512t24u.clone())?;
+        if !self.inner.is_sequence_loaded(&canonical_digest) {
+            self.inner.load_sequence(&canonical_digest)?;
+        }
+        Ok(self.inner.get_sequence(&canonical_digest)?.clone())
+    }
+
+    /// Retrieve a named sequence from a collection, loading only that
+    /// collection and sequence body when necessary.
+    pub fn get_sequence_by_name<K: AsRef<[u8]>>(
+        &mut self,
+        collection_digest: K,
+        sequence_name: &str,
+    ) -> Result<SequenceRecord> {
+        let collection_digest = String::from_utf8_lossy(collection_digest.as_ref());
+        if !self.inner.is_collection_loaded(collection_digest.as_bytes()) {
+            self.inner.load_collection(collection_digest.as_ref())?;
+        }
+        let canonical_digest = self
+            .inner
+            .get_sequence_by_name(collection_digest.as_bytes(), sequence_name)
+            .map(|record| record.metadata().sha512t24u.clone())?;
+        if !self.inner.is_sequence_loaded(&canonical_digest) {
+            self.inner.load_sequence(&canonical_digest)?;
+        }
+        self.inner
+            .get_sequence_by_name(collection_digest.as_bytes(), sequence_name)
+    }
+
     /// Lazily load two collection records and match their local names by content.
     pub fn match_sequence_names(
         &mut self,
@@ -191,6 +237,65 @@ impl RefgetStore {
             self.inner.load_collection(&collections[0])?;
         }
         self.inner.get_attribute(attr_name, attr_digest)
+    }
+
+    /// Lazy-loading export_fasta. Ensures the collection is loaded (fetching
+    /// it if it is still a stub), resolves the requested sequence names (or,
+    /// when `sequence_names` is `None`, every sequence in the collection) to
+    /// digests via the collection's own sequence list, loads any of those
+    /// sequences that are not yet [`Self::is_sequence_loaded`], then delegates
+    /// to the readonly implementation.
+    pub fn export_fasta<K: AsRef<[u8]>, P: AsRef<Path>>(
+        &mut self,
+        collection_digest: K,
+        output_path: P,
+        sequence_names: Option<Vec<&str>>,
+        line_width: Option<usize>,
+    ) -> Result<()> {
+        let collection_digest_str = String::from_utf8_lossy(collection_digest.as_ref()).into_owned();
+        let collection = self.get_collection(&collection_digest_str)?;
+
+        let names_to_load: Vec<&str> = match &sequence_names {
+            Some(names) => names.clone(),
+            None => collection
+                .sequences
+                .iter()
+                .map(|r| r.metadata().name.as_str())
+                .collect(),
+        };
+
+        for name in names_to_load {
+            let record = collection
+                .sequences
+                .iter()
+                .find(|r| r.metadata().name == name)
+                .ok_or_else(|| anyhow::anyhow!("Sequence '{}' not found in collection", name))?;
+            if !record.is_loaded() {
+                self.inner.load_sequence(&record.metadata().sha512t24u)?;
+            }
+        }
+
+        std::ops::Deref::deref(self).export_fasta(collection_digest, output_path, sequence_names, line_width)
+    }
+
+    /// Lazy-loading export_fasta_by_digests. Loads any requested sequence
+    /// digest that is not yet [`Self::is_sequence_loaded`], then delegates to
+    /// the readonly implementation. There is no collection context here, so
+    /// each digest is loaded directly (no name resolution needed).
+    pub fn export_fasta_by_digests<P: AsRef<Path>>(
+        &mut self,
+        seq_digests: Vec<&str>,
+        output_path: P,
+        line_width: Option<usize>,
+    ) -> Result<()> {
+        self.inner.ensure_sequence_index_loaded()?;
+        for digest in seq_digests.iter() {
+            if !self.inner.is_sequence_loaded(*digest) {
+                self.inner.load_sequence(digest)?;
+            }
+        }
+
+        std::ops::Deref::deref(self).export_fasta_by_digests(seq_digests, output_path, line_width)
     }
 
     // =====================================================================

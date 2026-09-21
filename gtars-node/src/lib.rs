@@ -218,7 +218,8 @@ impl RefgetStore {
     #[napi]
     pub fn list_sequences(&self) -> Result<Vec<SequenceMetadataJs>> {
         let store = self.inner.lock().map_err(lock_err)?;
-        Ok(store
+        let readonly = std::ops::Deref::deref(&*store);
+        Ok(readonly
             .list_sequences()
             .into_iter()
             .map(|m| SequenceMetadataJs {

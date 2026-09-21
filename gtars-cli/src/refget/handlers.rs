@@ -144,7 +144,7 @@ fn run_build(matches: &ArgMatches) -> Result<()> {
     let elapsed = start.elapsed().as_secs_f64();
 
     // Best-effort base count from the loaded sequence index (for throughput).
-    for meta in store.list_sequences() {
+    for meta in std::ops::Deref::deref(&store).list_sequences() {
         total_bases += meta.length as u64;
     }
 

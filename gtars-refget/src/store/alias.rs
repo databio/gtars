@@ -1137,7 +1137,7 @@ mod tests {
                 .add_sequence_collection_from_fasta(&fasta_path, FastaImportOptions::new())
                 .unwrap();
             digest = meta.digest.clone();
-            seq_digest = store.list_sequences()[0].sha512t24u.clone();
+            seq_digest = store.list_sequences().unwrap()[0].sha512t24u.clone();
 
             store.add_sequence_alias("ncbi", "NC_000001.11", &seq_digest).unwrap();
             store.add_collection_alias("ucsc", "hg38", &digest).unwrap();

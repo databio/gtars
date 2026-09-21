@@ -232,7 +232,7 @@ fn concurrent_processes_all_land_in_the_index() {
     // The store must still open, and the sequence index must carry one row per
     // writer's unique chromosome.
     let reopened = RefgetStore::open_local(&store_dir).unwrap();
-    let names: std::collections::HashSet<String> = reopened
+    let names: std::collections::HashSet<String> = std::ops::Deref::deref(&reopened)
         .list_sequences()
         .iter()
         .map(|m| m.name.clone())
@@ -297,7 +297,7 @@ fn abandoned_lock_from_a_dead_process_is_broken() {
     assert!(lock_status(&store_dir).unwrap().is_none());
     let reopened = RefgetStore::open_local(&store_dir).unwrap();
     assert!(
-        reopened
+        std::ops::Deref::deref(&reopened)
             .list_sequences()
             .iter()
             .any(|m| m.name == "chr_after"),

@@ -1701,11 +1701,11 @@ impl PyRefgetStore {
     ///     >>> print(f"Found: {record.metadata.name}")
     ///     >>> # Also works with SQ. prefix
     ///     >>> record = store.get_sequence("SQ.aKF498dAxcJAqme6QYQ7EZ07-fiw8Kw2")
-    fn get_sequence(&self, digest: &str) -> PyResult<PySequenceRecord> {
+    fn get_sequence(&mut self, digest: &str) -> PyResult<PySequenceRecord> {
         let digest = strip_sq_prefix(digest);
         self.inner
-            .get_sequence(digest.as_bytes())
-            .map(|record| PySequenceRecord::from(record.clone()))
+            .get_sequence(digest)
+            .map(PySequenceRecord::from)
             .map_err(|e| {
                 pyo3::exceptions::PyKeyError::new_err(format!(
                     "Sequence not found: {} ({})",
@@ -1736,7 +1736,7 @@ impl PyRefgetStore {
     ///     ...     "chr1"
     ///     ... )
     fn get_sequence_by_name(
-        &self,
+        &mut self,
         collection_digest: &str,
         sequence_name: &str,
     ) -> PyResult<PySequenceRecord> {
@@ -1982,12 +1982,16 @@ impl PyRefgetStore {
     /// Example:
     ///     >>> for meta in store.list_sequences():
     ///     ...     print(f"{meta.name}: {meta.length} bp")
-    fn list_sequences(&self) -> Vec<PySequenceMetadata> {
+    fn list_sequences(&mut self) -> PyResult<Vec<PySequenceMetadata>> {
         self.inner
             .list_sequences()
-            .into_iter()
-            .map(|meta| PySequenceMetadata::from(meta))
-            .collect()
+            .map(|metadata| {
+                metadata
+                    .into_iter()
+                    .map(PySequenceMetadata::from)
+                    .collect()
+            })
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e)))
     }
 
     /// List collections with pagination and optional attribute filtering.
@@ -2758,8 +2762,9 @@ impl PyRefgetStore {
     ///     >>> store.export_fasta("uC_UorBNf3YUu1YIDainBhI94CedlNeH", "output.fa", None, None)
     ///     >>> # Export only chr1 and chr2
     ///     >>> store.export_fasta("uC_UorBNf3YUu1YIDainBhI94CedlNeH", "output.fa", ["chr1", "chr2"], None)
+    #[pyo3(signature = (collection_digest, output_path, sequence_names=None, line_width=None))]
     fn export_fasta(
-        &self,
+        &mut self,
         collection_digest: &str,
         output_path: &Bound<'_, PyAny>,
         sequence_names: Option<Vec<String>>,
@@ -2813,8 +2818,9 @@ impl PyRefgetStore {
     ///     ...     "bXE123dAxcJAqme6QYQ7EZ07-fiw8Kw2"
     ///     ... ]
     ///     >>> store.export_fasta_by_digests(seq_digests, "output.fa", None)
+    #[pyo3(signature = (seq_digests, output_path, line_width=None))]
     fn export_fasta_by_digests(
-        &self,
+        &mut self,
         seq_digests: Vec<String>,
         output_path: &Bound<'_, PyAny>,
         line_width: Option<usize>,
@@ -3169,8 +3175,7 @@ impl PyRefgetStore {
     ///     >>> for seq_meta in store:
     ///     ...     print(f"{seq_meta.name}: {seq_meta.length} bp")
     fn __iter__(slf: PyRef<'_, Self>) -> PyResult<PyRefgetStoreIterator> {
-        let sequences = slf
-            .inner
+        let sequences = std::ops::Deref::deref(&slf.inner)
             .list_sequences()
             .into_iter()
             .map(|meta| PySequenceMetadata::from(meta))

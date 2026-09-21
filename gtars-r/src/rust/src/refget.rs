@@ -466,7 +466,7 @@ pub fn list_collections_store(store_ptr: Robj) -> extendr_api::Result<Robj> {
 #[extendr]
 pub fn list_sequences_store(store_ptr: Robj) -> extendr_api::Result<Robj> {
     with_store_ref!(store_ptr, store, {
-        let sequences: Vec<Robj> = store
+        let sequences: Vec<Robj> = std::ops::Deref::deref(store)
             .list_sequences()
             .into_iter()
             .map(|meta| metadata_to_list(meta).into())
