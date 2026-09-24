@@ -142,7 +142,7 @@ mod synthetic {
 
         let mut builder = TxStoreBuilder::new();
         builder.add_chrom_mapping(CHROM_NAME, digest_arr);
-        let n = builder.ingest_cdot(&cdot_path).expect("ingest cdot");
+        let n = builder.ingest_cdot(&cdot_path, None).expect("ingest cdot");
         assert!(n >= 5, "expected >=5 transcripts, got {}", n);
         builder.build(&bin_path).expect("build reftx");
 
