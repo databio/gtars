@@ -257,6 +257,7 @@ mod tests {
     }
 
 
+    #[rstest]
     fn test_stranded_promoters_plus() {
         // Plus-strand gene at [1000, 5000): promoter 100bp upstream of start
         let srs = make_stranded(vec![("chr1", 1000, 5000)], vec![Strand::Plus]);
