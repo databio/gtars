@@ -1453,6 +1453,32 @@ class RefgetStore:
         """
         ...
 
+    def compute_vrs_ids_parallel(
+        self,
+        collection_digest: str,
+        vcf_path: str,
+        output_path: str,
+        threads: Optional[int] = None,
+    ) -> int:
+        """Compute GA4GH VRS Allele identifiers in parallel and stream them to a TSV.
+
+        Makes the collection's sequences resident (2-bit encoded, decoded on
+        the fly), then runs worker threads with the GIL released. BGZF input
+        uses the block-parallel reader; plain or gzip input uses a single
+        reader. Rows are written in VCF order, identical to ``compute_vrs_ids``.
+
+        Args:
+            collection_digest: Digest of the sequence collection (genome assembly).
+            vcf_path: Path to a VCF file (plain, gzip, or BGZF).
+            output_path: Destination TSV. A header row
+                ``chrom pos ref alt vrs_id`` is written first.
+            threads: Worker threads. Defaults to available cores.
+
+        Returns:
+            Number of VRS results written.
+        """
+        ...
+
     def __len__(self) -> int: ...
     def __iter__(self) -> Iterator[SequenceMetadata]: ...
     def __str__(self) -> str: ...
