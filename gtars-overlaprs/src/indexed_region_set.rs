@@ -538,4 +538,89 @@ mod tests {
         assert_eq!(any, vec![true, true, false]);
     }
 
+    #[test]
+    fn test_subset_by_overlaps() {
+        let indexed = IndexedRegionSet::new(RegionSet::from(vec![
+            make_region("chr1", 100, 200),
+            make_region("chr1", 300, 400),
+            make_region("chr1", 500, 600),
+        ]));
+        let query = RegionSet::from(vec![
+            make_region("chr1", 150, 250),
+            make_region("chr1", 550, 650),
+        ]);
+        let got: Vec<(u32, u32)> = indexed
+            .subset_by_overlaps(&query, None)
+            .regions
+            .iter()
+            .map(|r| (r.start, r.end))
+            .collect();
+        assert_eq!(got, vec![(100, 200), (500, 600)]);
+        assert!(indexed.subset_by_overlaps(&RegionSet::from(vec![]), None).is_empty());
+    }
+
+    #[rstest::rstest]
+    #[case(OverlapperType::AIList)]
+    #[case(OverlapperType::Bits)]
+    fn test_find_overlaps_both_backends(#[case] overlapper_type: OverlapperType) {
+        let source = RegionSet::from(vec![
+            make_region("chr1", 150, 200),
+            make_region("chr1", 250, 350),
+            make_region("chr1", 550, 650),
+            make_region("chr2", 50, 150),
+        ]);
+        let query = RegionSet::from(vec![
+            make_region("chr1", 100, 300),
+            make_region("chr1", 500, 600),
+            make_region("chr2", 100, 200),
+        ]);
+        let indexed = IndexedRegionSet::with_overlapper_type(source, overlapper_type);
+        let mut found = indexed.find_overlaps(&query, None);
+        found.iter_mut().for_each(|hits| hits.sort());
+        assert_eq!(found, vec![vec![0, 1], vec![2], vec![3]]);
+        assert_eq!(indexed.count_overlaps(&query, None), vec![2, 1, 1]);
+        assert_eq!(indexed.any_overlaps(&query, None), vec![true, true, true]);
+    }
+
+    // a and b overlap by exactly 20bp.
+    #[rstest::rstest]
+    #[case(None, true)]
+    // non-positive min_overlap means any overlap
+    #[case(Some(-5), true)]
+    #[case(Some(0), true)]
+    #[case(Some(1), true)]
+    // threshold is inclusive
+    #[case(Some(20), true)]
+    #[case(Some(21), false)]
+    fn test_min_overlap_threshold(#[case] min: Option<i32>, #[case] pass: bool) {
+        let a = RegionSet::from(vec![make_region("chr1", 100, 200)]);
+        let b = RegionSet::from(vec![make_region("chr1", 180, 300)]);
+        let b_idx = IndexedRegionSet::new(b.clone());
+        let expected_hits: Vec<usize> = if pass { vec![0] } else { vec![] };
+        assert_eq!(b_idx.count_overlaps(&a, min), vec![pass as usize]);
+        assert_eq!(b_idx.any_overlaps(&a, min), vec![pass]);
+        assert_eq!(b_idx.find_overlaps(&a, min), vec![expected_hits]);
+        let subset = IndexedRegionSet::new(a).subset_by_overlaps(&b, min);
+        assert_eq!(subset.len(), pass as usize);
+    }
+
+    #[rstest::rstest]
+    #[case(Some(5), vec![3, 1])]
+    #[case(Some(50), vec![1, 0])]
+    #[case(Some(101), vec![0, 0])]
+    fn test_min_overlap_filters_each_hit(#[case] min: Option<i32>, #[case] expected: Vec<usize>) {
+        let query = RegionSet::from(vec![
+            make_region("chr1", 100, 300),
+            make_region("chr2", 100, 200),
+        ]);
+        let indexed = IndexedRegionSet::new(RegionSet::from(vec![
+            make_region("chr1", 90, 110),  // 10bp
+            make_region("chr1", 150, 250), // 100bp
+            make_region("chr1", 290, 400), // 10bp
+            make_region("chr2", 190, 300), // 10bp
+        ]));
+        let any: Vec<bool> = expected.iter().map(|&n| n > 0).collect();
+        assert_eq!(indexed.count_overlaps(&query, min), expected);
+        assert_eq!(indexed.any_overlaps(&query, min), any);
+    }
 }

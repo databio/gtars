@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
+use std::io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::sync::mpsc;
 
 use anyhow::{Context, Result};
@@ -487,8 +487,23 @@ pub fn compute_vrs_ids_parallel_encoded(
 /// backpressure instead of letting the queue grow without bound.
 const PARALLEL_CHANNEL_CAPACITY: usize = 64;
 
+/// Results for a run of VCF lines, accumulated into `items` by the caller's
+/// `add` function (on the worker for block interiors). `n` counts results;
+/// `err` holds the first error in line order.
+struct BlockOut<B> {
+    items: B,
+    n: usize,
+    err: Option<anyhow::Error>,
+}
+
+impl<B: Default> BlockOut<B> {
+    fn new() -> Self {
+        BlockOut { items: B::default(), n: 0, err: None }
+    }
+}
+
 /// Per-block processing output from a worker.
-struct BgzfBlockResult {
+struct BgzfBlockResult<B> {
     batch_id: usize,
     /// Bytes before the first `\n` in the decompressed block. Only meaningful
     /// when `had_newline == true` -- in that case these bytes belong to the line
@@ -498,9 +513,9 @@ struct BgzfBlockResult {
     /// true`. If `had_newline == false` the entire decompressed block is stored
     /// here; the collector accumulates it into `prev_tail` verbatim.
     tail_fragment: Vec<u8>,
-    /// VRS results (or errors) for every complete line fully inside this block,
-    /// in line order. Empty when `had_newline == false`.
-    results: Vec<Result<VrsResult>>,
+    /// VRS results (and first error) for every complete line fully inside this
+    /// block, in line order. Empty when `had_newline == false`.
+    out: BlockOut<B>,
     /// Whether this block's decompressed payload contained at least one `\n`.
     /// `false` means the block is entirely interior to a single VCF line that
     /// spans multiple BGZF blocks (e.g. a very long INFO field in gnomAD).
@@ -557,17 +572,18 @@ fn decompress_bgzf_block(block: &[u8]) -> Result<Vec<u8>> {
 
 /// Parse one complete VCF data line (bytes, no trailing newline) and, on
 /// success, append one `VrsResult` per non-symbolic ALT allele to `out`.
-/// Errors are pushed as `Err` entries to preserve ordering.
+/// Each result is handed to `add`; the first error is kept in `out.err`.
 ///
 /// Computes VRS via the canonical encoded `RefView` path: the chromosome is
 /// looked up in `chrom_to_seq_index` to find its shared [`SeqEntry`], and each
 /// allele is normalized against that entry's [`RefView`] (decode-on-the-fly).
-fn process_vcf_line_bytes(
+fn process_vcf_line_bytes<B>(
     line: &[u8],
     seqs: &[SeqEntry<'_>],
     chrom_to_seq_index: &HashMap<String, usize>,
     digest_writer: &mut DigestWriter,
-    out: &mut Vec<Result<VrsResult>>,
+    add: &impl Fn(&mut B, VrsResult),
+    out: &mut BlockOut<B>,
 ) {
     // Strip trailing \r (Windows-style line endings inside a block).
     let line = if line.last() == Some(&b'\r') {
@@ -621,36 +637,41 @@ fn process_vcf_line_bytes(
         let norm = match normalize_ref(&entry.view, pos, ref_str.as_bytes(), alt.as_bytes()) {
             Ok(n) => n,
             Err(e) => {
-                out.push(Err(anyhow::anyhow!(
-                    "Failed to normalize variant at {}:{}: {}",
-                    chrom,
-                    pos + 1,
-                    e
-                )));
+                record_first_err(
+                    &mut out.err,
+                    anyhow::anyhow!("Failed to normalize variant at {}:{}: {}", chrom, pos + 1, e),
+                );
                 continue;
             }
         };
         let norm_seq = match std::str::from_utf8(&norm.allele) {
             Ok(s) => s,
             Err(e) => {
-                out.push(Err(anyhow::anyhow!(
-                    "Normalized allele is not valid UTF-8 at {}:{}: {}",
-                    chrom,
-                    pos + 1,
-                    e
-                )));
+                record_first_err(
+                    &mut out.err,
+                    anyhow::anyhow!(
+                        "Normalized allele is not valid UTF-8 at {}:{}: {}",
+                        chrom,
+                        pos + 1,
+                        e
+                    ),
+                );
                 continue;
             }
         };
         let vrs_id =
             digest_writer.allele_identifier_literal(&entry.accession, norm.start, norm.end, norm_seq);
-        out.push(Ok(VrsResult {
-            chrom: chrom.to_string(),
-            pos,
-            ref_allele: ref_str.to_string(),
-            alt_allele: alt.to_string(),
-            vrs_id,
-        }));
+        add(
+            &mut out.items,
+            VrsResult {
+                chrom: chrom.to_string(),
+                pos,
+                ref_allele: ref_str.to_string(),
+                alt_allele: alt.to_string(),
+                vrs_id,
+            },
+        );
+        out.n += 1;
     }
 }
 
@@ -658,21 +679,24 @@ fn process_vcf_line_bytes(
 /// tail_fragment, and process the complete lines via the encoded `RefView`
 /// path. All CPU-heavy work (inflate + normalize + digest) happens here, on a
 /// worker thread.
-fn process_bgzf_block(
+fn process_bgzf_block<B: Default>(
     batch_id: usize,
     raw_block: &[u8],
     seqs: &[SeqEntry<'_>],
     chrom_to_seq_index: &HashMap<String, usize>,
     digest_writer: &mut DigestWriter,
-) -> BgzfBlockResult {
+    add: &impl Fn(&mut B, VrsResult),
+) -> BgzfBlockResult<B> {
     let decompressed = match decompress_bgzf_block(raw_block) {
         Ok(d) => d,
         Err(e) => {
+            let mut out = BlockOut::new();
+            out.err = Some(e);
             return BgzfBlockResult {
                 batch_id,
                 head_fragment: Vec::new(),
                 tail_fragment: Vec::new(),
-                results: vec![Err(e)],
+                out,
                 had_newline: false,
             };
         }
@@ -683,7 +707,7 @@ fn process_bgzf_block(
             batch_id,
             head_fragment: Vec::new(),
             tail_fragment: Vec::new(),
-            results: Vec::new(),
+            out: BlockOut::new(),
             had_newline: false,
         };
     }
@@ -703,7 +727,7 @@ fn process_bgzf_block(
                 batch_id,
                 head_fragment: Vec::new(),
                 tail_fragment: decompressed,
-                results: Vec::new(),
+                out: BlockOut::new(),
                 had_newline: false,
             };
         }
@@ -716,19 +740,19 @@ fn process_bgzf_block(
     let tail_fragment = decompressed[last + 1..].to_vec();
     let middle_slice: &[u8] = &decompressed[first + 1..last + 1];
 
-    let mut results: Vec<Result<VrsResult>> = Vec::new();
+    let mut out = BlockOut::new();
     for line in middle_slice.split(|&b| b == b'\n') {
         if line.is_empty() {
             continue;
         }
-        process_vcf_line_bytes(line, seqs, chrom_to_seq_index, digest_writer, &mut results);
+        process_vcf_line_bytes(line, seqs, chrom_to_seq_index, digest_writer, add, &mut out);
     }
 
     BgzfBlockResult {
         batch_id,
         head_fragment,
         tail_fragment,
-        results,
+        out,
         had_newline: true,
     }
 }
@@ -788,6 +812,34 @@ pub fn compute_vrs_ids_parallel_bgzf_encoded_with_sink<F: FnMut(VrsResult)>(
     num_workers: usize,
     mut on_result: F,
 ) -> Result<usize> {
+    bgzf_encoded_pipeline(
+        store,
+        name_to_digest,
+        vcf_path,
+        num_workers,
+        |b: &mut Vec<VrsResult>, r| b.push(r),
+        |b| b.into_iter().for_each(&mut on_result),
+    )
+}
+
+/// The BGZF-block pipeline behind [`compute_vrs_ids_parallel_bgzf_encoded_with_sink`],
+/// generic over what a block's results become. Workers fold each result into a
+/// per-block `B` with `add` (so per-result work such as output formatting runs
+/// in parallel); the collector hands each `B` to `on_block` in VCF order.
+fn bgzf_encoded_pipeline<B, A, S>(
+    store: &ReadonlyRefgetStore,
+    name_to_digest: &HashMap<String, String>,
+    vcf_path: &str,
+    num_workers: usize,
+    add: A,
+    mut on_block: S,
+) -> Result<usize>
+where
+    B: Default + Send,
+    A: Fn(&mut B, VrsResult) + Sync,
+    S: FnMut(B),
+{
+    let add = &add;
     let mut file = File::open(vcf_path).context(format!("Failed to open VCF: {}", vcf_path))?;
     if !is_bgzf(&mut file)? {
         return Err(anyhow::anyhow!(
@@ -807,7 +859,7 @@ pub fn compute_vrs_ids_parallel_bgzf_encoded_with_sink<F: FnMut(VrsResult)>(
         let (block_tx, block_rx) =
             crossbeam_channel::bounded::<(usize, Vec<u8>)>(PARALLEL_CHANNEL_CAPACITY);
         let (result_tx, result_rx) =
-            crossbeam_channel::bounded::<BgzfBlockResult>(PARALLEL_CHANNEL_CAPACITY);
+            crossbeam_channel::bounded::<BgzfBlockResult<B>>(PARALLEL_CHANNEL_CAPACITY);
 
         // Reader thread: raw block I/O only. No decompression, no parsing.
         let reader_handle = s.spawn(move || -> Result<()> {
@@ -836,6 +888,7 @@ pub fn compute_vrs_ids_parallel_bgzf_encoded_with_sink<F: FnMut(VrsResult)>(
                         seqs,
                         chrom_to_seq_index,
                         &mut digest_writer,
+                        add,
                     );
                     if result_tx.send(br).is_err() {
                         break;
@@ -857,18 +910,33 @@ pub fn compute_vrs_ids_parallel_bgzf_encoded_with_sink<F: FnMut(VrsResult)>(
         let mut count: usize = 0;
         let mut prev_tail: Vec<u8> = Vec::new();
         let mut stitch_writer = DigestWriter::new();
-        let mut pending: HashMap<usize, BgzfBlockResult> = HashMap::new();
+        let mut pending: HashMap<usize, BgzfBlockResult<B>> = HashMap::new();
         let mut next_batch_id: usize = 0;
 
+        // Hand one run of results to the sink, keeping the first error.
+        fn emit<B>(
+            out: BlockOut<B>,
+            on_block: &mut impl FnMut(B),
+            count: &mut usize,
+            first_err: &mut Option<anyhow::Error>,
+        ) {
+            if let Some(e) = out.err {
+                record_first_err(first_err, e);
+            }
+            *count += out.n;
+            on_block(out.items);
+        }
+
         #[allow(clippy::too_many_arguments)]
-        fn process_block<F: FnMut(VrsResult)>(
-            block: BgzfBlockResult,
+        fn process_block<B: Default>(
+            block: BgzfBlockResult<B>,
             next_batch_id: usize,
             prev_tail: &mut Vec<u8>,
             stitch_writer: &mut DigestWriter,
             seqs: &[SeqEntry<'_>],
             chrom_to_seq_index: &HashMap<String, usize>,
-            on_result: &mut F,
+            add: &impl Fn(&mut B, VrsResult),
+            on_block: &mut impl FnMut(B),
             count: &mut usize,
             first_err: &mut Option<anyhow::Error>,
         ) {
@@ -876,10 +944,8 @@ pub fn compute_vrs_ids_parallel_bgzf_encoded_with_sink<F: FnMut(VrsResult)>(
                 // Block sits entirely inside a single VCF line that spans
                 // multiple BGZF blocks. Accumulate bytes into prev_tail; the
                 // line completes when a later block produces its first `\n`.
-                for r in block.results {
-                    if let Err(e) = r {
-                        record_first_err(first_err, e);
-                    }
+                if let Some(e) = block.out.err {
+                    record_first_err(first_err, e);
                 }
                 prev_tail.extend_from_slice(&block.tail_fragment);
                 return;
@@ -892,37 +958,18 @@ pub fn compute_vrs_ids_parallel_bgzf_encoded_with_sink<F: FnMut(VrsResult)>(
             let mut stitched = std::mem::take(prev_tail);
             stitched.extend_from_slice(&block.head_fragment);
             if !stitched.is_empty() || next_batch_id > 0 {
-                let mut tmp: Vec<Result<VrsResult>> = Vec::new();
+                let mut out = BlockOut::new();
                 process_vcf_line_bytes(
                     &stitched,
                     seqs,
                     chrom_to_seq_index,
                     stitch_writer,
-                    &mut tmp,
+                    add,
+                    &mut out,
                 );
-                for r in tmp {
-                    match r {
-                        Ok(v) => {
-                            on_result(v);
-                            *count += 1;
-                        }
-                        Err(e) => {
-                            record_first_err(first_err, e);
-                        }
-                    }
-                }
+                emit(out, on_block, count, first_err);
             }
-            for r in block.results {
-                match r {
-                    Ok(v) => {
-                        on_result(v);
-                        *count += 1;
-                    }
-                    Err(e) => {
-                        record_first_err(first_err, e);
-                    }
-                }
-            }
+            emit(block.out, on_block, count, first_err);
             *prev_tail = block.tail_fragment;
         }
 
@@ -936,7 +983,8 @@ pub fn compute_vrs_ids_parallel_bgzf_encoded_with_sink<F: FnMut(VrsResult)>(
                     &mut stitch_writer,
                     seqs,
                     chrom_to_seq_index,
-                    &mut on_result,
+                    add,
+                    &mut on_block,
                     &mut count,
                     &mut first_err,
                 );
@@ -956,7 +1004,8 @@ pub fn compute_vrs_ids_parallel_bgzf_encoded_with_sink<F: FnMut(VrsResult)>(
                     &mut stitch_writer,
                     seqs,
                     chrom_to_seq_index,
-                    &mut on_result,
+                    add,
+                    &mut on_block,
                     &mut count,
                     &mut first_err,
                 );
@@ -965,25 +1014,16 @@ pub fn compute_vrs_ids_parallel_bgzf_encoded_with_sink<F: FnMut(VrsResult)>(
 
         // Final unterminated line (if any).
         if !prev_tail.is_empty() {
-            let mut tmp: Vec<Result<VrsResult>> = Vec::new();
+            let mut out = BlockOut::new();
             process_vcf_line_bytes(
                 &prev_tail,
                 seqs,
                 chrom_to_seq_index,
                 &mut stitch_writer,
-                &mut tmp,
+                add,
+                &mut out,
             );
-            for r in tmp {
-                match r {
-                    Ok(v) => {
-                        on_result(v);
-                        count += 1;
-                    }
-                    Err(e) => {
-                        record_first_err(&mut first_err, e);
-                    }
-                }
-            }
+            emit(out, &mut on_block, &mut count, &mut first_err);
         }
 
         // Surface reader / worker panics.
@@ -1009,6 +1049,75 @@ pub fn compute_vrs_ids_parallel_bgzf_encoded_with_sink<F: FnMut(VrsResult)>(
         }
         Ok(count)
     })
+}
+
+/// Append one `chrom\tpos\tref\talt\tvrs_id\n` TSV row to `buf`.
+fn push_tsv_row(buf: &mut Vec<u8>, r: &VrsResult) {
+    buf.extend_from_slice(r.chrom.as_bytes());
+    buf.push(b'\t');
+    buf.extend_from_slice(itoa::Buffer::new().format(r.pos).as_bytes());
+    buf.push(b'\t');
+    buf.extend_from_slice(r.ref_allele.as_bytes());
+    buf.push(b'\t');
+    buf.extend_from_slice(r.alt_allele.as_bytes());
+    buf.push(b'\t');
+    buf.extend_from_slice(r.vrs_id.as_bytes());
+    buf.push(b'\n');
+}
+
+/// Parallel VRS computation for any VCF, streamed to `out` as TSV.
+///
+/// Makes every sequence of `collection_digest` resident (encoded bytes, no
+/// decode), writes a `chrom\tpos\tref\talt\tvrs_id` header, then one row per
+/// result in exact VCF order. BGZF input uses the BGZF-block pipeline with rows
+/// formatted on the workers (a single collector formatting every row starves
+/// the workers); plain or gzip input uses [`compute_vrs_ids_parallel_encoded`],
+/// which is bound by its single reader. Returns the number of rows written.
+pub fn compute_vrs_ids_parallel_to_tsv(
+    store: &mut RefgetStore,
+    collection_digest: &str,
+    vcf_path: &str,
+    threads: usize,
+    out: impl Write,
+) -> Result<usize> {
+    let name_to_digest = build_name_to_digest(store, collection_digest)?;
+    for digest in name_to_digest.values() {
+        ensure_resident(store, digest)?;
+    }
+    let mut file = File::open(vcf_path).context(format!("Failed to open VCF: {}", vcf_path))?;
+    let bgzf = is_bgzf(&mut file)?;
+    let store: &ReadonlyRefgetStore = store;
+
+    let mut w = BufWriter::with_capacity(1 << 20, out);
+    w.write_all(b"chrom\tpos\tref\talt\tvrs_id\n")?;
+    let mut write_err: Option<std::io::Error> = None;
+    let mut write = |bytes: &[u8]| {
+        if write_err.is_none() {
+            write_err = w.write_all(bytes).err();
+        }
+    };
+    let n = if bgzf {
+        bgzf_encoded_pipeline(
+            store,
+            &name_to_digest,
+            vcf_path,
+            threads,
+            |b: &mut Vec<u8>, r| push_tsv_row(b, &r),
+            |b| write(&b),
+        )?
+    } else {
+        let mut row = Vec::new();
+        compute_vrs_ids_parallel_encoded(store, &name_to_digest, vcf_path, threads, |r| {
+            row.clear();
+            push_tsv_row(&mut row, &r);
+            write(&row);
+        })?
+    };
+    if let Some(e) = write_err {
+        return Err(e.into());
+    }
+    w.flush()?;
+    Ok(n)
 }
 
 // ── Vec-collecting APIs (convenience wrappers) ──────────────────────────

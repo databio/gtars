@@ -3501,6 +3501,52 @@ impl PyRefgetStore {
             .map_err(|e| pyo3::exceptions::PyKeyError::new_err(format!("{}", e)))?;
         Ok(PyVerifyReport::from(report))
     }
+
+    /// Compute GA4GH VRS Allele identifiers in parallel and stream them to a TSV.
+    ///
+    /// Makes the collection's sequences resident (2-bit encoded, decoded on the
+    /// fly), then runs worker threads with the GIL released. BGZF input uses
+    /// the block-parallel reader; plain or gzip input uses a single reader.
+    /// Rows are written in VCF order, identical to ``compute_vrs_ids``.
+    ///
+    /// Args:
+    ///     collection_digest (str): Digest of the sequence collection (genome assembly).
+    ///     vcf_path (str): Path to a VCF file (plain, gzip, or BGZF).
+    ///     output_path (str): Destination TSV. A header row
+    ///         ``chrom pos ref alt vrs_id`` is written first.
+    ///     threads (int, optional): Worker threads. Defaults to available cores.
+    ///
+    /// Returns:
+    ///     int: Number of VRS results written.
+    #[pyo3(signature = (collection_digest, vcf_path, output_path, threads = None))]
+    fn compute_vrs_ids_parallel(
+        &mut self,
+        py: Python<'_>,
+        collection_digest: &str,
+        vcf_path: &str,
+        output_path: &str,
+        threads: Option<usize>,
+    ) -> PyResult<usize> {
+        let threads = threads.unwrap_or_else(|| {
+            std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(1)
+        });
+        let store = &mut self.inner;
+        py.detach(|| -> anyhow::Result<usize> {
+            let file = std::fs::File::create(output_path)?;
+            gtars_vrs::vcf::compute_vrs_ids_parallel_to_tsv(
+                store,
+                collection_digest,
+                vcf_path,
+                threads,
+                file,
+            )
+        })
+        .map_err(|e| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!("VRS computation failed: {:#}", e))
+        })
+    }
 }
 
 /// Iterator for RefgetStore that yields SequenceMetadata.

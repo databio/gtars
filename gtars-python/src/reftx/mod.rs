@@ -371,15 +371,31 @@ impl TxStoreBuilderPy {
     }
 
     /// Ingest a cdot JSON file. Auto-detects `.gz`.
-    fn load_cdot(&mut self, py: Python<'_>, path: &str) -> PyResult<usize> {
+    ///
+    /// `genome_build` (e.g. `"GRCh38"`) is required when the file holds
+    /// more than one build.
+    #[pyo3(signature = (path, genome_build=None))]
+    fn load_cdot(
+        &mut self,
+        py: Python<'_>,
+        path: &str,
+        genome_build: Option<&str>,
+    ) -> PyResult<usize> {
         let path = path.to_string();
-        py.detach(|| self.inner.ingest_cdot(&path))
+        let genome_build = genome_build.map(str::to_string);
+        py.detach(|| self.inner.ingest_cdot(&path, genome_build.as_deref()))
             .map_err(map_store_err)
     }
 
     /// Alias for `load_cdot`; the auto-detected gzip path also works through it.
-    fn load_cdot_gz(&mut self, py: Python<'_>, path: &str) -> PyResult<usize> {
-        self.load_cdot(py, path)
+    #[pyo3(signature = (path, genome_build=None))]
+    fn load_cdot_gz(
+        &mut self,
+        py: Python<'_>,
+        path: &str,
+        genome_build: Option<&str>,
+    ) -> PyResult<usize> {
+        self.load_cdot(py, path, genome_build)
     }
 
     /// Load MANE flags from an NCBI MANE summary TSV (auto-detects `.gz`).

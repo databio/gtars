@@ -39,24 +39,32 @@ fn ingest_cdot(path: &PathBuf, chrom_name: &str, chrom_digest: [u8; 24]) -> Vec<
 
     let mut out = Vec::new();
     for (_, tx) in txs {
-        let contig = tx.get("contig").and_then(|v| v.as_str()).unwrap_or("");
+        // Real cdot shape: coordinates live under genome_builds.<build>.
+        let Some(build) = tx
+            .get("genome_builds")
+            .and_then(|v| v.as_object())
+            .and_then(|m| m.values().next())
+        else {
+            continue;
+        };
+        let contig = build.get("contig").and_then(|v| v.as_str()).unwrap_or("");
         if contig != chrom_name {
             continue;
         }
-        let strand = match tx.get("strand").and_then(|v| v.as_i64()).unwrap_or(0) {
-            1 => Strand::Forward,
-            -1 => Strand::Reverse,
+        let strand = match build.get("strand").and_then(|v| v.as_str()).unwrap_or("") {
+            "+" => Strand::Forward,
+            "-" => Strand::Reverse,
             _ => continue,
         };
-        let exons: Vec<Exon> = tx
+        let exons: Vec<Exon> = build
             .get("exons")
             .and_then(|v| v.as_array())
             .map(|arr| {
                 arr.iter()
                     .filter_map(|e| {
-                        let pair = e.as_array()?;
-                        let s = pair.first()?.as_u64()? as u32;
-                        let en = pair.get(1)?.as_u64()? as u32;
+                        let row = e.as_array()?;
+                        let s = row.first()?.as_u64()? as u32;
+                        let en = row.get(1)?.as_u64()? as u32;
                         Some(Exon { start: s, end: en })
                     })
                     .collect()
@@ -74,8 +82,8 @@ fn ingest_cdot(path: &PathBuf, chrom_name: &str, chrom_digest: [u8; 24]) -> Vec<
                 .to_string(),
             chrom_digest,
             strand,
-            cds_start: tx.get("cds_start").and_then(|v| v.as_u64()).map(|v| v as u32),
-            cds_end: tx.get("cds_end").and_then(|v| v.as_u64()).map(|v| v as u32),
+            cds_start: build.get("cds_start").and_then(|v| v.as_u64()).map(|v| v as u32),
+            cds_end: build.get("cds_end").and_then(|v| v.as_u64()).map(|v| v as u32),
             exons,
             mane: ManeStatus::default(),
         });

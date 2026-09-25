@@ -15,22 +15,73 @@ use crate::transcripts::store::build_reftx_bytes;
 
 const READ_BUFFER_SIZE: usize = 256 * 1024;
 
-/// cdot JSON transcript format (subset of fields we need).
+/// cdot JSON file structure (subset of fields we need).
+///
+/// Real cdot files (0.2.x) keep per-build coordinates one level down:
+/// `transcripts.<id>.genome_builds.<build>.{contig, strand, cds_start, cds_end, exons}`.
+/// The top-level `genome_builds` lists every build present in the file.
+#[derive(Deserialize)]
+struct CdotFile {
+    #[serde(default)]
+    genome_builds: Vec<String>,
+    transcripts: HashMap<String, CdotTranscript>,
+}
+
 #[derive(Deserialize)]
 struct CdotTranscript {
     id: String,
     gene_name: Option<String>,
-    contig: String,
-    strand: i8,
-    cds_start: Option<u32>,
-    cds_end: Option<u32>,
-    exons: Vec<(u32, u32)>,
+    #[serde(default)]
+    genome_builds: HashMap<String, CdotBuild>,
 }
 
-/// cdot JSON file structure.
+/// One transcript's alignment to one genome build.
 #[derive(Deserialize)]
-struct CdotFile {
-    transcripts: HashMap<String, CdotTranscript>,
+struct CdotBuild {
+    contig: String,
+    /// `"+"` or `"-"`.
+    strand: String,
+    cds_start: Option<u32>,
+    cds_end: Option<u32>,
+    exons: Vec<CdotExon>,
+}
+
+/// A cdot exon: `[alt_start, alt_end, exon_ordinal, tx_start, tx_end, gap]`.
+/// Genomic coordinates are 0-based half-open; we keep only those two.
+struct CdotExon {
+    start: u32,
+    end: u32,
+}
+
+impl<'de> Deserialize<'de> for CdotExon {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct ExonVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for ExonVisitor {
+            type Value = CdotExon;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a cdot exon array starting with [start, end, ...]")
+            }
+
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                mut seq: A,
+            ) -> Result<CdotExon, A::Error> {
+                use serde::de::Error;
+                let start = seq
+                    .next_element()?
+                    .ok_or_else(|| A::Error::invalid_length(0, &self))?;
+                let end = seq
+                    .next_element()?
+                    .ok_or_else(|| A::Error::invalid_length(1, &self))?;
+                while seq.next_element::<serde::de::IgnoredAny>()?.is_some() {}
+                Ok(CdotExon { start, end })
+            }
+        }
+
+        deserializer.deserialize_seq(ExonVisitor)
+    }
 }
 
 /// Builder for creating transcript stores.
@@ -139,11 +190,18 @@ impl TxStoreBuilder {
         self.chrom_to_digest.insert(name.to_string(), digest);
     }
 
-    /// Ingest a cdot JSON file.
+    /// Ingest a cdot JSON file (optionally `.gz`).
     ///
-    /// Uses 256KB read buffer. Skips transcripts on chromosomes not in
-    /// the chrom_to_digest mapping.
-    pub fn ingest_cdot<P: AsRef<Path>>(&mut self, path: P) -> Result<usize> {
+    /// `genome_build` picks which build's coordinates to use (e.g. `"GRCh38"`).
+    /// If `None`, the file must contain exactly one build. Transcripts without
+    /// an alignment to that build, or on contigs not in the chrom_to_digest
+    /// mapping, are skipped. Note that real cdot files name contigs by RefSeq
+    /// accession (e.g. `NC_000007.14`), so mappings must use those names.
+    pub fn ingest_cdot<P: AsRef<Path>>(
+        &mut self,
+        path: P,
+        genome_build: Option<&str>,
+    ) -> Result<usize> {
         let file = File::open(path.as_ref())?;
 
         let reader: Box<dyn std::io::Read> =
@@ -158,28 +216,56 @@ impl TxStoreBuilder {
 
         let cdot: CdotFile = serde_json::from_reader(reader)?;
 
+        let build = match genome_build {
+            Some(b) => {
+                if !cdot.genome_builds.iter().any(|x| x == b) {
+                    return Err(anyhow!(
+                        "genome build {:?} not in cdot file (available: {:?})",
+                        b,
+                        cdot.genome_builds
+                    ));
+                }
+                b.to_string()
+            }
+            None => match cdot.genome_builds.as_slice() {
+                [only] => only.clone(),
+                builds => {
+                    return Err(anyhow!(
+                        "cdot file has {} genome builds {:?}; pass genome_build to pick one",
+                        builds.len(),
+                        builds
+                    ))
+                }
+            },
+        };
+
         let mut count = 0;
-        for (_, tx) in cdot.transcripts {
-            let chrom_digest = match self.chrom_to_digest.get(&tx.contig) {
+        for (_, mut tx) in cdot.transcripts {
+            let Some(b) = tx.genome_builds.remove(&build) else {
+                continue;
+            };
+
+            let chrom_digest = match self.chrom_to_digest.get(&b.contig) {
                 Some(d) => *d,
                 None => continue,
             };
 
-            let strand = match tx.strand {
-                1 => Strand::Forward,
-                -1 => Strand::Reverse,
+            let strand = match b.strand.as_str() {
+                "+" => Strand::Forward,
+                "-" => Strand::Reverse,
                 _ => continue,
             };
 
-            let exons: Vec<Exon> = tx
+            let mut exons: Vec<Exon> = b
                 .exons
                 .into_iter()
-                .map(|(s, e)| Exon { start: s, end: e })
+                .map(|e| Exon { start: e.start, end: e.end })
                 .collect();
 
             if exons.is_empty() {
                 continue;
             }
+            exons.sort_by_key(|e| e.start);
 
             let mane_flag_byte = self
                 .mane_flags
@@ -196,8 +282,8 @@ impl TxStoreBuilder {
                 gene: tx.gene_name.unwrap_or_default(),
                 chrom_digest,
                 strand,
-                cds_start: tx.cds_start,
-                cds_end: tx.cds_end,
+                cds_start: b.cds_start,
+                cds_end: b.cds_end,
                 exons,
                 mane: ManeStatus::from_flags_byte(mane_flag_byte),
             });

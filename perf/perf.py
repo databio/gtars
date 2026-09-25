@@ -90,7 +90,7 @@ DEF_TARBALL = HERE / TARBALL_NAME                # local cached tarball
 DEF_ENV_FILE = HERE / ".env"                     # optional PERF_DATA_URL override
 # Public default location of the fixture tarball, so a fresh checkout
 # auto-downloads with no config. Override via PERF_DATA_URL (env or .env).
-DEFAULT_PERF_DATA_URL = f"https://cloud.databio.org/gtars/{TARBALL_NAME}"
+DEFAULT_PERF_DATA_URL = f"http://cloud.databio.org/gtars/{TARBALL_NAME}"
 DEF_STORE_DIR = DEF_DATA_DIR / "_store"          # built+cached Encoded store
 
 DEF_WORK = "/tmp/gtars-perf-work"        # cached derived BEDs/points subsets
