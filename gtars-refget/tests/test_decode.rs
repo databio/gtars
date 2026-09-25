@@ -120,7 +120,7 @@ fn make_encoded_full_record(name: &str, raw_seq: &[u8], alphabet: AlphabetType) 
     let length = raw_seq.len();
     let mut encoder = SequenceEncoder::new(alphabet, length);
     encoder.update(raw_seq);
-    let encoded = encoder.finalize();
+    let encoded = encoder.finalize().unwrap();
     let metadata = SequenceMetadata {
         name: name.to_string(),
         description: None,

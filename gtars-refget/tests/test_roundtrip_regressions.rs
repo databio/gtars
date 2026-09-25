@@ -20,7 +20,7 @@ use tempfile::NamedTempFile;
 fn roundtrip(seq: &[u8]) -> (AlphabetType, Vec<u8>) {
     let alphabet_type = guess_alphabet(seq);
     let alphabet = lookup_alphabet(&alphabet_type);
-    let encoded = encode_sequence(seq, alphabet);
+    let encoded = encode_sequence(seq, alphabet).unwrap();
     let decoded = decode_string_from_bytes(&encoded, seq.len(), alphabet);
     (alphabet_type, decoded)
 }

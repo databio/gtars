@@ -151,12 +151,12 @@ mod nofs_tests {
 
         store.disable_encoding();
         assert_eq!(store.mode, StorageMode::Raw);
-        store.enable_encoding();
+        store.enable_encoding().unwrap();
         assert_eq!(store.mode, StorageMode::Encoded);
 
-        store.set_encoding_mode(StorageMode::Raw);
+        store.set_encoding_mode(StorageMode::Raw).unwrap();
         assert_eq!(store.mode, StorageMode::Raw);
-        store.set_encoding_mode(StorageMode::Encoded);
+        store.set_encoding_mode(StorageMode::Encoded).unwrap();
         assert_eq!(store.mode, StorageMode::Encoded);
     }
 }

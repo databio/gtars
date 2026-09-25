@@ -394,7 +394,7 @@ mod tests {
     fn test_decode_handles_encoded_data() {
         let sequence = b"ACGT";
         let alphabet = lookup_alphabet(&AlphabetType::Dna2bit);
-        let encoded_data = encode_sequence(sequence, alphabet);
+        let encoded_data = encode_sequence(sequence, alphabet).unwrap();
 
         let record = SequenceRecord::Full {
             metadata: SequenceMetadata {

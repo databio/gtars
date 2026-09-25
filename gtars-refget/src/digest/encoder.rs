@@ -22,7 +22,8 @@ use super::alphabet::Alphabet;
 ///
 /// 1. Create a new `SequenceEncoder` using the `new` method.
 /// 2. Add sequence chunks with the `update` method.
-/// 3. Call the `finalize` method to retrieve the encoded sequence as a `Vec<u8>`.
+/// 3. Call the `finalize` method to retrieve the encoded sequence as a `Vec<u8>`
+///    (or an [`EncodeError`] if a byte was not in the alphabet).
 ///
 pub struct SequenceEncoder {
     alphabet: &'static alphabet::Alphabet, // alphabet used by this encoder
@@ -30,6 +31,10 @@ pub struct SequenceEncoder {
     bit_pos: usize,                        // internal bit position in encoded sequence
     buffer: u64,                           // internal bit buffer
     buffer_bits: usize,                    // number of bits currently in buffer
+    code_mask: u8,                         // (1 << bits_per_symbol) - 1
+    invalid_flag: u8,                      // high bit that marks INVALID_CODE (0 for Ascii)
+    symbols_seen: usize,                   // bytes consumed across all update calls
+    first_bad: Option<(usize, u8)>,        // first non-member byte: (position, byte)
 }
 
 impl SequenceEncoder {
@@ -44,33 +49,110 @@ impl SequenceEncoder {
             bit_pos: 0,
             buffer: 0,
             buffer_bits: 0,
+            code_mask: ((1u16 << bits_per_symbol) - 1) as u8,
+            invalid_flag: invalid_flag(alphabet),
+            symbols_seen: 0,
+            first_bad: None,
         }
     }
 
+    /// Encode the next chunk of the sequence. A byte that is not in the
+    /// alphabet does not stop encoding; it is reported by [`finalize`](Self::finalize).
     pub fn update(&mut self, sequence: &[u8]) {
-        for &byte in sequence {
-            let code = self.alphabet.encoding_array[byte as usize] as u64;
-            self.buffer = (self.buffer << self.alphabet.bits_per_symbol) | code;
-            self.buffer_bits += self.alphabet.bits_per_symbol;
+        let encoding_array = self.alphabet.encoding_array;
+        let bits = self.alphabet.bits_per_symbol;
+        let code_mask = self.code_mask;
+        // OR of every raw table value in this call. Valid codes are < 0x80 and
+        // INVALID_CODE is 0xFF, so the high bit flags a non-member byte.
+        let mut bad = 0u8;
 
-            while self.buffer_bits >= 8 {
-                self.buffer_bits -= 8;
-                let out_byte = (self.buffer >> self.buffer_bits) as u8;
-                self.encoded_sequence.push(out_byte);
-                self.bit_pos += 8;
-                self.buffer &= (1 << self.buffer_bits) - 1; // Mask to keep remaining bits
+        // Work on locals so the bit buffer stays in registers. `bits` is at
+        // most 8 and fewer than 8 bits are pending before each symbol, so at
+        // most one byte is ready per symbol (an `if`, not a loop). Bits above
+        // the pending ones are shifted out of the u64 or dropped by `as u8`.
+        let mut buffer = self.buffer;
+        let mut buffer_bits = self.buffer_bits;
+        let out = &mut self.encoded_sequence;
+        out.reserve((sequence.len() * bits).div_ceil(8) + 1);
+
+        for &byte in sequence {
+            let raw = encoding_array[byte as usize];
+            bad |= raw;
+            buffer = (buffer << bits) | (raw & code_mask) as u64;
+            buffer_bits += bits;
+            if buffer_bits >= 8 {
+                buffer_bits -= 8;
+                out.push((buffer >> buffer_bits) as u8);
             }
         }
+
+        self.bit_pos = out.len() * 8;
+        self.buffer = buffer & ((1u64 << buffer_bits) - 1);
+        self.buffer_bits = buffer_bits;
+
+        if bad & self.invalid_flag != 0 && self.first_bad.is_none() {
+            // Cold path, runs at most once per sequence.
+            self.first_bad = find_first_invalid(sequence, self.alphabet)
+                .map(|(i, b)| (self.symbols_seen + i, b));
+        }
+        self.symbols_seen += sequence.len();
     }
 
-    pub fn finalize(mut self) -> Vec<u8> {
+    /// Finish encoding. Returns an error if any byte passed to
+    /// [`update`](Self::update) was not a member of the alphabet.
+    pub fn finalize(mut self) -> Result<Vec<u8>, EncodeError> {
+        if let Some((position, byte)) = self.first_bad {
+            return Err(EncodeError::invalid_symbol(self.alphabet, byte, position));
+        }
         if self.buffer_bits > 0 {
             let out_byte = (self.buffer << (8 - self.buffer_bits)) as u8;
             self.encoded_sequence.push(out_byte);
             self.bit_pos += self.buffer_bits;
         }
-        self.encoded_sequence
+        Ok(self.encoded_sequence)
     }
+}
+
+/// Error from encoding a sequence with an alphabet that cannot hold it.
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum EncodeError {
+    #[error("byte {byte:#04x} ({ch:?}) at position {position} is not in alphabet {alphabet}")]
+    InvalidSymbol {
+        alphabet: alphabet::AlphabetType,
+        byte: u8,
+        ch: char,
+        position: usize,
+    },
+}
+
+impl EncodeError {
+    fn invalid_symbol(alphabet: &Alphabet, byte: u8, position: usize) -> Self {
+        EncodeError::InvalidSymbol {
+            alphabet: alphabet.alphabet_type,
+            byte,
+            ch: byte as char,
+            position,
+        }
+    }
+}
+
+/// The bit that marks a non-member in an OR of raw table values. Valid codes
+/// of the bit-packed alphabets are < 0x80 and `INVALID_CODE` is 0xFF. Ascii
+/// (8 bits) holds every byte and uses the whole byte as its code, so it has no
+/// flag.
+fn invalid_flag(alphabet: &Alphabet) -> u8 {
+    if alphabet.bits_per_symbol < 8 { 0x80 } else { 0 }
+}
+
+/// Find the first byte of `sequence` that is not in `alphabet`, as
+/// `(index, byte)`. Only called after the hot loop has seen one.
+#[cold]
+#[inline(never)]
+fn find_first_invalid(sequence: &[u8], alphabet: &Alphabet) -> Option<(usize, u8)> {
+    sequence
+        .iter()
+        .position(|&b| !alphabet.contains(b))
+        .map(|i| (i, sequence[i]))
 }
 
 /// Encodes a sequence using the specified encoding array.
@@ -90,20 +172,28 @@ impl SequenceEncoder {
 ///
 /// # Arguments
 ///
-/// * `sequence` - The sequence to encode
+/// * `sequence` - The sequence to encode (already uppercased)
 /// * `alphabet` - The alphabet defining the encoding
 ///
 /// # Returns
 ///
-/// A vector containing the encoded (bit-packed) sequence
-pub fn encode_sequence<T: AsRef<[u8]>>(sequence: T, alphabet: &Alphabet) -> Vec<u8> {
+/// The encoded (bit-packed) sequence, or [`EncodeError::InvalidSymbol`] for
+/// the first byte that is not a member of `alphabet`.
+pub fn encode_sequence<T: AsRef<[u8]>>(
+    sequence: T,
+    alphabet: &Alphabet,
+) -> Result<Vec<u8>, EncodeError> {
     let sequence = sequence.as_ref();
     let total_bits = sequence.len() * alphabet.bits_per_symbol;
     let mut bytes = vec![0u8; total_bits.div_ceil(8)];
+    let code_mask = ((1u16 << alphabet.bits_per_symbol) - 1) as u8;
+    let mut bad = 0u8;
 
     let mut bit_index = 0;
     for &byte in sequence {
-        let code = alphabet.encoding_array[byte as usize];
+        let raw = alphabet.encoding_array[byte as usize];
+        bad |= raw;
+        let code = raw & code_mask;
 
         for i in (0..alphabet.bits_per_symbol).rev() {
             let bit = (code >> i) & 1;
@@ -113,7 +203,13 @@ pub fn encode_sequence<T: AsRef<[u8]>>(sequence: T, alphabet: &Alphabet) -> Vec<
             bit_index += 1;
         }
     }
-    bytes
+
+    if bad & invalid_flag(alphabet) != 0 {
+        let (position, byte) = find_first_invalid(sequence, alphabet)
+            .expect("high bit set implies a non-member byte");
+        return Err(EncodeError::invalid_symbol(alphabet, byte, position));
+    }
+    Ok(bytes)
 }
 
 /// Returns the `[byte_start, byte_end)` range in the encoded file that contains
@@ -490,7 +586,7 @@ mod tests {
     fn test_dna_2bit_encoding() {
         let alphabet = &alphabet::DNA_2BIT_ALPHABET;
         let sequence = b"ACGT";
-        let encoded = encode_sequence(sequence, alphabet);
+        let encoded = encode_sequence(sequence, alphabet).unwrap();
         let ans = [0b10, 0b01, 0b11, 0b00];
         let packed: Vec<u8> = ans
             .chunks(8 / alphabet.bits_per_symbol) // Number of symbols that fit in a byte
@@ -510,7 +606,7 @@ mod tests {
     fn test_dna_iupac_encoding() {
         let sequence = b"ACGTRYMK";
         let alphabet = &alphabet::DNA_IUPAC_ALPHABET;
-        let encoded = encode_sequence(sequence, alphabet);
+        let encoded = encode_sequence(sequence, alphabet).unwrap();
         let ans = [
             0b0001, 0b0010, 0b0100, 0b1000, 0b0101, 0b1010, 0b0011, 0b0111,
         ];
@@ -533,7 +629,7 @@ mod tests {
         // `test_dna_iupac_full_roundtrip` already exists, this is
         // intentionally redundant with it, not a replacement for it.
         let full_sequence = b"ACGTURYSWKMBDHVN";
-        let full_encoded = encode_sequence(full_sequence, alphabet);
+        let full_encoded = encode_sequence(full_sequence, alphabet).unwrap();
         let full_decoded: Vec<u8> =
             decode_substring_from_bytes(&full_encoded, 0, full_sequence.len(), alphabet);
         assert_eq!(full_decoded, full_sequence);
@@ -544,18 +640,21 @@ mod tests {
         let alphabet = &alphabet::DNA_IUPAC_ALPHABET;
 
         let sequence = b"ACGTURYSWKMBDHVN";
-        let encoded = encode_sequence(sequence, alphabet);
+        let encoded = encode_sequence(sequence, alphabet).unwrap();
         let decoded = decode_substring_from_bytes(&encoded, 0, sequence.len(), alphabet);
         assert_eq!(decoded, sequence);
 
+        // Lowercase is not a DnaIupac member: ingest uppercases first, and
+        // encoding lowercase directly is an error, not a silent case change.
         let lower = b"acgturyswkmbdhvn";
-        let encoded_lower = encode_sequence(lower, alphabet);
-        let decoded_lower = decode_substring_from_bytes(&encoded_lower, 0, lower.len(), alphabet);
-        assert_eq!(decoded_lower, sequence);
+        assert!(encode_sequence(lower, alphabet).is_err());
+        let encoded_upper = encode_sequence(lower.to_ascii_uppercase(), alphabet).unwrap();
+        let decoded_upper = decode_substring_from_bytes(&encoded_upper, 0, lower.len(), alphabet);
+        assert_eq!(decoded_upper, sequence);
 
         // Odd-length input exercises the half-byte tail of the 4-bit packing.
         let odd_sequence = b"ACGTURYSWKMBDHVNA";
-        let odd_encoded = encode_sequence(odd_sequence, alphabet);
+        let odd_encoded = encode_sequence(odd_sequence, alphabet).unwrap();
         let odd_decoded =
             decode_substring_from_bytes(&odd_encoded, 0, odd_sequence.len(), alphabet);
         assert_eq!(odd_decoded, odd_sequence);
@@ -577,7 +676,7 @@ mod tests {
 
         // The current encoder must still produce the same bytes for D/H/V,
         // since their encoding is frozen for on-disk compatibility.
-        let encoded = encode_sequence(b"DHV", alphabet);
+        let encoded = encode_sequence(b"DHV", alphabet).unwrap();
         assert_eq!(encoded, legacy_bytes);
     }
 
@@ -585,7 +684,7 @@ mod tests {
     fn test_protein_encoding() {
         let sequence = b"ACDEFGHIKLMNPQRSTVWY*X-.";
         let alphabet = &alphabet::PROTEIN_ALPHABET;
-        let encoded = encode_sequence(sequence, alphabet);
+        let encoded = encode_sequence(sequence, alphabet).unwrap();
         // Don't want to re-implement bit-packing here for 5-bit symbols, so just check the length.
         assert_eq!(
             encoded.len(),
@@ -596,10 +695,137 @@ mod tests {
     }
 
     #[test]
+    fn test_protein_extras_roundtrip() {
+        let sequence = b"MAUGBZOJ*-.";
+        let alphabet = &alphabet::PROTEIN_ALPHABET;
+        let encoded = encode_sequence(sequence, alphabet).unwrap();
+        let decoded = decode_string_from_bytes(&encoded, sequence.len(), alphabet);
+        assert_eq!(decoded, sequence);
+    }
+
+    #[test]
+    fn test_selenoprotein_fragment_roundtrips() {
+        // Window around the catalytic selenocysteine of GPX4 (the "ASQUGKT"
+        // motif). Before the fix, U was stored as Alanine's code and came
+        // back as A.
+        let sequence = b"GFVCIVTNVASQUGKTEVNYTQLVDLHARY";
+        let u_index = 12;
+        assert_eq!(sequence[u_index], b'U');
+
+        let alphabet_type = alphabet::guess_alphabet(sequence);
+        assert_eq!(alphabet_type, alphabet::AlphabetType::Protein);
+        let alphabet = alphabet::lookup_alphabet(&alphabet_type);
+        let encoded = encode_sequence(sequence, alphabet).unwrap();
+        let decoded = decode_string_from_bytes(&encoded, sequence.len(), alphabet);
+        assert_eq!(decoded, sequence);
+        assert_eq!(decoded[u_index], b'U');
+    }
+
+    #[test]
+    fn test_encode_rejects_non_member_byte() {
+        let err = encode_sequence(b"ACGU", &alphabet::DNA_2BIT_ALPHABET).unwrap_err();
+        assert!(
+            matches!(
+                err,
+                EncodeError::InvalidSymbol {
+                    alphabet: alphabet::AlphabetType::Dna2bit,
+                    byte: b'U',
+                    ch: 'U',
+                    position: 3,
+                }
+            ),
+            "unexpected error: {err:?}"
+        );
+
+        // Streaming encoder: the bad byte is in the second update call, and
+        // the position counts from the start of the whole sequence.
+        let mut encoder = SequenceEncoder::new(alphabet::AlphabetType::Dna2bit, 8);
+        encoder.update(b"ACGT");
+        encoder.update(b"ACUG");
+        let err = encoder.finalize().unwrap_err();
+        assert!(
+            matches!(
+                err,
+                EncodeError::InvalidSymbol {
+                    byte: b'U',
+                    position: 6,
+                    ..
+                }
+            ),
+            "unexpected error: {err:?}"
+        );
+
+        // Only the first bad byte is reported.
+        let mut encoder = SequenceEncoder::new(alphabet::AlphabetType::Protein, 8);
+        encoder.update(b"MK1");
+        encoder.update(b"2L");
+        assert!(matches!(
+            encoder.finalize(),
+            Err(EncodeError::InvalidSymbol { byte: b'1', position: 2, .. })
+        ));
+    }
+
+    #[test]
+    fn test_streaming_encoder_matches_bulk_across_chunk_splits() {
+        let cases: [(&Alphabet, &[u8]); 5] = [
+            (&alphabet::DNA_2BIT_ALPHABET, b"ACGTTGCAAGCTTACGA"),
+            (&alphabet::DNA_3BIT_ALPHABET, b"ACGTNRYXNNACGTRYX"),
+            (&alphabet::DNA_IUPAC_ALPHABET, b"ACGTURYSWKMBDHVNA"),
+            (&alphabet::PROTEIN_ALPHABET, b"MAUGBZOJ*-.ACDEFGHIKLMNPQRSTVWYX"),
+            (&alphabet::ASCII_ALPHABET, b"Hello, World! 1234"),
+        ];
+        for (alphabet, seq) in cases {
+            let bulk = encode_sequence(seq, alphabet).unwrap();
+            for chunk in 1..=seq.len() {
+                let mut encoder = SequenceEncoder::new(alphabet.alphabet_type, seq.len());
+                for part in seq.chunks(chunk) {
+                    encoder.update(part);
+                }
+                assert_eq!(
+                    encoder.finalize().unwrap(),
+                    bulk,
+                    "{:?} chunk size {chunk}",
+                    alphabet.alphabet_type
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_ascii_encodes_every_byte() {
+        let sequence: Vec<u8> = (0u8..=255).collect();
+        let alphabet = &alphabet::ASCII_ALPHABET;
+        let encoded = encode_sequence(&sequence, alphabet).unwrap();
+        assert_eq!(encoded, sequence);
+        let mut encoder = SequenceEncoder::new(alphabet::AlphabetType::Ascii, sequence.len());
+        encoder.update(&sequence);
+        assert_eq!(encoder.finalize().unwrap(), sequence);
+    }
+
+    #[test]
+    fn test_protein_payload_is_unchanged_by_table_rebuild() {
+        // Encoded bytes for this sequence as written by gtars before the
+        // symbol-list rebuild. The layout is frozen, so they must decode the
+        // same, and today's encoder must still produce them.
+        let sequence = b"ACDEFGHIKLMNPQRSTVWY*X-.";
+        let legacy_hex = "00443214c74254b635cf84653a56d7";
+        let legacy: Vec<u8> = (0..legacy_hex.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&legacy_hex[i..i + 2], 16).unwrap())
+            .collect();
+        let alphabet = &alphabet::PROTEIN_ALPHABET;
+        assert_eq!(
+            decode_string_from_bytes(&legacy, sequence.len(), alphabet),
+            sequence
+        );
+        assert_eq!(encode_sequence(sequence, alphabet).unwrap(), legacy);
+    }
+
+    #[test]
     fn test_ascii_encoding() {
         let sequence = b"Hello, World!";
         let alphabet = &alphabet::ASCII_ALPHABET;
-        let encoded = encode_sequence(sequence, alphabet);
+        let encoded = encode_sequence(sequence, alphabet).unwrap();
         let decoded = decode_substring_from_bytes(&encoded, 0, sequence.len(), alphabet);
         assert_eq!(decoded, sequence);
     }
@@ -608,7 +834,7 @@ mod tests {
     fn test_dna_3bit_encoding() {
         let sequence = b"ACGTNRYX"; // 8 chars * 3 bits/char = 24 bits.
         let alphabet = &alphabet::DNA_3BIT_ALPHABET;
-        let encoded = encode_sequence(sequence, alphabet);
+        let encoded = encode_sequence(sequence, alphabet).unwrap();
         // let ans =  vec![0b000, 0b001, 0b010, 0b011, 0b100, 0b101, 0b110, 0b111];
         let packed = vec![0b00000101, 0b00111001, 0b01110111]; //manually bit-packed above 3-bits
         assert_eq!(encoded, packed);
@@ -628,7 +854,7 @@ mod tests {
     }
 
     fn check_offset_roundtrip(sequence: &[u8], alphabet: &Alphabet, start: usize, end: usize) {
-        let encoded = encode_sequence(sequence, alphabet);
+        let encoded = encode_sequence(sequence, alphabet).unwrap();
         let (byte_start, byte_end) = byte_range_for_bases(start, end, alphabet.bits_per_symbol);
         let partial = &encoded[byte_start..byte_end];
 

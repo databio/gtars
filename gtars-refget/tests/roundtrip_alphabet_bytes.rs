@@ -43,8 +43,8 @@ fn pipeline_alphabet(seq: &[u8]) -> &'static Alphabet {
 fn encode_both(seq: &[u8], alphabet: &'static Alphabet) -> Vec<u8> {
     let mut enc = SequenceEncoder::new(alphabet.alphabet_type, seq.len());
     enc.update(seq);
-    let streaming = enc.finalize();
-    let bulk = encode_sequence(seq, alphabet);
+    let streaming = enc.finalize().unwrap();
+    let bulk = encode_sequence(seq, alphabet).unwrap();
     assert_eq!(
         streaming, bulk,
         "SequenceEncoder and encode_sequence disagree for {:?} under {:?}",
@@ -268,14 +268,17 @@ fn guesser_never_picks_an_alphabet_that_cannot_hold_the_input() {
     );
 }
 
-/// Pins the "decoding always yields uppercase" contract: for every non-ASCII
-/// alphabet, encoding a lowercase letter that is a real member of that
-/// alphabet must decode back to the uppercase form. This matters for callers
-/// that skip the pipeline's own uppercasing step (e.g. `set_encoding_mode`
-/// applied to hand-built records). ASCII is excluded: it passes bytes
-/// through unchanged by design, so it must NOT uppercase.
+/// Pins the strict-uppercase contract. Every ingest path uppercases before
+/// guessing and encoding, so the bit-packed alphabets hold uppercase symbols
+/// only:
+///
+/// - encoding a lowercase letter with a non-ASCII alphabet is an error, never
+///   a silent case change (callers that skip uppercasing, e.g. hand-built
+///   records passed to `set_encoding_mode`, get a loud failure);
+/// - the guesser sends a lowercase byte to Ascii, which round-trips it
+///   exactly (ASCII passes bytes through unchanged, so it must NOT uppercase).
 #[test]
-fn lowercase_input_to_non_ascii_alphabets_decodes_uppercase() {
+fn lowercase_input_is_rejected_by_non_ascii_alphabets() {
     use gtars_refget::digest::AlphabetType;
 
     let mut failures = Vec::new();
@@ -288,26 +291,43 @@ fn lowercase_input_to_non_ascii_alphabets_decodes_uppercase() {
 
     for alphabet in alphabets {
         for upper in b'A'..=b'Z' {
-            // Only test letters that are real members of this alphabet.
-            let code = alphabet.encoding_array[upper as usize];
-            if alphabet.decoding_array[code as usize] != upper {
+            // Only test letters whose uppercase form is a real member.
+            if !alphabet.contains(upper) {
                 continue;
             }
             let lower = upper.to_ascii_lowercase();
-            let encoded = encode_sequence([lower], alphabet);
-            let decoded = decode_string_from_bytes(&encoded, 1, alphabet);
-            if decoded != vec![upper] {
+            if encode_sequence([lower], alphabet).is_ok() {
                 failures.push(format!(
-                    "{:?}: lowercase '{}' decoded to {:?}, expected '{}'",
-                    alphabet.alphabet_type, lower as char, decoded, upper as char
+                    "{:?}: lowercase '{}' was accepted by the encoder",
+                    alphabet.alphabet_type, lower as char
                 ));
             }
         }
     }
 
+    for lower in b'a'..=b'z' {
+        let seq = [lower];
+        let alphabet = pipeline_alphabet(&seq);
+        if alphabet.alphabet_type != AlphabetType::Ascii {
+            failures.push(format!(
+                "lowercase '{}' guessed {:?}, expected Ascii",
+                lower as char, alphabet.alphabet_type
+            ));
+            continue;
+        }
+        let encoded = encode_both(&seq, alphabet);
+        let decoded = decode_string_from_bytes(&encoded, 1, alphabet);
+        if decoded != seq {
+            failures.push(format!(
+                "lowercase '{}' did not round-trip through Ascii: {:?}",
+                lower as char, decoded
+            ));
+        }
+    }
+
     assert!(
         failures.is_empty(),
-        "{} lowercase-decoding failures:\n{}",
+        "{} lowercase failures:\n{}",
         failures.len(),
         failures.join("\n")
     );

@@ -297,7 +297,7 @@ fn run_all(store: &ReadonlyRefgetStore, label: &str, failures: &mut Vec<String>)
 
 fn build_in_memory(mode: StorageMode, fasta_path: &Path) -> RefgetStore {
     let mut store = RefgetStore::in_memory();
-    store.set_encoding_mode(mode);
+    store.set_encoding_mode(mode).unwrap();
     store
         .add_sequence_collection_from_fasta(fasta_path, FastaImportOptions::new())
         .expect("import fasta");
@@ -384,7 +384,7 @@ fn mode_switches_are_lossless() {
     // own lossy path independent of the read paths tested elsewhere.
     {
         let mut store = build_in_memory(StorageMode::Encoded, &fasta_path);
-        store.set_encoding_mode(StorageMode::Raw);
+        store.set_encoding_mode(StorageMode::Raw).unwrap();
         let ro = store.into_readonly();
         run_all(&ro, "mode_switch/encoded_to_raw", &mut failures);
     }
@@ -392,7 +392,7 @@ fn mode_switches_are_lossless() {
     // Encoded -> Zstd.
     {
         let mut store = build_in_memory(StorageMode::Encoded, &fasta_path);
-        store.set_encoding_mode(StorageMode::Zstd);
+        store.set_encoding_mode(StorageMode::Zstd).unwrap();
         let ro = store.into_readonly();
         run_all(&ro, "mode_switch/encoded_to_zstd", &mut failures);
     }
@@ -401,8 +401,8 @@ fn mode_switches_are_lossless() {
     // exact inverses on real data.
     {
         let mut store = build_in_memory(StorageMode::Raw, &fasta_path);
-        store.set_encoding_mode(StorageMode::Encoded);
-        store.set_encoding_mode(StorageMode::Raw);
+        store.set_encoding_mode(StorageMode::Encoded).unwrap();
+        store.set_encoding_mode(StorageMode::Raw).unwrap();
         let ro = store.into_readonly();
         run_all(&ro, "mode_switch/raw_encoded_raw", &mut failures);
     }
@@ -410,8 +410,8 @@ fn mode_switches_are_lossless() {
     // Zstd -> Encoded -> Zstd.
     {
         let mut store = build_in_memory(StorageMode::Zstd, &fasta_path);
-        store.set_encoding_mode(StorageMode::Encoded);
-        store.set_encoding_mode(StorageMode::Zstd);
+        store.set_encoding_mode(StorageMode::Encoded).unwrap();
+        store.set_encoding_mode(StorageMode::Zstd).unwrap();
         let ro = store.into_readonly();
         run_all(&ro, "mode_switch/zstd_encoded_zstd", &mut failures);
     }
@@ -494,7 +494,7 @@ fn on_disk_mode_test(mode: StorageMode, label: &str) {
     {
         let store_dir = tempfile::tempdir().unwrap();
         let mut store = RefgetStore::on_disk(store_dir.path()).expect("on_disk");
-        store.set_encoding_mode(mode);
+        store.set_encoding_mode(mode).unwrap();
         store
             .add_sequence_collection_from_fasta(&fasta_path, FastaImportOptions::new())
             .expect("import fasta (on_disk)");
@@ -557,7 +557,7 @@ fn export_fasta_is_lossless() {
         // the collection- and sequence-level digests match exactly. This is
         // the full seqcol-level check that export did not lose data.
         let mut reimported = RefgetStore::in_memory();
-        reimported.set_encoding_mode(StorageMode::Raw);
+        reimported.set_encoding_mode(StorageMode::Raw).unwrap();
         reimported
             .add_sequence_collection_from_fasta(&out_path, FastaImportOptions::new())
             .expect("reimport exported fasta");

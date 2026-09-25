@@ -660,78 +660,91 @@ impl ReadonlyRefgetStore {
     }
 
     /// Change the storage mode, re-encoding/decoding existing sequences as needed.
-    pub fn set_encoding_mode(&mut self, new_mode: StorageMode) {
+    ///
+    /// Switching to [`StorageMode::Encoded`] fails if a sequence holds a byte
+    /// that its stored alphabet cannot represent. That means the store's
+    /// alphabet metadata is wrong (written by an older gtars) and the store
+    /// must be re-imported. On error the store is left unchanged.
+    pub fn set_encoding_mode(&mut self, new_mode: StorageMode) -> Result<()> {
         if self.mode == new_mode {
-            return;
+            return Ok(());
+        }
+        let old_mode = self.mode;
+
+        let encode = |metadata: &SequenceMetadata, ascii: &[u8]| -> Result<Vec<u8>> {
+            let alphabet = lookup_alphabet(&metadata.alphabet);
+            encode_sequence(ascii, alphabet).map_err(|e| {
+                anyhow::anyhow!(
+                    "cannot encode sequence {} ({}): {e}. The stored alphabet \
+                     metadata is wrong; re-import this store.",
+                    metadata.sha512t24u,
+                    metadata.name
+                )
+            })
+        };
+
+        // Convert everything first, then swap in, so an error leaves the store
+        // untouched rather than half converted.
+        let mut converted: Vec<(DigestKey, Vec<u8>)> = Vec::new();
+        for (key, record) in self.sequence_store.iter() {
+            let SequenceRecord::Full { metadata, sequence } = record else {
+                continue;
+            };
+            let new_bytes = match (old_mode, new_mode) {
+                (StorageMode::Raw, StorageMode::Encoded) => encode(metadata, &sequence[..])?,
+                (StorageMode::Encoded, StorageMode::Raw) => {
+                    let alphabet = lookup_alphabet(&metadata.alphabet);
+                    decode_string_from_bytes(&sequence[..], metadata.length, alphabet)
+                }
+                // Zstd conversions: normalize through ASCII. The stored
+                // body for Zstd is the whole-record zstd frame.
+                (StorageMode::Raw, StorageMode::Zstd) => {
+                    zstd::encode_all(&sequence[..], super::ZSTD_STORAGE_LEVEL)
+                        .expect("zstd encode during mode switch")
+                }
+                (StorageMode::Zstd, StorageMode::Raw) => {
+                    zstd::decode_all(&sequence[..]).expect("zstd decode during mode switch")
+                }
+                (StorageMode::Encoded, StorageMode::Zstd) => {
+                    let alphabet = lookup_alphabet(&metadata.alphabet);
+                    let ascii =
+                        decode_string_from_bytes(&sequence[..], metadata.length, alphabet);
+                    zstd::encode_all(&ascii[..], super::ZSTD_STORAGE_LEVEL)
+                        .expect("zstd encode during mode switch")
+                }
+                (StorageMode::Zstd, StorageMode::Encoded) => {
+                    let ascii = zstd::decode_all(&sequence[..])
+                        .expect("zstd decode during mode switch");
+                    encode(metadata, &ascii[..])?
+                }
+                _ => continue,
+            };
+            converted.push((*key, new_bytes));
         }
 
-        for record in self.sequence_store.values_mut() {
-            match record {
-                SequenceRecord::Full { metadata, sequence } => {
-                    match (self.mode, new_mode) {
-                        (StorageMode::Raw, StorageMode::Encoded) => {
-                            let alphabet = lookup_alphabet(&metadata.alphabet);
-                            *sequence = std::sync::Arc::new(encode_sequence(&sequence[..], alphabet));
-                        }
-                        (StorageMode::Encoded, StorageMode::Raw) => {
-                            let alphabet = lookup_alphabet(&metadata.alphabet);
-                            *sequence = std::sync::Arc::new(decode_string_from_bytes(
-                                &sequence[..],
-                                metadata.length,
-                                alphabet,
-                            ));
-                        }
-                        // Zstd conversions: normalize through ASCII. The stored
-                        // body for Zstd is the whole-record zstd frame.
-                        (StorageMode::Raw, StorageMode::Zstd) => {
-                            *sequence = std::sync::Arc::new(
-                                zstd::encode_all(&sequence[..], super::ZSTD_STORAGE_LEVEL)
-                                    .expect("zstd encode during mode switch"),
-                            );
-                        }
-                        (StorageMode::Zstd, StorageMode::Raw) => {
-                            *sequence = std::sync::Arc::new(
-                                zstd::decode_all(&sequence[..])
-                                    .expect("zstd decode during mode switch"),
-                            );
-                        }
-                        (StorageMode::Encoded, StorageMode::Zstd) => {
-                            let alphabet = lookup_alphabet(&metadata.alphabet);
-                            let ascii = decode_string_from_bytes(
-                                &sequence[..],
-                                metadata.length,
-                                alphabet,
-                            );
-                            *sequence = std::sync::Arc::new(
-                                zstd::encode_all(&ascii[..], super::ZSTD_STORAGE_LEVEL)
-                                    .expect("zstd encode during mode switch"),
-                            );
-                        }
-                        (StorageMode::Zstd, StorageMode::Encoded) => {
-                            let alphabet = lookup_alphabet(&metadata.alphabet);
-                            let ascii = zstd::decode_all(&sequence[..])
-                                .expect("zstd decode during mode switch");
-                            *sequence =
-                                std::sync::Arc::new(encode_sequence(&ascii[..], alphabet));
-                        }
-                        _ => {}
-                    }
-                }
-                SequenceRecord::Stub(_) => {}
+        for (key, new_bytes) in converted {
+            if let Some(SequenceRecord::Full { sequence, .. }) = self.sequence_store.get_mut(&key)
+            {
+                *sequence = std::sync::Arc::new(new_bytes);
             }
         }
 
         self.mode = new_mode;
+        Ok(())
     }
 
     /// Enable 2-bit encoding for space efficiency.
-    pub fn enable_encoding(&mut self) {
-        self.set_encoding_mode(StorageMode::Encoded);
+    ///
+    /// Fails, leaving the store unchanged, if a sequence cannot be encoded
+    /// with its stored alphabet (see [`set_encoding_mode`](Self::set_encoding_mode)).
+    pub fn enable_encoding(&mut self) -> Result<()> {
+        self.set_encoding_mode(StorageMode::Encoded)
     }
 
     /// Disable encoding, use raw byte storage.
     pub fn disable_encoding(&mut self) {
-        self.set_encoding_mode(StorageMode::Raw);
+        self.set_encoding_mode(StorageMode::Raw)
+            .expect("switching to Raw never encodes, so it cannot fail");
     }
 
     /// Enable disk persistence for this store.
@@ -880,9 +893,9 @@ impl ReadonlyRefgetStore {
     /// Raw and packed forms are distinguished by their expected lengths, so a
     /// single-base sequence is ambiguous. Use [`ingest_sequence`](Self::ingest_sequence)
     /// when the input is known to be raw; it handles that case explicitly.
-    fn pack_raw_ascii_for_encoded_mode(&self, sr: SequenceRecord) -> SequenceRecord {
+    fn pack_raw_ascii_for_encoded_mode(&self, sr: SequenceRecord) -> Result<SequenceRecord> {
         if self.mode != StorageMode::Encoded {
-            return sr;
+            return Ok(sr);
         }
         match sr {
             SequenceRecord::Full { metadata, sequence } => {
@@ -893,16 +906,21 @@ impl ReadonlyRefgetStore {
                     && sequence.len() != expected_encoded
                     && sequence.is_ascii();
                 if looks_raw {
-                    let packed = encode_sequence(&sequence[..], alphabet);
-                    SequenceRecord::Full {
+                    let packed = encode_sequence(&sequence[..], alphabet).with_context(|| {
+                        format!(
+                            "encoding sequence {} ({}) with alphabet {}",
+                            metadata.sha512t24u, metadata.name, metadata.alphabet
+                        )
+                    })?;
+                    Ok(SequenceRecord::Full {
                         metadata,
                         sequence: std::sync::Arc::new(packed),
-                    }
+                    })
                 } else {
-                    SequenceRecord::Full { metadata, sequence }
+                    Ok(SequenceRecord::Full { metadata, sequence })
                 }
             }
-            stub @ SequenceRecord::Stub(_) => stub,
+            stub @ SequenceRecord::Stub(_) => Ok(stub),
         }
     }
 
@@ -918,7 +936,9 @@ impl ReadonlyRefgetStore {
         let record = match record {
             SequenceRecord::Full { metadata, sequence } if self.mode == StorageMode::Encoded => {
                 let alphabet = lookup_alphabet(&metadata.alphabet);
-                let packed = encode_sequence(&sequence[..], alphabet);
+                let packed = encode_sequence(&sequence[..], alphabet).with_context(|| {
+                    format!("encoding sequence {} ({})", metadata.sha512t24u, metadata.name)
+                })?;
                 SequenceRecord::Full {
                     metadata,
                     sequence: std::sync::Arc::new(packed),
@@ -936,7 +956,7 @@ impl ReadonlyRefgetStore {
     /// Raw ASCII records are packed when the store uses encoded storage.
     /// Already-packed records are stored unchanged.
     pub fn add_sequence_record(&mut self, sr: SequenceRecord, force: bool) -> Result<()> {
-        let sr = self.pack_raw_ascii_for_encoded_mode(sr);
+        let sr = self.pack_raw_ascii_for_encoded_mode(sr)?;
 
         let metadata = sr.metadata();
         let key = metadata.sha512t24u.to_key();
@@ -3659,7 +3679,7 @@ mod remote_partial_read_tests {
         let record = digest_sequence("chrTest", bases);
         let meta = record.metadata().clone();
         let alphabet = lookup_alphabet(&meta.alphabet);
-        let encoded = encode_sequence(&bases[..], alphabet);
+        let encoded = encode_sequence(&bases[..], alphabet).unwrap();
 
         let (base_url, shutdown) = start_range_honoring_server(encoded.clone());
         let store = remote_only_store(&base_url, &record);
@@ -3718,7 +3738,7 @@ mod remote_partial_read_tests {
         let record = digest_sequence("chrBulk", bases);
         let meta = record.metadata().clone();
         let alphabet = lookup_alphabet(&meta.alphabet);
-        let encoded = encode_sequence(bases, alphabet);
+        let encoded = encode_sequence(bases, alphabet).unwrap();
 
         let (base_url, shutdown) = start_range_honoring_server(encoded.clone());
 

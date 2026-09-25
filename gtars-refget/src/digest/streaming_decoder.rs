@@ -213,7 +213,7 @@ mod tests {
         start: usize,
         end: usize,
     ) {
-        let encoded = encode_sequence(sequence, alphabet);
+        let encoded = encode_sequence(sequence, alphabet).unwrap();
         let (byte_start, byte_end, leading_skip) =
             byte_window(start, end, alphabet.bits_per_symbol);
         let slice = &encoded[byte_start..byte_end.min(encoded.len())];
@@ -251,13 +251,10 @@ mod tests {
 
     /// The Protein fixture, factored out so `test_protein_5bit_unaligned`
     /// uses the exact same bytes as `fixtures()` and the two cannot drift
-    /// apart. Standard residues only: the guesser currently sends a sequence
-    /// containing U/B/Z/O/J to Ascii (see `fixtures_match_guesser` below),
-    /// not Protein, so those symbols are exercised via the ASCII fixture
-    /// instead (and via `roundtrip_alphabet_bytes.rs` / `roundtrip_store.rs`
-    /// for the real bug).
+    /// apart. Covers every Protein symbol, including U/B/Z/O/J, which the
+    /// guesser now sends to Protein (see `fixtures_match_guesser` below).
     fn protein_fixture() -> &'static [u8] {
-        b"ACDEFGHIKLMNPQRSTVWY*X-."
+        b"ACDEFGHIKLMNPQRSTVWY*X-.UBZOJ"
     }
 
     // Test inputs per alphabet. Each sequence is chosen to exercise the
@@ -267,11 +264,9 @@ mod tests {
     fn fixtures() -> Vec<(&'static Alphabet, &'static [u8])> {
         vec![
             (&DNA_2BIT_ALPHABET, b"ACGTACGTACGTACGT" as &[u8]),
-            // X dropped: the guesser never sends X to Dna3bit (it goes to
-            // Protein), so an X fixture here would test a case the real
-            // pipeline cannot produce. Still covered by encoder.rs's
-            // test_dna_3bit_encoding.
-            (&DNA_3BIT_ALPHABET, b"ACGTNRYAACGTNRYC" as &[u8]),
+            // All 8 Dna3bit symbols, including X (X is a Dna3bit member, so
+            // the guesser sends ACGTNRYX to Dna3bit).
+            (&DNA_3BIT_ALPHABET, b"ACGTNRYXACGTNRYC" as &[u8]),
             // All 16 DnaIupac symbols including U; 17 symbols long so the
             // half-byte tail of the 4-bit packing is exercised. `-` dropped:
             // it is not a DnaIupac member (encodes to 0b0000, decodes 'N'),
@@ -279,11 +274,9 @@ mod tests {
             // it to Protein/Ascii, not DnaIupac.
             (&DNA_IUPAC_ALPHABET, b"ACGTURYSWKMBDHVNA" as &[u8]),
             (&PROTEIN_ALPHABET, protein_fixture()),
-            // Standard-alphabet passthrough, plus U/B/Z/O/J: the guesser
-            // sends a sequence containing these non-standard letters to
-            // Ascii (they are not in the Protein table), so they belong
-            // here rather than in the Protein fixture.
-            (&ASCII_ALPHABET, b"Hello, World! 1234 UBZOJ" as &[u8]),
+            // Standard-alphabet passthrough: digits, punctuation, spaces and
+            // lowercase force Ascii.
+            (&ASCII_ALPHABET, b"Hello, World! 1234" as &[u8]),
         ]
     }
 
@@ -362,7 +355,7 @@ mod tests {
         // Zero-length windows should emit nothing regardless of alphabet or
         // leading_skip_bits — the bit-buffer never needs refilling.
         for (alphabet, seq) in fixtures() {
-            let encoded = encode_sequence(seq, alphabet);
+            let encoded = encode_sequence(seq, alphabet).unwrap();
             // A zero-length window at offset 5 — the decoder should read
             // zero bytes and produce an empty output.
             let mut decoder = StreamingDecoder::new(
@@ -397,7 +390,7 @@ mod tests {
     fn test_read_small_buf() {
         let sequence = b"ACGTACGTACGTACGT";
         let alphabet = &DNA_2BIT_ALPHABET;
-        let encoded = encode_sequence(sequence, alphabet);
+        let encoded = encode_sequence(sequence, alphabet).unwrap();
         let (byte_start, byte_end, leading_skip) =
             byte_window(1, 15, alphabet.bits_per_symbol);
         let slice = &encoded[byte_start..byte_end];
@@ -450,7 +443,7 @@ mod tests {
         // Provide a truncated source and ask for more bases than fit.
         let sequence = b"ACGTACGT";
         let alphabet = &DNA_2BIT_ALPHABET;
-        let encoded = encode_sequence(sequence, alphabet);
+        let encoded = encode_sequence(sequence, alphabet).unwrap();
         // Only feed 1 byte (4 bases worth) but ask for 8 bases.
         let mut decoder = StreamingDecoder::new(
             Cursor::new(encoded[..1].to_vec()),
@@ -491,7 +484,7 @@ mod tests {
         // per call) correctly — the decoder should produce identical output
         // whether the inner reader yields 1 byte or many at a time.
         for (alphabet, seq) in fixtures() {
-            let encoded = encode_sequence(seq, alphabet);
+            let encoded = encode_sequence(seq, alphabet).unwrap();
             for start in 0..seq.len() {
                 for end in (start + 1)..=seq.len() {
                     let (byte_start, byte_end, leading_skip) =

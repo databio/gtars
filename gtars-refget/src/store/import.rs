@@ -47,7 +47,7 @@ use std::sync::Mutex;
 use std::thread::available_parallelism;
 use std::time::Instant;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use crossbeam_channel::{bounded, Receiver, Sender};
 use indexmap::IndexMap;
 
@@ -174,6 +174,7 @@ fn build_collection_from_fasta(
         match build_collection_from_cached_metadata(file_idx, file_path, &rgsi_path, cfg, out) {
             Ok(()) => return Ok(()),
             Err(BuildError::Channel(e)) => return Err(BuildError::Channel(e).into()),
+            Err(BuildError::Encode(e)) => return Err(BuildError::Encode(e).into()),
             // Cache was stale/empty; fall through to the full pipeline. Note: a
             // partial cached run cannot have emitted `Seq`s (the cache validity
             // is checked before any `Begin`/`Seq` is sent), so re-running the
@@ -186,17 +187,20 @@ fn build_collection_from_fasta(
 }
 
 /// Errors from the build half. `Channel` means the inserter hung up (fatal);
-/// `Other` means a recoverable build error (e.g. stale cache) the caller may
-/// choose to handle by falling through to another path.
+/// `Encode` means a sequence could not be encoded with its alphabet after
+/// `Begin` was sent (fatal); `Other` means a recoverable build error (e.g.
+/// stale cache) the caller may choose to handle by falling through to another
+/// path.
 enum BuildError {
     Channel(anyhow::Error),
+    Encode(anyhow::Error),
     Other(anyhow::Error),
 }
 
 impl From<BuildError> for anyhow::Error {
     fn from(e: BuildError) -> Self {
         match e {
-            BuildError::Channel(e) | BuildError::Other(e) => e,
+            BuildError::Channel(e) | BuildError::Encode(e) | BuildError::Other(e) => e,
         }
     }
 }
@@ -290,7 +294,9 @@ fn build_collection_full(
                         let mut encoder = SequenceEncoder::new(alphabet, length);
                         encoder.update(&raw_bytes);
                         drop(raw_bytes);
-                        encoder.finalize()
+                        encoder
+                            .finalize()
+                            .with_context(|| format!("encoding {name}"))?
                     }
                     StorageMode::Raw => raw_bytes,
                     // Zstd stores compress the whole ASCII body at the store's
@@ -401,7 +407,9 @@ fn build_collection_full(
                             SequenceEncoder::new(digested.metadata.alphabet, digested.metadata.length);
                         encoder.update(&digested.raw_bytes);
                         drop(digested.raw_bytes);
-                        encoder.finalize()
+                        encoder
+                            .finalize()
+                            .with_context(|| format!("encoding {}", digested.metadata.name))?
                     }
                     StorageMode::Raw => digested.raw_bytes,
                     // See the Zstd note above: pass ASCII through; the store
@@ -574,7 +582,14 @@ fn build_collection_from_cached_metadata(
                     SequenceEncoder::new(unit.metadata.alphabet, unit.metadata.length);
                 encoder.update(&unit.raw_bytes);
                 drop(unit.raw_bytes);
-                encoder.finalize()
+                encoder.finalize().map_err(|e| {
+                    BuildError::Encode(anyhow::Error::new(e).context(format!(
+                        "encoding {} with the alphabet from cached metadata {}; \
+                         delete the stale .rgsi cache and re-import",
+                        unit.metadata.name,
+                        rgsi_path.display()
+                    )))
+                })?
             }
             StorageMode::Raw => unit.raw_bytes,
             // See the Zstd note above: pass ASCII through; the store write seam

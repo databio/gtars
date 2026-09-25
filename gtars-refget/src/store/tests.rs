@@ -95,7 +95,7 @@ fn test_mode_switching() {
         }
         let seq_before = store.get_sequence(&chr1_sha).unwrap().decode().unwrap();
 
-        store.set_encoding_mode(StorageMode::Encoded);
+        store.set_encoding_mode(StorageMode::Encoded).unwrap();
 
         if let Some(SequenceRecord::Full { sequence, .. }) = store.sequence_store.get(&chr1_key) {
             assert_eq!(sequence.len(), 3);
@@ -1353,7 +1353,7 @@ fn test_add_sequence_record_packed_bytes_in_encoded_mode() {
     use crate::digest::{digest_sequence, encode_sequence, lookup_alphabet};
 
     let mut store = RefgetStore::in_memory();
-    store.set_encoding_mode(StorageMode::Encoded);
+    store.set_encoding_mode(StorageMode::Encoded).unwrap();
 
     let record = digest_sequence("test", b"ACGTACGT");
     let digest = record.metadata().sha512t24u.clone();
@@ -1361,7 +1361,7 @@ fn test_add_sequence_record_packed_bytes_in_encoded_mode() {
     let packed_record = match record {
         SequenceRecord::Full { metadata, sequence } => {
             let alphabet = lookup_alphabet(&metadata.alphabet);
-            let encoded = encode_sequence(&*sequence, alphabet);
+            let encoded = encode_sequence(&*sequence, alphabet).unwrap();
             SequenceRecord::Full { metadata, sequence: encoded.into() }
         }
         other => other,
@@ -3271,7 +3271,7 @@ fn build_on_disk_store_streaming(mode: StorageMode) -> (tempfile::TempDir, Refge
     fs::write(&fasta, ">chr1\nACGTACGTACGTACGTACGT\n").unwrap();
     let store_path = dir.path().join("store");
     let mut store = RefgetStore::on_disk(&store_path).unwrap();
-    store.set_encoding_mode(mode);
+    store.set_encoding_mode(mode).unwrap();
     store
         .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
         .unwrap();
@@ -3351,7 +3351,7 @@ fn build_zstd_roundtrip_store(
     let dir = tempdir().unwrap();
     let store_path = dir.path().join("store");
     let mut store = RefgetStore::on_disk(&store_path).unwrap();
-    store.set_encoding_mode(mode);
+    store.set_encoding_mode(mode).unwrap();
     // digest_sequence builds the ASCII SequenceRecord (metadata + raw bytes);
     // for Encoded we must 2-bit pre-pack, for Raw/Zstd we pass ASCII through
     // (the store owns zstd compression). This mirrors panget's store_fill_chunk.
@@ -3361,7 +3361,7 @@ fn build_zstd_roundtrip_store(
         match record {
             SequenceRecord::Full { metadata, sequence } => {
                 let alphabet = crate::digest::lookup_alphabet(&metadata.alphabet);
-                let packed = crate::digest::encode_sequence(&sequence[..], alphabet);
+                let packed = crate::digest::encode_sequence(&sequence[..], alphabet).unwrap();
                 SequenceRecord::Full { metadata, sequence: packed.into() }
             }
             other => other,
@@ -3684,7 +3684,7 @@ fn test_stream_sequence_bounded_memory_full_record() {
     // Use Raw mode so the Full record holds SEQ_LEN bytes verbatim. The old
     // buggy code path cloned that entire buffer during streaming; with the
     // Arc-backed reader it must not.
-    store.set_encoding_mode(StorageMode::Raw);
+    store.set_encoding_mode(StorageMode::Raw).unwrap();
     store
         .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
         .unwrap();
@@ -3779,7 +3779,7 @@ fn test_stream_sequence_bounded_memory_stub_record() {
     let digest;
     {
         let mut builder = RefgetStore::on_disk(&store_path).unwrap();
-        builder.set_encoding_mode(StorageMode::Raw);
+        builder.set_encoding_mode(StorageMode::Raw).unwrap();
         builder
             .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
             .unwrap();
@@ -5513,7 +5513,7 @@ fn build_multi_alphabet_store(
     fs::write(&fasta, multi_alphabet_fasta()).unwrap();
     let store_path = dir.path().join("store");
     let mut store = RefgetStore::on_disk(&store_path).unwrap();
-    store.set_encoding_mode(mode);
+    store.set_encoding_mode(mode).unwrap();
     store
         .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
         .unwrap();

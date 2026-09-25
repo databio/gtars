@@ -344,13 +344,17 @@ impl RefgetStore {
     }
 
     /// Change the storage mode.
-    pub fn set_encoding_mode(&mut self, new_mode: StorageMode) {
-        self.inner.set_encoding_mode(new_mode);
+    ///
+    /// Switching to Encoded fails, leaving the store unchanged, if a sequence
+    /// cannot be encoded with its stored alphabet. The store must then be
+    /// re-imported.
+    pub fn set_encoding_mode(&mut self, new_mode: StorageMode) -> Result<()> {
+        self.inner.set_encoding_mode(new_mode)
     }
 
     /// Enable 2-bit encoding for space efficiency.
-    pub fn enable_encoding(&mut self) {
-        self.inner.enable_encoding();
+    pub fn enable_encoding(&mut self) -> Result<()> {
+        self.inner.enable_encoding()
     }
 
     /// Disable encoding, use raw byte storage.
