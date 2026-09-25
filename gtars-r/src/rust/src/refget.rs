@@ -539,6 +539,85 @@ pub fn iter_sequences_store(store_ptr: Robj) -> extendr_api::Result<Robj> {
     })
 }
 
+/// Verify sequences against their stored digests.
+///
+/// Streams each sequence's decoded bytes through the normal decode path and
+/// recomputes its sha512t24u (and md5, when one is stored) to check that the
+/// stored bytes still hash to the digest they are stored under.
+///
+/// @param store_ptr External pointer to RefgetStore
+/// @param digests Optional character vector of sequence digests (sha512t24u
+///   or md5) to verify. NULL (the default) verifies every sequence in the
+///   store.
+/// @param jobs Worker threads. 0 (default) = auto, 1 = serial.
+/// @param check_md5 Also recompute and compare md5 when the store has one
+///   recorded (default TRUE).
+/// @return A list with n_checked, n_ok, n_failed, and failures (a data.frame
+///   with columns digest, name, alphabet, length, kind,
+///   computed_sha512t24u, stored_md5, computed_md5, error).
+/// @export
+#[extendr]
+pub fn verify_store(
+    store_ptr: Robj,
+    digests: Nullable<Vec<String>>,
+    jobs: i32,
+    check_md5: bool,
+) -> extendr_api::Result<Robj> {
+    with_store!(store_ptr, store, {
+        let digest_filter: Option<Vec<String>> = match digests {
+            Nullable::NotNull(d) => Some(d),
+            Nullable::Null => None,
+        };
+        let opts = gtars_refget::store::VerifyOptions {
+            jobs: jobs.max(0) as usize,
+            check_md5,
+        };
+        let report = store
+            .verify_sequences(digest_filter.as_deref(), &opts)
+            .map_err(|e| extendr_api::Error::Other(format!("Error verifying store: {}", e)))?;
+
+        let n = report.failures.len();
+        let mut f_digest: Vec<String> = Vec::with_capacity(n);
+        let mut f_name: Vec<String> = Vec::with_capacity(n);
+        let mut f_alphabet: Vec<String> = Vec::with_capacity(n);
+        let mut f_length: Vec<i32> = Vec::with_capacity(n);
+        let mut f_kind: Vec<String> = Vec::with_capacity(n);
+        let mut f_computed_sha512t24u: Vec<String> = Vec::with_capacity(n);
+        let mut f_stored_md5: Vec<String> = Vec::with_capacity(n);
+        let mut f_computed_md5: Vec<String> = Vec::with_capacity(n);
+        let mut f_error: Vec<String> = Vec::with_capacity(n);
+        for f in &report.failures {
+            f_digest.push(f.digest.clone());
+            f_name.push(f.name.clone());
+            f_alphabet.push(f.alphabet.to_string());
+            f_length.push(f.length as i32);
+            f_kind.push(f.kind.as_str().to_string());
+            f_computed_sha512t24u.push(f.computed_sha512t24u.clone().unwrap_or_default());
+            f_stored_md5.push(f.stored_md5.clone());
+            f_computed_md5.push(f.computed_md5.clone().unwrap_or_default());
+            f_error.push(f.error.clone().unwrap_or_default());
+        }
+
+        Ok(list!(
+            n_checked = report.n_checked as i32,
+            n_ok = report.n_ok as i32,
+            n_failed = report.n_failed as i32,
+            failures = list!(
+                digest = f_digest,
+                name = f_name,
+                alphabet = f_alphabet,
+                length = f_length,
+                kind = f_kind,
+                computed_sha512t24u = f_computed_sha512t24u,
+                stored_md5 = f_stored_md5,
+                computed_md5 = f_computed_md5,
+                error = f_error
+            )
+        )
+        .into())
+    })
+}
+
 /// Get store statistics
 /// @param store_ptr External pointer to RefgetStore
 #[extendr]
@@ -1567,6 +1646,7 @@ extendr_module! {
     fn iter_collections_store;
     fn iter_sequences_store;
     fn stats_store;
+    fn verify_store;
 
     // Seqcol spec operations
     fn get_collection_level1_store;
