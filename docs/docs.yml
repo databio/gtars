@@ -1,0 +1,59 @@
+site_name: Gtars
+nav:
+  - Gtars: README.md
+  - 💿 Install: install.md
+  - Modules:
+    - Overview: modules.md
+    - gtars-core: core.md
+    # - gtars-io: io.md
+    - Core models: regionSet.md
+    - gtars-overlaprs: overlaprs.md
+    - gtars-uniwig: uniwig.md
+    - gtars-igd: igd.md
+    - gtars-scoring: scoring.md
+    - gtars-fragsplit: fragsplit.md
+    - gtars-tokenizers: tokenizers.md
+    - gtars-scatrs: scatrs.md
+    - gtars-genomicdist: genomicdist.md
+    - gtars-lola: lola.md
+    - gtars-refget: refget.md
+    - gtars-bbcache: bbcache.md
+  - Bindings:
+    - Python:
+      - Overview: python-overview.md
+      - Models: python/models.md
+      - GenomicDist: python/genomic_distributions.md
+      - LOLA: python/lola.md
+      - Digests: python/digests.md
+      - RefgetStore Tutorial: python/refgetstore.ipynb
+      - RefgetStore Python Reference: python/refget-store.md
+      - Refget API Reference: python/refget-api.md
+    - Wasm:
+      - Overview: wasm.md
+      - Overlappers: wasm/overlappers.md
+      - RegionSet: wasm/regionset.md
+      - Partitions: wasm/partitions.md
+      - Signal: wasm/signal.md
+      - LOLA: wasm/lola.md
+    - CLI: cli.md
+    - R:
+      - R: r.md
+      - RegionSet: r/regionset.md
+      - GenomicDist: r/genomicdist.md
+      - LOLA: r/lola.md
+      - IGD: r/igd.md
+      - RefgetStore: r/refgetstore.md
+  - Reference:
+    - Changelog: changelog.md
+    - Rust source API docs: https://docs.rs/gtars/latest/gtars/
+    - Versioning policy: versioning.md
+
+renderers:
+  - hub-notebooks:
+      include: [python/refgetstore.ipynb]
+      execute: false
+  - hub-python-api:
+      package_root: ../gtars-python/py_src
+      packages: [gtars]
+      include: [python/refget-api.md]
+      docstring_style: google
