@@ -540,6 +540,48 @@ mod tests {
     }
 
     #[test]
+    fn test_dna_iupac_full_roundtrip() {
+        let alphabet = &alphabet::DNA_IUPAC_ALPHABET;
+
+        let sequence = b"ACGTURYSWKMBDHVN";
+        let encoded = encode_sequence(sequence, alphabet);
+        let decoded = decode_substring_from_bytes(&encoded, 0, sequence.len(), alphabet);
+        assert_eq!(decoded, sequence);
+
+        let lower = b"acgturyswkmbdhvn";
+        let encoded_lower = encode_sequence(lower, alphabet);
+        let decoded_lower = decode_substring_from_bytes(&encoded_lower, 0, lower.len(), alphabet);
+        assert_eq!(decoded_lower, sequence);
+
+        // Odd-length input exercises the half-byte tail of the 4-bit packing.
+        let odd_sequence = b"ACGTURYSWKMBDHVNA";
+        let odd_encoded = encode_sequence(odd_sequence, alphabet);
+        let odd_decoded =
+            decode_substring_from_bytes(&odd_encoded, 0, odd_sequence.len(), alphabet);
+        assert_eq!(odd_decoded, odd_sequence);
+
+        // Sub-range decode at an odd offset exercises decode_rolling.
+        let sub_decoded = decode_substring_from_bytes(&odd_encoded, 3, 14, alphabet);
+        assert_eq!(sub_decoded, &odd_sequence[3..14]);
+    }
+
+    #[test]
+    fn test_dna_iupac_decodes_legacy_dh_payload() {
+        let alphabet = &alphabet::DNA_IUPAC_ALPHABET;
+
+        // Bytes an old gtars would have written for "DHV" + padding:
+        // D=0b1101, H=0b1110, V=0b1111, then a padding nibble.
+        let legacy_bytes: [u8; 2] = [0b1101_1110, 0b1111_0000];
+        let decoded = decode_substring_from_bytes(&legacy_bytes, 0, 3, alphabet);
+        assert_eq!(decoded, b"DHV");
+
+        // The current encoder must still produce the same bytes for D/H/V,
+        // since their encoding is frozen for on-disk compatibility.
+        let encoded = encode_sequence(b"DHV", alphabet);
+        assert_eq!(encoded, legacy_bytes);
+    }
+
+    #[test]
     fn test_protein_encoding() {
         let sequence = b"ACDEFGHIKLMNPQRSTVWY*X-.";
         let alphabet = &alphabet::PROTEIN_ALPHABET;

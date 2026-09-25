@@ -70,7 +70,7 @@ pub enum AlphabetType {
     Dna2bit,
     /// 3-bit DNA encoding (A, C, G, T, N, R, Y, and others as X)
     Dna3bit,
-    /// IUPAC DNA encoding (includes ambiguity codes)
+    /// IUPAC DNA/RNA encoding: A C G T U plus ambiguity codes R Y S W K M B D H V N (4 bits/symbol)
     DnaIupac,
     /// Protein sequence encoding
     Protein,
@@ -188,33 +188,51 @@ const DNA_3BIT_DECODING_ARRAY: [u8; 256] = {
     arr
 };
 
-/// A lookup table that maps ASCII characters representing DNA bases.
-/// This encoding uses 4 bits to represent each base, allowing for
-/// the representation of 16 different values.
+/// A lookup table that maps ASCII characters representing IUPAC DNA/RNA
+/// symbols to a 4-bit code (16 possible values).
+///
+/// **This is NOT an IUPAC bitmask.** The codes do not follow A=1, C=2, G=4,
+/// T=8 union semantics -- if they did, K (G or T) would be `0b1100`, not
+/// `0b0111`; B (C, G, or T) would be `0b1110`, not `0b1100`; N (any base)
+/// would be `0b1111`, not `0b0000`; and so on. Treat this as an arbitrary
+/// one-to-one mapping between 16 symbols and 16 codes.
+///
+/// **The layout is frozen.** Encoded sequence files already on disk use
+/// these exact codes. Never renumber an existing symbol's code. Only a code
+/// that no input ever produced may be reassigned to a new symbol.
+///
+/// Full code table:
+/// `N=0000 A=0001 C=0010 M=0011 G=0100 R=0101 S=0110 K=0111 T=1000 W=1001
+/// Y=1010 U=1011 B=1100 D=1101 H=1110 V=1111`.
+///
+/// Lowercase input maps to the same code as its uppercase counterpart;
+/// decoding always yields uppercase. Characters not present in the table
+/// encode to `0b0000` and so decode as `N` (this is intentional -- alphabet
+/// selection is responsible for not routing unsupported characters here).
 const DNA_IUPAC_ENCODING_ARRAY: [u8; 256] = {
     let mut arr = [0u8; 256];
-    arr[b'A' as usize] = 0b0001; // A
-    arr[b'C' as usize] = 0b0010; // C
-    arr[b'G' as usize] = 0b0100; // G
-    arr[b'T' as usize] = 0b1000; // T
-    arr[b'U' as usize] = 0b1000; // U (common in RNA)
-    arr[b'R' as usize] = 0b0101; // A or G
-    arr[b'Y' as usize] = 0b1010; // C or T
-    arr[b'S' as usize] = 0b0110; // G or C
-    arr[b'W' as usize] = 0b1001; // A or T
-    arr[b'K' as usize] = 0b0111; // G or T
-    arr[b'M' as usize] = 0b0011; // A or C
-    arr[b'B' as usize] = 0b1100; // C or G or T
-    arr[b'D' as usize] = 0b1101; // A or G or T
-    arr[b'H' as usize] = 0b1110; // A or C or T
-    arr[b'V' as usize] = 0b1111; // A or C or G
-    arr[b'N' as usize] = 0b0000; // Any base
+    arr[b'A' as usize] = 0b0001; // A (adenine)
+    arr[b'C' as usize] = 0b0010; // C (cytosine)
+    arr[b'G' as usize] = 0b0100; // G (guanine)
+    arr[b'T' as usize] = 0b1000; // T (thymine)
+    arr[b'U' as usize] = 0b1011; // U (RNA uracil); own code so it does not collapse to T
+    arr[b'R' as usize] = 0b0101; // R (IUPAC: A or G)
+    arr[b'Y' as usize] = 0b1010; // Y (IUPAC: C or T)
+    arr[b'S' as usize] = 0b0110; // S (IUPAC: G or C)
+    arr[b'W' as usize] = 0b1001; // W (IUPAC: A or T)
+    arr[b'K' as usize] = 0b0111; // K (IUPAC: G or T)
+    arr[b'M' as usize] = 0b0011; // M (IUPAC: A or C)
+    arr[b'B' as usize] = 0b1100; // B (IUPAC: not A)
+    arr[b'D' as usize] = 0b1101; // D (IUPAC: not C)
+    arr[b'H' as usize] = 0b1110; // H (IUPAC: not G)
+    arr[b'V' as usize] = 0b1111; // V (IUPAC: not T)
+    arr[b'N' as usize] = 0b0000; // N (IUPAC: any base)
     // Add lowercase variants
     arr[b'a' as usize] = 0b0001;
     arr[b'c' as usize] = 0b0010;
     arr[b'g' as usize] = 0b0100;
     arr[b't' as usize] = 0b1000;
-    arr[b'u' as usize] = 0b1000;
+    arr[b'u' as usize] = 0b1011;
     arr[b'r' as usize] = 0b0101;
     arr[b'y' as usize] = 0b1010;
     arr[b's' as usize] = 0b0110;
@@ -229,26 +247,26 @@ const DNA_IUPAC_ENCODING_ARRAY: [u8; 256] = {
     arr
 };
 
-/// Maps 4-bit IUPAC bit patterns (from 0b0000 to 0b1111) back to representative DNA characters.
-/// Values outside the valid 4-bit range default to 'N'.
+/// Exact inverse of `DNA_IUPAC_ENCODING_ARRAY`. See that table for why the
+/// codes are not bitmasks and why the layout is frozen.
 const DNA_IUPAC_DECODING_ARRAY: [u8; 256] = {
     let mut arr = [b'N'; 256]; // Default to 'N' for all
-    arr[0b0000] = b'N'; // Any
+    arr[0b0000] = b'N';
     arr[0b0001] = b'A';
     arr[0b0010] = b'C';
-    arr[0b0011] = b'M'; // A or C
+    arr[0b0011] = b'M';
     arr[0b0100] = b'G';
-    arr[0b0101] = b'R'; // A or G
-    arr[0b0110] = b'S'; // G or C
-    arr[0b0111] = b'K'; // G or T
+    arr[0b0101] = b'R';
+    arr[0b0110] = b'S';
+    arr[0b0111] = b'K';
     arr[0b1000] = b'T';
-    arr[0b1001] = b'W'; // A or T
-    arr[0b1010] = b'Y'; // C or T
-    arr[0b1011] = b'D'; // A or G or T
-    arr[0b1100] = b'B'; // C or G or T
-    arr[0b1101] = b'H'; // A or C or T
-    arr[0b1110] = b'V'; // A or C or G
-    arr[0b1111] = b'V'; // A or C or G (or use 'N' if you'd rather treat 0b1111 as invalid)
+    arr[0b1001] = b'W';
+    arr[0b1010] = b'Y';
+    arr[0b1011] = b'U'; // was 'D' (dead code: nothing encoded to 0b1011)
+    arr[0b1100] = b'B';
+    arr[0b1101] = b'D'; // was 'H': the D/H bug
+    arr[0b1110] = b'H'; // was 'V': the H/V bug
+    arr[0b1111] = b'V';
     arr
 };
 
@@ -528,7 +546,73 @@ fn is_more_general_alphabet(a: AlphabetType, b: AlphabetType) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{AlphabetGuesser, AlphabetType, guess_alphabet, guess_alphabet_fast};
+    use super::{
+        AlphabetGuesser, AlphabetType, DNA_IUPAC_DECODING_ARRAY, DNA_IUPAC_ENCODING_ARRAY,
+        guess_alphabet, guess_alphabet_fast,
+    };
+
+    #[test]
+    fn test_dna_iupac_tables_are_inverse() {
+        use std::collections::HashSet;
+
+        for &b in b"ACGTURYSWKMBDHVN" {
+            let code = DNA_IUPAC_ENCODING_ARRAY[b as usize];
+            assert_eq!(
+                DNA_IUPAC_DECODING_ARRAY[code as usize], b,
+                "decode(encode({})) did not round-trip",
+                b as char
+            );
+        }
+
+        for &b in b"acgturyswkmbdhvn" {
+            let code = DNA_IUPAC_ENCODING_ARRAY[b as usize];
+            assert_eq!(
+                DNA_IUPAC_DECODING_ARRAY[code as usize],
+                b.to_ascii_uppercase(),
+                "decode(encode({})) did not round-trip to uppercase",
+                b as char
+            );
+        }
+
+        let codes: HashSet<u8> = b"ACGTURYSWKMBDHVN"
+            .iter()
+            .map(|&b| DNA_IUPAC_ENCODING_ARRAY[b as usize])
+            .collect();
+        assert_eq!(
+            codes.len(),
+            16,
+            "the 16 IUPAC codes must be pairwise distinct"
+        );
+        assert!(codes.iter().all(|&c| c < 16));
+
+        // Pin the frozen layout: guards against "fixing" the codes into real
+        // IUPAC bitmasks, which would break existing on-disk stores.
+        const EXPECTED_CODES: [(u8, u8); 16] = [
+            (b'N', 0b0000),
+            (b'A', 0b0001),
+            (b'C', 0b0010),
+            (b'M', 0b0011),
+            (b'G', 0b0100),
+            (b'R', 0b0101),
+            (b'S', 0b0110),
+            (b'K', 0b0111),
+            (b'T', 0b1000),
+            (b'W', 0b1001),
+            (b'Y', 0b1010),
+            (b'U', 0b1011),
+            (b'B', 0b1100),
+            (b'D', 0b1101),
+            (b'H', 0b1110),
+            (b'V', 0b1111),
+        ];
+        for &(symbol, expected_code) in EXPECTED_CODES.iter() {
+            assert_eq!(
+                DNA_IUPAC_ENCODING_ARRAY[symbol as usize], expected_code,
+                "frozen layout changed for symbol {}",
+                symbol as char
+            );
+        }
+    }
 
     #[test]
     fn test_guess_alphabet() {
