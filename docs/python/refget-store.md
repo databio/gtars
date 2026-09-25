@@ -17,7 +17,11 @@ store.add_sequence_collection_from_fasta("genome.fa")
 # Inspect what's in the store
 sequence_records = store.iter_sequences()
 sequence_metadata = store.list_sequences()
-collections = store.collections()
+
+# list_collections() returns a page of results plus pagination info
+page = store.list_collections()
+for coll in page["results"]:
+    print(f"{coll.digest}: {coll.n_sequences} sequences")
 
 # Access individual sequences
 first_seq = sequence_records[0]
@@ -42,25 +46,33 @@ store.write_store_to_dir(store_path, "sequences/%s2/%s.seq")
 loaded_store = RefgetStore.open_local(store_path)
 ```
 
-## Loading Remote Stores with Caching
+## Loading Remote Stores
 
-You can load stores from remote URLs (HTTP/HTTPS) with local caching:
+You can open stores from remote URLs (HTTP/HTTPS). The small index files are
+downloaded into a local cache directory; sequence data stays on the server
+until you ask for it:
 
 ```python
-# Load from a remote server with local caching
+# Open a remote store; index files are cached in cache_dir
 cache_dir = "local_cache"
 remote_url = "https://refget-server.example.com/hg38"
 remote_store = RefgetStore.open_remote(cache_dir, remote_url)
 
-# Get sequence metadata
-seq_metadata = list(remote_store.list_sequences())
-first_seq = seq_metadata[0]
+# Collections and sequence metadata are loaded lazily
+coll = remote_store.list_collections()["results"][0]
+remote_store.load_collection(coll.digest)
+record = remote_store.get_sequence_by_name(coll.digest, "chr1")
+digest = record.metadata.sha512t24u
 
-# Get a substring (automatically fetches and caches data)
-substring = remote_store.get_substring(first_seq.sha512t24u, 0, 1000)
+# Get a substring. This reads only the bytes for the region with an HTTP
+# range request; nothing is written to the sequence cache.
+substring = remote_store.get_substring(digest, 0, 1000)
 print(f"First 1000 bases: {substring[:50]}...")
 
-# Iterate over all sequences in the store
+# For many reads on one sequence, download and cache it once
+remote_store.load_sequence(digest)
+
+# Iterate over the sequences the store knows about (metadata only)
 for seq_meta in remote_store:
     print(f"{seq_meta.name}: {seq_meta.length} bp")
 ```
@@ -68,9 +80,8 @@ for seq_meta in remote_store:
 ## Working with Collections
 
 ```python
-# Get collections in the store
-collections = store.collections()
-collection = collections[0]
+# Get the first collection in the store
+collection = store.list_collections()["results"][0]
 
 # Get a sequence by collection and name
 record = store.get_sequence_by_name(
@@ -117,11 +128,15 @@ store.export_fasta_from_regions(
 
 ## Local HTTP Server Example
 
-For testing remote loading locally, you can serve a store directory:
+For testing remote loading locally, you can serve a store directory. The server
+must support HTTP range requests, because `get_substring()` asks for just the
+bytes it needs. Python's built-in `python -m http.server` does **not** support
+them, and `get_substring()` fails against it with "Remote server did not honor
+Range header". Use a range-capable static server instead, for example:
 
 ```bash
 # In the directory containing your refget store
-python -m http.server 8200
+npx http-server -p 8200
 ```
 
 Then connect to it:
@@ -129,12 +144,18 @@ Then connect to it:
 ```python
 remote_store = RefgetStore.open_remote(
     "local_cache",
-    "http://localhost:8200/my_refget_store/"
+    "http://localhost:8200/my_refget_store"
 )
 
 # Use it like any other store
+coll = remote_store.list_collections()["results"][0]
+remote_store.load_collection(coll.digest)
+seq_digest = remote_store.get_sequence_by_name(coll.digest, "chr1").metadata.sha512t24u
 substring = remote_store.get_substring(seq_digest, 0, 100)
 ```
+
+The [RefgetStore tutorial](refgetstore.ipynb) includes a small pure-Python
+range-capable server if you prefer not to use Node.
 
 ## More Information
 
