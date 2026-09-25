@@ -4,7 +4,8 @@ use anyhow::Result;
 use clap::ArgMatches;
 
 use gtars_refget::store::{
-    FastaImportOptions, LockOptions, RefgetStore, StorageMode, force_unlock, lock_status,
+    FastaImportOptions, LockOptions, RefgetStore, StorageMode, VerifyOptions, VerifyReport,
+    force_unlock, lock_status,
 };
 use gtars_refget::{expand_fasta_inputs, FastaInputs};
 
@@ -13,6 +14,7 @@ pub fn run_refget(matches: &ArgMatches) -> Result<()> {
         Some((super::cli::REFGET_BUILD, sub)) => run_build(sub),
         Some((super::cli::REFGET_EXPORT, sub)) => run_export(sub),
         Some((super::cli::REFGET_LOCK_STATUS, sub)) => run_lock_status(sub),
+        Some((super::cli::REFGET_VERIFY, sub)) => run_verify(sub),
         _ => unreachable!("refget subcommand not found"),
     }
 }
@@ -98,9 +100,9 @@ fn run_build(matches: &ArgMatches) -> Result<()> {
     store.set_lock_options(lock_options_from(matches));
     store.set_force_alias(matches.get_flag("force_alias"));
     if raw {
-        store.set_encoding_mode(StorageMode::Raw);
+        store.set_encoding_mode(StorageMode::Raw)?;
     } else {
-        store.set_encoding_mode(StorageMode::Encoded);
+        store.set_encoding_mode(StorageMode::Encoded)?;
     }
 
     let mode = if raw { "Raw" } else { "Encoded" };
@@ -303,6 +305,119 @@ fn run_export(matches: &ArgMatches) -> Result<()> {
         "Exported collection {} ({}) to {} [{}]",
         digest, seq_desc, output, wrap_desc
     );
+
+    Ok(())
+}
+
+/// Strip an optional `SQ.` prefix, matching the convention used elsewhere for
+/// user-supplied sequence digests.
+fn strip_sq_prefix(digest: &str) -> &str {
+    digest.strip_prefix("SQ.").unwrap_or(digest)
+}
+
+fn write_verify_tsv<W: std::io::Write>(mut out: W, report: &VerifyReport) -> Result<()> {
+    writeln!(
+        out,
+        "digest\tname\talphabet\tlength\tkind\tcomputed_sha512t24u\tstored_md5\tcomputed_md5\terror"
+    )?;
+    for f in &report.failures {
+        writeln!(
+            out,
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            f.digest,
+            f.name,
+            f.alphabet,
+            f.length,
+            f.kind.as_str(),
+            f.computed_sha512t24u.as_deref().unwrap_or(""),
+            f.stored_md5,
+            f.computed_md5.as_deref().unwrap_or(""),
+            f.error.as_deref().unwrap_or(""),
+        )?;
+    }
+    Ok(())
+}
+
+fn run_verify(matches: &ArgMatches) -> Result<()> {
+    let store_path = matches.get_one::<String>("store").expect("store is required");
+    let requested_collection = matches.get_one::<String>("collection");
+    let digests: Option<Vec<String>> = matches
+        .get_many::<String>("digest")
+        .map(|vals| vals.map(|s| strip_sq_prefix(s).to_string()).collect());
+    let jobs = *matches.get_one::<usize>("jobs").unwrap_or(&0);
+    let check_md5 = !matches.get_flag("no_md5");
+    let as_json = matches.get_flag("json");
+    let output = matches.get_one::<String>("output");
+
+    let mut store = RefgetStore::open_local(store_path)
+        .map_err(|e| anyhow::anyhow!("Failed to open store at {}: {}", store_path, e))?;
+
+    let opts = VerifyOptions { jobs, check_md5 };
+
+    eprintln!(
+        "Verifying store at {} (jobs={}, check_md5={})",
+        store_path,
+        if jobs == 0 { "auto".to_string() } else { jobs.to_string() },
+        check_md5,
+    );
+
+    let report = if let Some(c) = requested_collection {
+        let resolved = resolve_collection_arg(&store, c)?;
+        store
+            .verify_collection(&resolved, &opts)
+            .map_err(|e| anyhow::anyhow!("Failed to verify collection {}: {}", resolved, e))?
+    } else {
+        store
+            .verify_sequences(digests.as_deref(), &opts)
+            .map_err(|e| anyhow::anyhow!("Failed to verify store: {}", e))?
+    };
+
+    // Write the report before returning any error, so a failing exit status
+    // still leaves the failure listing on disk / on stdout for scripts to read.
+    let rendered = if as_json {
+        serde_json::to_string_pretty(&report)
+            .map_err(|e| anyhow::anyhow!("Failed to serialize verify report as JSON: {}", e))?
+    } else {
+        let mut buf = Vec::new();
+        write_verify_tsv(&mut buf, &report)?;
+        String::from_utf8(buf).expect("TSV output is always valid UTF-8")
+    };
+
+    match output {
+        Some(path) => {
+            std::fs::write(path, &rendered)
+                .map_err(|e| anyhow::anyhow!("Failed to write report to {}: {}", path, e))?;
+        }
+        None => {
+            print!("{}", rendered);
+            if !rendered.ends_with('\n') {
+                println!();
+            }
+        }
+    }
+
+    eprintln!(
+        "Verified {} sequences: OK {}, FAILED {}",
+        report.n_checked, report.n_ok, report.n_failed
+    );
+    for (alphabet, counts) in &report.by_alphabet {
+        eprintln!(
+            "  {}: checked {}, failed {}",
+            alphabet, counts.checked, counts.failed
+        );
+    }
+
+    if report.n_failed > 0 {
+        eprintln!(
+            "Failing sequences cannot be repaired in place; re-import the affected \
+             collection(s) from the source FASTA (gtars refget build --force ...)."
+        );
+        return Err(anyhow::anyhow!(
+            "{} of {} sequences failed verification",
+            report.n_failed,
+            report.n_checked
+        ));
+    }
 
     Ok(())
 }

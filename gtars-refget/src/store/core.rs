@@ -239,6 +239,45 @@ impl RefgetStore {
         self.inner.get_attribute(attr_name, attr_digest)
     }
 
+    /// Verify sequences against their stored digests. `digests: None` checks
+    /// every sequence in the store.
+    ///
+    /// See [`ReadonlyRefgetStore::verify_sequences`] for what this actually
+    /// checks and how parallelism is controlled by `opts.jobs`.
+    pub fn verify_sequences(
+        &mut self,
+        digests: Option<&[String]>,
+        opts: &VerifyOptions,
+    ) -> Result<VerifyReport> {
+        self.inner.ensure_sequence_index_loaded()?;
+        self.inner.verify_sequences(digests, opts)
+    }
+
+    /// Verify only the sequences belonging to one collection.
+    ///
+    /// Loads the collection's metadata (not sequence bytes) via the usual
+    /// lazy-load path, then verifies each of its (deduped) sequence digests.
+    pub fn verify_collection(
+        &mut self,
+        collection_digest: &str,
+        opts: &VerifyOptions,
+    ) -> Result<VerifyReport> {
+        use crate::hashkeyable::HashKeyable;
+
+        self.inner.ensure_sequence_index_loaded()?;
+        let collection_key = collection_digest.to_key();
+        self.inner.ensure_collection_loaded(&collection_key)?;
+        let mut digests: Vec<String> = self
+            .inner
+            .collection_sequence_metadata(&collection_key)?
+            .iter()
+            .map(|record| record.metadata().sha512t24u.clone())
+            .collect();
+        digests.sort();
+        digests.dedup();
+        self.inner.verify_sequences(Some(&digests), opts)
+    }
+
     /// Lazy-loading export_fasta. Loads the collection and only the sequence
     /// bodies it will write (every record whose name is requested, or all of
     /// the collection's when `sequence_names` is `None`), never the whole
@@ -305,13 +344,17 @@ impl RefgetStore {
     }
 
     /// Change the storage mode.
-    pub fn set_encoding_mode(&mut self, new_mode: StorageMode) {
-        self.inner.set_encoding_mode(new_mode);
+    ///
+    /// Switching to Encoded fails, leaving the store unchanged, if a sequence
+    /// cannot be encoded with its stored alphabet. The store must then be
+    /// re-imported.
+    pub fn set_encoding_mode(&mut self, new_mode: StorageMode) -> Result<()> {
+        self.inner.set_encoding_mode(new_mode)
     }
 
     /// Enable 2-bit encoding for space efficiency.
-    pub fn enable_encoding(&mut self) {
-        self.inner.enable_encoding();
+    pub fn enable_encoding(&mut self) -> Result<()> {
+        self.inner.enable_encoding()
     }
 
     /// Disable encoding, use raw byte storage.

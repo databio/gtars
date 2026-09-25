@@ -376,6 +376,65 @@ test_that("persistence round-trip with write_store works", {
   expect_true(st2$n_sequences > 0)
 })
 
+test_that("verify_store reports no failures on a clean store", {
+  skip_if_no_fasta()
+  store_dir <- file.path(tempdir(), "refget_verify_clean")
+  on.exit(unlink(store_dir, recursive = TRUE))
+  unlink(store_dir, recursive = TRUE)
+
+  store <- refget_store_on_disk(store_dir)
+  set_quiet(store, TRUE)
+  import_fasta(store, fasta_path)
+  write_store(store)
+
+  store_load <- refget_store_open_local(store_dir)
+  result <- verify_store(store_load)
+
+  expect_equal(result$n_failed, 0)
+  expect_equal(result$n_ok, result$n_checked)
+  expect_true(result$n_checked > 0)
+  expect_true(is.data.frame(result$failures))
+  expect_equal(nrow(result$failures), 0)
+})
+
+test_that("verify_store detects a corrupted sequence", {
+  skip_if_no_fasta()
+  store_dir <- file.path(tempdir(), "refget_verify_corrupt")
+  on.exit(unlink(store_dir, recursive = TRUE))
+  unlink(store_dir, recursive = TRUE)
+
+  store <- refget_store_on_disk(store_dir)
+  set_quiet(store, TRUE)
+  import_fasta(store, fasta_path)
+  write_store(store)
+
+  seq_files <- list.files(store_dir, recursive = TRUE, pattern = "\\.seq$", full.names = TRUE)
+  expect_true(length(seq_files) >= 1)
+  seq_path <- seq_files[1]
+  # The store names each .seq file after its own sha512t24u digest.
+  target_digest <- tools::file_path_sans_ext(basename(seq_path))
+
+  con <- file(seq_path, "r+b")
+  byte <- readBin(con, "raw", n = 1)
+  seek(con, where = 0)
+  writeBin(as.raw(bitwXor(as.integer(byte), 255L)), con)
+  close(con)
+
+  store_load <- refget_store_open_local(store_dir)
+  result <- verify_store(store_load)
+
+  expect_equal(result$n_failed, 1)
+  expect_equal(nrow(result$failures), 1)
+  expect_equal(result$failures$digest[1], target_digest)
+  expect_equal(result$failures$kind[1], "digest_mismatch")
+
+  # With check_md5 = FALSE the same (still-corrupted) store must still fail
+  # on the sha512t24u mismatch -- check_md5 only controls the md5 comparison.
+  store_load2 <- refget_store_open_local(store_dir)
+  result2 <- verify_store(store_load2, check_md5 = FALSE)
+  expect_equal(result2$n_failed, 1)
+})
+
 test_that("export_fasta creates valid FASTA", {
   skip_if_no_fasta()
   store <- refget_store()

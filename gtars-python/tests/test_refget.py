@@ -1350,3 +1350,80 @@ def test_remote_store_lookups_load_deferred_index(tmp_path):
         assert store.get_sequence_metadata(sha512t24u_digest("GGCC")).length == 4
     finally:
         server.kill()
+
+
+def _build_verify_test_store(tmp_path):
+    """Small on-disk store with two sequences, for the verify() tests below."""
+    fasta = tmp_path / "genome.fa"
+    fasta.write_text(">chr1\nACGTACGTACGTACGT\n>chr2\nGGGGCCCCTTTTAAAA\n")
+    store_path = tmp_path / "store"
+    store = RefgetStore.on_disk(str(store_path))
+    store.add_sequence_collection_from_fasta(str(fasta))
+    store.write()
+    return store_path
+
+
+def test_verify_clean_store(tmp_path):
+    """A freshly-built store must verify with zero failures."""
+    store_path = _build_verify_test_store(tmp_path)
+    store = RefgetStore.open_local(str(store_path))
+
+    report = store.verify()
+
+    assert report.ok is True
+    assert bool(report) is True
+    assert report.n_failed == 0
+    assert report.n_checked == 2
+    assert report.n_ok == 2
+    assert report.failures == []
+
+
+def test_verify_detects_corrupted_sequence(tmp_path):
+    """Flipping a byte in one .seq file must surface exactly that digest."""
+    import glob
+    import os
+
+    store_path = _build_verify_test_store(tmp_path)
+
+    seq_files = glob.glob(str(store_path / "sequences" / "**" / "*.seq"), recursive=True)
+    assert len(seq_files) == 2
+    seq_path = seq_files[0]
+    # The store names each .seq file after its own sha512t24u digest.
+    target_digest = os.path.splitext(os.path.basename(seq_path))[0]
+
+    with open(seq_path, "r+b") as f:
+        data = bytearray(f.read())
+        data[0] ^= 0xFF
+        f.seek(0)
+        f.write(data)
+
+    reopened = RefgetStore.open_local(str(store_path))
+    report = reopened.verify()
+
+    assert report.ok is False
+    assert report.n_checked == 2
+    assert report.n_failed == 1
+    assert len(report.failures) == 1
+    failure = report.failures[0]
+    assert failure.digest == target_digest
+    assert failure.kind == "digest_mismatch"
+
+
+def test_verify_digests_subset_limits_n_checked(tmp_path):
+    """Passing `digests=` restricts verification to just those sequences."""
+    store_path = _build_verify_test_store(tmp_path)
+    store = RefgetStore.open_local(str(store_path))
+
+    seqs = store.list_sequences()
+    one_digest = seqs[0].sha512t24u
+
+    report = store.verify(digests=[one_digest])
+
+    assert report.n_checked == 1
+    assert report.n_failed == 0
+
+    with pytest.raises(KeyError):
+        store.verify(digests=["not-a-real-digest"])
+
+    with pytest.raises(ValueError):
+        store.verify(digests=[one_digest], collection="whatever")

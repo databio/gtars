@@ -765,7 +765,8 @@ mod tests {
         let encoded = gtars_refget::digest::encode_sequence(
             CHR_F_BASES.as_bytes(),
             &gtars_refget::digest::DNA_2BIT_ALPHABET,
-        );
+        )
+        .unwrap();
 
         let mut store = RefgetStore::new();
         store
