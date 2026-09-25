@@ -61,3 +61,5 @@ use gtars_refget::alphabet;
 ## Standards Compliance
 
 Implements GA4GH refget specification for sequence collections and digests.
+
+**See also:** the [refget Python package](https://docs.refgenie.org/refget/) builds on this crate. Its docs explain RefgetStore concepts and include tutorials: [What is RefgetStore?](https://docs.refgenie.org/refget/refgetstore-explained/)
