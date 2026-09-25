@@ -5481,3 +5481,353 @@ fn test_has_uncommitted_changes_tracks_the_commit() {
     );
     store.release_batch_lock();
 }
+
+// =========================================================================
+// verify()
+// =========================================================================
+
+/// A small FASTA with one sequence per alphabet class the guesser can
+/// produce. Deliberately avoids the D/H/U/B letters whose round-trip is
+/// still lossy/buggy pending sibling encoding-fix plans, so a freshly-built
+/// clean store verifies with zero failures regardless of whether those
+/// fixes have landed yet.
+fn multi_alphabet_fasta() -> String {
+    format!(
+        ">dna\n{}\n>iupac\n{}\n>prot\n{}\n>asc\n{}\n",
+        "ACGTACGTACGTACGTACGTACGTACGT",
+        "ACGTRYMKSWVNACGTRYMKSWVNACGTRYMKSWVN",
+        "MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQFEVVHSLAKWKRQTLGQHDFSAGEGLYTHMKALRPDEDRLSPLHSVYVDQWDWELVMGDGERQFSTLKSTVEAIWAGIKATEAAVSEEFGLAPFLPDQIHFVHSQELLSRYPDLDAKGRERAIAKDLGAVFLVGIGGKLSDGHRHDVRAPDYDDWSTPSELGHAGLNGDILVWNPVLEDAFELSSMGIRVDADTLKHQLALTGDEDRLELEWHQALLRGEMPQTIGGGIGQSRLTMLLLQLPHIGQVQAGVWPAAVRESVPSLL",
+        "Hello, World! This is plain ASCII text, not a sequence at all: 12345."
+    )
+}
+
+/// Build an on-disk store with one collection ("multi") holding one sequence
+/// per alphabet (dna2bit, dnaio, protein, ASCII). Returns the store together
+/// with the store's directory and `(name, sha512t24u, alphabet_string)` for
+/// each of its four sequences.
+fn build_multi_alphabet_store(
+    mode: StorageMode,
+) -> (tempfile::TempDir, PathBuf, RefgetStore, Vec<(String, String, String)>) {
+    let dir = tempdir().unwrap();
+    let fasta = dir.path().join("multi.fa");
+    fs::write(&fasta, multi_alphabet_fasta()).unwrap();
+    let store_path = dir.path().join("store");
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    store.set_encoding_mode(mode);
+    store
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
+        .unwrap();
+    store.write().unwrap();
+
+    let mut reopened = RefgetStore::open_local(&store_path).unwrap();
+    let seqs: Vec<(String, String, String)> = reopened
+        .list_sequences()
+        .unwrap()
+        .into_iter()
+        .map(|m| (m.name, m.sha512t24u, m.alphabet.to_string()))
+        .collect();
+    (dir, store_path, reopened, seqs)
+}
+
+/// Flip every bit of one byte roughly in the middle of a file (keeps the
+/// file length the same -- important for the encoded/2-bit-packed case,
+/// where the file length is derived from the sequence length).
+fn corrupt_one_byte(path: &std::path::Path) {
+    let mut bytes = fs::read(path).unwrap();
+    assert!(!bytes.is_empty(), "cannot corrupt an empty file: {}", path.display());
+    let mid = bytes.len() / 2;
+    bytes[mid] ^= 0xFF;
+    fs::write(path, bytes).unwrap();
+}
+
+/// Overwrite one ASCII base (Raw storage mode) with a different letter.
+fn corrupt_one_base_raw(path: &std::path::Path) {
+    let mut bytes = fs::read(path).unwrap();
+    assert!(!bytes.is_empty(), "cannot corrupt an empty file: {}", path.display());
+    let mid = bytes.len() / 2;
+    bytes[mid] = if bytes[mid] == b'A' { b'C' } else { b'A' };
+    fs::write(path, bytes).unwrap();
+}
+
+/// Rewrite the md5 column (5th tab-separated field) of the row for `digest`
+/// in `sequences.rgsi` to `bad_md5`.
+fn corrupt_stored_md5(store_path: &std::path::Path, digest: &str, bad_md5: &str) {
+    let idx_path = store_path.join("sequences.rgsi");
+    let content = fs::read_to_string(&idx_path).unwrap();
+    let mut out = String::new();
+    let mut found = false;
+    for line in content.lines() {
+        if line.starts_with('#') || line.trim().is_empty() {
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+        let parts: Vec<&str> = line.split('\t').collect();
+        if parts.len() >= 5 && parts[3] == digest {
+            found = true;
+            let mut owned: Vec<String> = parts.iter().map(|s| s.to_string()).collect();
+            owned[4] = bad_md5.to_string();
+            out.push_str(&owned.join("\t"));
+        } else {
+            out.push_str(line);
+        }
+        out.push('\n');
+    }
+    assert!(found, "digest {} not found in sequences.rgsi", digest);
+    fs::write(&idx_path, out).unwrap();
+}
+
+fn find_seq<'a>(
+    seqs: &'a [(String, String, String)],
+    name: &str,
+) -> &'a (String, String, String) {
+    seqs.iter()
+        .find(|(n, _, _)| n == name)
+        .unwrap_or_else(|| panic!("no sequence named {} in test fixture", name))
+}
+
+#[test]
+fn verify_clean_store_reports_no_failures() {
+    let (_dir, _store_path, mut store, seqs) = build_multi_alphabet_store(StorageMode::Encoded);
+    let report = store.verify_sequences(None, &VerifyOptions::default()).unwrap();
+
+    assert!(report.is_ok());
+    assert_eq!(report.n_checked, seqs.len());
+    assert_eq!(report.n_ok, seqs.len());
+    assert_eq!(report.n_failed, 0);
+    assert!(report.failures.is_empty());
+
+    let expected_alphabets: std::collections::HashSet<&String> =
+        seqs.iter().map(|(_, _, a)| a).collect();
+    assert_eq!(report.by_alphabet.len(), expected_alphabets.len());
+    for (_, _, alphabet) in &seqs {
+        let counts = report.by_alphabet.get(alphabet).unwrap();
+        assert!(counts.checked >= 1);
+        assert_eq!(counts.failed, 0);
+    }
+}
+
+#[test]
+fn verify_clean_store_raw_mode() {
+    let (_dir, _store_path, mut store, seqs) = build_multi_alphabet_store(StorageMode::Raw);
+    let report = store.verify_sequences(None, &VerifyOptions::default()).unwrap();
+    assert!(report.is_ok());
+    assert_eq!(report.n_checked, seqs.len());
+    assert_eq!(report.n_failed, 0);
+}
+
+#[test]
+fn verify_clean_store_zstd_mode() {
+    let (_dir, _store_path, mut store, seqs) = build_multi_alphabet_store(StorageMode::Zstd);
+    let report = store.verify_sequences(None, &VerifyOptions::default()).unwrap();
+    assert!(report.is_ok());
+    assert_eq!(report.n_checked, seqs.len());
+    assert_eq!(report.n_failed, 0);
+}
+
+#[test]
+fn verify_detects_corrupted_encoded_payload() {
+    let (_dir, store_path, store, seqs) = build_multi_alphabet_store(StorageMode::Encoded);
+    let (_, target_digest, _) = find_seq(&seqs, "dna").clone();
+    let seq_path = store.sequence_file_path(&target_digest).unwrap();
+    drop(store);
+    corrupt_one_byte(&seq_path);
+
+    let mut reopened = RefgetStore::open_local(&store_path).unwrap();
+    let report = reopened.verify_sequences(None, &VerifyOptions::default()).unwrap();
+
+    assert_eq!(report.n_checked, seqs.len());
+    assert_eq!(report.n_ok, seqs.len() - 1);
+    assert_eq!(report.n_failed, 1);
+    assert_eq!(report.failures.len(), 1);
+    let failure = &report.failures[0];
+    assert_eq!(failure.digest, target_digest);
+    assert_eq!(failure.kind, VerifyFailureKind::DigestMismatch);
+    assert_ne!(failure.computed_sha512t24u.as_deref(), Some(target_digest.as_str()));
+    assert_eq!(failure.bases_read as usize, failure.length);
+}
+
+#[test]
+fn verify_detects_corrupted_raw_payload() {
+    let (_dir, store_path, store, seqs) = build_multi_alphabet_store(StorageMode::Raw);
+    let (_, target_digest, _) = find_seq(&seqs, "prot").clone();
+    let seq_path = store.sequence_file_path(&target_digest).unwrap();
+    drop(store);
+    corrupt_one_base_raw(&seq_path);
+
+    let mut reopened = RefgetStore::open_local(&store_path).unwrap();
+    let report = reopened.verify_sequences(None, &VerifyOptions::default()).unwrap();
+
+    assert_eq!(report.n_failed, 1);
+    let failure = &report.failures[0];
+    assert_eq!(failure.digest, target_digest);
+    assert_eq!(failure.kind, VerifyFailureKind::DigestMismatch);
+    // Every other sequence still passes.
+    assert_eq!(report.n_ok, seqs.len() - 1);
+}
+
+#[test]
+fn verify_reports_truncated_file_as_read_error_and_continues() {
+    let (_dir, store_path, store, seqs) = build_multi_alphabet_store(StorageMode::Encoded);
+    let (_, target_digest, _) = find_seq(&seqs, "prot").clone();
+    let seq_path = store.sequence_file_path(&target_digest).unwrap();
+    drop(store);
+    {
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .open(&seq_path)
+            .unwrap();
+        file.set_len(2).unwrap();
+    }
+
+    let mut reopened = RefgetStore::open_local(&store_path).unwrap();
+    let report = reopened.verify_sequences(None, &VerifyOptions::default()).unwrap();
+
+    assert_eq!(report.n_checked, seqs.len());
+    assert_eq!(report.n_ok, seqs.len() - 1);
+    assert_eq!(report.n_failed, 1);
+    let failure = &report.failures[0];
+    assert_eq!(failure.digest, target_digest);
+    assert_eq!(failure.kind, VerifyFailureKind::ReadError);
+    assert!(failure.error.is_some());
+}
+
+#[test]
+fn verify_detects_md5_mismatch() {
+    let (_dir, store_path, _store, seqs) = build_multi_alphabet_store(StorageMode::Encoded);
+    let (_, target_digest, _) = find_seq(&seqs, "dna").clone();
+    corrupt_stored_md5(&store_path, &target_digest, "deadbeefdeadbeefdeadbeefdeadbeef");
+
+    let mut reopened = RefgetStore::open_local(&store_path).unwrap();
+    let report = reopened.verify_sequences(None, &VerifyOptions::default()).unwrap();
+    assert_eq!(report.n_failed, 1);
+    assert_eq!(report.failures[0].digest, target_digest);
+    assert_eq!(report.failures[0].kind, VerifyFailureKind::Md5Mismatch);
+
+    let mut reopened_no_md5 = RefgetStore::open_local(&store_path).unwrap();
+    let opts = VerifyOptions {
+        jobs: 0,
+        check_md5: false,
+    };
+    let report_no_md5 = reopened_no_md5.verify_sequences(None, &opts).unwrap();
+    assert_eq!(report_no_md5.n_failed, 0);
+}
+
+#[test]
+fn verify_subset_only_checks_requested() {
+    let (_dir, _store_path, mut store, seqs) = build_multi_alphabet_store(StorageMode::Encoded);
+
+    let two: Vec<String> = seqs.iter().take(2).map(|(_, d, _)| d.clone()).collect();
+    let report = store
+        .verify_sequences(Some(&two), &VerifyOptions::default())
+        .unwrap();
+    assert_eq!(report.n_checked, 2);
+    assert_eq!(report.n_failed, 0);
+
+    let unknown = vec!["not-a-real-digest".to_string()];
+    let err = store
+        .verify_sequences(Some(&unknown), &VerifyOptions::default())
+        .unwrap_err();
+    assert!(err.to_string().contains("not-a-real-digest"));
+
+    // An md5 digest in the subset resolves to its sequence.
+    let target = find_seq(&seqs, "dna").clone();
+    let meta = store
+        .list_sequences()
+        .unwrap()
+        .into_iter()
+        .find(|m| m.sha512t24u == target.1)
+        .unwrap();
+    let md5_subset = vec![meta.md5.clone()];
+    let report_md5 = store
+        .verify_sequences(Some(&md5_subset), &VerifyOptions::default())
+        .unwrap();
+    assert_eq!(report_md5.n_checked, 1);
+    assert_eq!(report_md5.n_failed, 0);
+}
+
+#[test]
+fn verify_collection_limits_to_collection() {
+    let dir = tempdir().unwrap();
+    let fasta_a = dir.path().join("a.fa");
+    let fasta_b = dir.path().join("b.fa");
+    fs::write(&fasta_a, ">a1\nACGTACGTACGTACGT\n").unwrap();
+    fs::write(&fasta_b, ">b1\nGGGGCCCCTTTTAAAA\n").unwrap();
+    let store_path = dir.path().join("store");
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    let (meta_a, _) = store
+        .add_sequence_collection_from_fasta(&fasta_a, FastaImportOptions::new())
+        .unwrap();
+    let (meta_b, _) = store
+        .add_sequence_collection_from_fasta(&fasta_b, FastaImportOptions::new())
+        .unwrap();
+    store.write().unwrap();
+    drop(store);
+
+    // Corrupt the b1 sequence's file on disk.
+    let mut probe = RefgetStore::open_local(&store_path).unwrap();
+    let b_digest = probe
+        .get_collection(&meta_b.digest)
+        .unwrap()
+        .sequences[0]
+        .metadata()
+        .sha512t24u
+        .clone();
+    let seq_path = probe.sequence_file_path(&b_digest).unwrap();
+    drop(probe);
+    corrupt_one_byte(&seq_path);
+
+    let mut store_a = RefgetStore::open_local(&store_path).unwrap();
+    let report_a = store_a
+        .verify_collection(&meta_a.digest, &VerifyOptions::default())
+        .unwrap();
+    assert_eq!(report_a.n_failed, 0, "collection A must be unaffected");
+
+    let mut store_b = RefgetStore::open_local(&store_path).unwrap();
+    let report_b = store_b
+        .verify_collection(&meta_b.digest, &VerifyOptions::default())
+        .unwrap();
+    assert_eq!(report_b.n_failed, 1);
+    assert_eq!(report_b.failures[0].digest, b_digest);
+}
+
+#[test]
+fn verify_parallel_matches_serial() {
+    let (_dir, store_path, store, seqs) = build_multi_alphabet_store(StorageMode::Encoded);
+    let (_, target_digest, _) = find_seq(&seqs, "iupac").clone();
+    let seq_path = store.sequence_file_path(&target_digest).unwrap();
+    drop(store);
+    corrupt_one_byte(&seq_path);
+
+    let mut store_serial = RefgetStore::open_local(&store_path).unwrap();
+    let serial = store_serial
+        .verify_sequences(
+            None,
+            &VerifyOptions {
+                jobs: 1,
+                check_md5: true,
+            },
+        )
+        .unwrap();
+
+    let mut store_parallel = RefgetStore::open_local(&store_path).unwrap();
+    let parallel = store_parallel
+        .verify_sequences(
+            None,
+            &VerifyOptions {
+                jobs: 4,
+                check_md5: true,
+            },
+        )
+        .unwrap();
+
+    assert_eq!(serial.n_checked, parallel.n_checked);
+    assert_eq!(serial.n_ok, parallel.n_ok);
+    assert_eq!(serial.n_failed, parallel.n_failed);
+    assert_eq!(serial.failures.len(), parallel.failures.len());
+    for (a, b) in serial.failures.iter().zip(parallel.failures.iter()) {
+        assert_eq!(a.digest, b.digest);
+        assert_eq!(a.kind, b.kind);
+    }
+    assert_eq!(serial.by_alphabet, parallel.by_alphabet);
+}
