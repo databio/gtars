@@ -525,11 +525,23 @@ mod tests {
         assert_eq!(encoded, packed);
         let decoded: Vec<u8> = decode_substring_from_bytes(&encoded, 0, sequence.len(), alphabet);
         assert_eq!(decoded, sequence);
+
+        // Broader round-trip covering every DnaIupac symbol, including U and
+        // the ambiguity codes affected by the decode-table bug (D, H).
+        // Expected to fail on master for D, H and U until the sibling
+        // DnaIupac-table-fix plan lands; if that plan's own
+        // `test_dna_iupac_full_roundtrip` already exists, this is
+        // intentionally redundant with it, not a replacement for it.
+        let full_sequence = b"ACGTURYSWKMBDHVN";
+        let full_encoded = encode_sequence(full_sequence, alphabet);
+        let full_decoded: Vec<u8> =
+            decode_substring_from_bytes(&full_encoded, 0, full_sequence.len(), alphabet);
+        assert_eq!(full_decoded, full_sequence);
     }
 
     #[test]
     fn test_protein_encoding() {
-        let sequence = b"ACDEFGHIKLMNPQRSTVWY*X-";
+        let sequence = b"ACDEFGHIKLMNPQRSTVWY*X-.";
         let alphabet = &alphabet::PROTEIN_ALPHABET;
         let encoded = encode_sequence(sequence, alphabet);
         // Don't want to re-implement bit-packing here for 5-bit symbols, so just check the length.
@@ -605,6 +617,27 @@ mod tests {
         check_offset_roundtrip(sequence, alphabet, 3, 6);
         check_offset_roundtrip(sequence, alphabet, 5, 11);
         check_offset_roundtrip(sequence, alphabet, 2, 16);
+    }
+
+    #[test]
+    fn test_decode_at_offset_dna_iupac() {
+        // All 16 DnaIupac symbols, including U/D/H (the known bugs).
+        let sequence = b"ACGTURYSWKMBDHVN";
+        let alphabet = &alphabet::DNA_IUPAC_ALPHABET;
+        check_offset_roundtrip(sequence, alphabet, 0, 5);
+        check_offset_roundtrip(sequence, alphabet, 3, 9);
+        check_offset_roundtrip(sequence, alphabet, 5, 16);
+        check_offset_roundtrip(sequence, alphabet, 1, sequence.len());
+    }
+
+    #[test]
+    fn test_decode_at_offset_protein() {
+        let sequence = b"ACDEFGHIKLMNPQRSTVWY*X-.";
+        let alphabet = &alphabet::PROTEIN_ALPHABET;
+        check_offset_roundtrip(sequence, alphabet, 0, 5);
+        check_offset_roundtrip(sequence, alphabet, 3, 9);
+        check_offset_roundtrip(sequence, alphabet, 5, 16);
+        check_offset_roundtrip(sequence, alphabet, 1, sequence.len());
     }
 
     /// Tiny deterministic xorshift64 RNG so the differential test is reproducible

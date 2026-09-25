@@ -186,7 +186,8 @@ impl<R: Read> Read for StreamingDecoder<R> {
 mod tests {
     use super::*;
     use crate::digest::alphabet::{
-        ASCII_ALPHABET, DNA_2BIT_ALPHABET, DNA_3BIT_ALPHABET, DNA_IUPAC_ALPHABET, PROTEIN_ALPHABET,
+        ASCII_ALPHABET, AlphabetType, DNA_2BIT_ALPHABET, DNA_3BIT_ALPHABET, DNA_IUPAC_ALPHABET,
+        PROTEIN_ALPHABET, guess_alphabet,
     };
     use crate::digest::encoder::{decode_substring_from_bytes, encode_sequence};
     use std::io::Cursor;
@@ -217,8 +218,6 @@ mod tests {
             byte_window(start, end, alphabet.bits_per_symbol);
         let slice = &encoded[byte_start..byte_end.min(encoded.len())];
 
-        let expected = decode_substring_from_bytes(&encoded, start, end, alphabet);
-
         let mut decoder = StreamingDecoder::new(
             Cursor::new(slice.to_vec()),
             alphabet,
@@ -227,26 +226,87 @@ mod tests {
         );
         let mut out = Vec::new();
         decoder.read_to_end(&mut out).expect("streaming read failed");
+
+        // Main assertion: streamed output must equal the ORIGINAL INPUT
+        // slice, not just agree with another decoder reading the same
+        // (possibly wrong) table.
         assert_eq!(
-            out, expected,
-            "alphabet bps={} range [{}, {}) sequence={:?}",
+            out,
+            &sequence[start..end],
+            "streamed output does not match source input: alphabet bps={} range [{}, {}) sequence={:?}",
             alphabet.bits_per_symbol,
             start,
             end,
             std::str::from_utf8(sequence).unwrap_or("<non-utf8>")
         );
+
+        // Secondary cross-check against the other decode path.
+        let expected = decode_substring_from_bytes(&encoded, start, end, alphabet);
+        assert_eq!(
+            out, expected,
+            "streaming decoder disagrees with decode_substring_from_bytes: bps={} range [{}, {})",
+            alphabet.bits_per_symbol, start, end
+        );
     }
 
-    // Test inputs per alphabet. Each sequence is chosen to exercise the decoder
-    // across the full symbol set where possible.
+    /// The Protein fixture, factored out so `test_protein_5bit_unaligned`
+    /// uses the exact same bytes as `fixtures()` and the two cannot drift
+    /// apart. Standard residues only: the guesser currently sends a sequence
+    /// containing U/B/Z/O/J to Ascii (see `fixtures_match_guesser` below),
+    /// not Protein, so those symbols are exercised via the ASCII fixture
+    /// instead (and via `roundtrip_alphabet_bytes.rs` / `roundtrip_store.rs`
+    /// for the real bug).
+    fn protein_fixture() -> &'static [u8] {
+        b"ACDEFGHIKLMNPQRSTVWY*X-."
+    }
+
+    // Test inputs per alphabet. Each sequence is chosen to exercise the
+    // decoder across the full symbol set where possible, and must be an
+    // input the real pipeline would actually send to that alphabet (see
+    // `fixtures_match_guesser`).
     fn fixtures() -> Vec<(&'static Alphabet, &'static [u8])> {
         vec![
             (&DNA_2BIT_ALPHABET, b"ACGTACGTACGTACGT" as &[u8]),
-            (&DNA_3BIT_ALPHABET, b"ACGTNRYXACGTNRYX" as &[u8]),
-            (&DNA_IUPAC_ALPHABET, b"ACGTRYMKSWBDHVN-" as &[u8]),
-            (&PROTEIN_ALPHABET, b"ACDEFGHIKLMNPQRSTVWY*X-" as &[u8]),
-            (&ASCII_ALPHABET, b"Hello, World! 1234" as &[u8]),
+            // X dropped: the guesser never sends X to Dna3bit (it goes to
+            // Protein), so an X fixture here would test a case the real
+            // pipeline cannot produce. Still covered by encoder.rs's
+            // test_dna_3bit_encoding.
+            (&DNA_3BIT_ALPHABET, b"ACGTNRYAACGTNRYC" as &[u8]),
+            // All 16 DnaIupac symbols including U; 17 symbols long so the
+            // half-byte tail of the 4-bit packing is exercised. `-` dropped:
+            // it is not a DnaIupac member (encodes to 0b0000, decodes 'N'),
+            // so it could never round-trip and the real pipeline would send
+            // it to Protein/Ascii, not DnaIupac.
+            (&DNA_IUPAC_ALPHABET, b"ACGTURYSWKMBDHVNA" as &[u8]),
+            (&PROTEIN_ALPHABET, protein_fixture()),
+            // Standard-alphabet passthrough, plus U/B/Z/O/J: the guesser
+            // sends a sequence containing these non-standard letters to
+            // Ascii (they are not in the Protein table), so they belong
+            // here rather than in the Protein fixture.
+            (&ASCII_ALPHABET, b"Hello, World! 1234 UBZOJ" as &[u8]),
         ]
+    }
+
+    /// Every fixture must be an input the real pipeline would actually send
+    /// to that alphabet -- otherwise the fixture tests a case that never
+    /// happens. Ascii is exempt: it is the catch-all, so any guess of Ascii
+    /// is fine for that fixture regardless of what forced it there.
+    #[test]
+    fn fixtures_match_guesser() {
+        for (alphabet, seq) in fixtures() {
+            let guessed = guess_alphabet(seq);
+            if alphabet.alphabet_type == AlphabetType::Ascii {
+                continue;
+            }
+            assert_eq!(
+                guessed,
+                alphabet.alphabet_type,
+                "fixture for {:?} is actually guessed as {:?}: {:?}",
+                alphabet.alphabet_type,
+                guessed,
+                std::str::from_utf8(seq).unwrap_or("<non-utf8>")
+            );
+        }
     }
 
     #[test]
@@ -362,11 +422,12 @@ mod tests {
 
         let expected = decode_substring_from_bytes(&encoded, 1, 15, alphabet);
         assert_eq!(collected, expected);
+        assert_eq!(collected, &sequence[1..15]);
     }
 
     #[test]
     fn test_protein_5bit_unaligned() {
-        let sequence = b"ACDEFGHIKLMNPQRSTVWY*X-";
+        let sequence = protein_fixture();
         let alphabet = &PROTEIN_ALPHABET;
         // Test starts that are non-byte-aligned at 5 bits per symbol.
         for start in 0..sequence.len() {
