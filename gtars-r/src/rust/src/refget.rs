@@ -74,7 +74,9 @@ pub fn refget_store_raw(mode: &str) -> extendr_api::Result<Robj> {
     };
 
     let mut store = RefgetStore::in_memory();
-    store.set_encoding_mode(storage_mode);
+    store
+        .set_encoding_mode(storage_mode)
+        .map_err(|e| extendr_api::Error::Other(format!("Error setting encoding mode: {e:#}")))?;
     let ext_ptr = ExternalPtr::new(store);
 
     Ok(ext_ptr.into())
@@ -132,8 +134,9 @@ pub fn open_remote_store(cache_path: &str, remote_url: &str) -> extendr_api::Res
 #[extendr]
 pub fn enable_encoding_store(store_ptr: Robj) -> extendr_api::Result<()> {
     with_store!(store_ptr, store, {
-        store.enable_encoding();
-        Ok(())
+        store
+            .enable_encoding()
+            .map_err(|e| extendr_api::Error::Other(format!("Error enabling encoding: {e:#}")))
     })
 }
 

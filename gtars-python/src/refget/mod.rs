@@ -161,9 +161,9 @@ pub fn digest_sequence(data: &[u8], name: Option<&str>, description: Option<&str
 ///
 /// Variants:
 ///     Dna2bit: Standard DNA (A, C, G, T only) - can use 2-bit encoding.
-///     Dna3bit: DNA with N (A, C, G, T, N) - requires 3-bit encoding.
-///     DnaIupac: Full IUPAC DNA alphabet with ambiguity codes.
-///     Protein: Amino acid sequences.
+///     Dna3bit: DNA with A, C, G, T, N, R, Y, X - requires 3-bit encoding.
+///     DnaIupac: Full IUPAC DNA/RNA alphabet with ambiguity codes (and U).
+///     Protein: Amino acid sequences, including U, O, B, Z, J, X, *, -, .
 ///     Ascii: Generic ASCII text.
 ///     Unknown: Alphabet could not be determined.
 #[pyclass(name = "AlphabetType", module = "gtars.refget")]
@@ -1534,8 +1534,15 @@ impl PyRefgetStore {
     ///     >>> from gtars.refget import RefgetStore, StorageMode
     ///     >>> store = RefgetStore.in_memory()
     ///     >>> store.set_encoding_mode(StorageMode.Raw)
-    fn set_encoding_mode(&mut self, mode: PyStorageMode) {
-        self.inner.set_encoding_mode(mode.into());
+    ///
+    /// Raises:
+    ///     ValueError: If a sequence cannot be encoded with its stored
+    ///         alphabet. The store's alphabet metadata is wrong and the store
+    ///         must be re-imported. The store is left unchanged.
+    fn set_encoding_mode(&mut self, mode: PyStorageMode) -> PyResult<()> {
+        self.inner
+            .set_encoding_mode(mode.into())
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("{e:#}")))
     }
 
     /// Enable 2-bit encoding for space efficiency.
@@ -1545,8 +1552,14 @@ impl PyRefgetStore {
     ///     >>> store = RefgetStore.in_memory()
     ///     >>> store.disable_encoding()  # Switch to Raw
     ///     >>> store.enable_encoding()   # Back to Encoded
-    fn enable_encoding(&mut self) {
-        self.inner.enable_encoding();
+    ///
+    /// Raises:
+    ///     ValueError: If a sequence cannot be encoded with its stored
+    ///         alphabet (see set_encoding_mode).
+    fn enable_encoding(&mut self) -> PyResult<()> {
+        self.inner
+            .enable_encoding()
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("{e:#}")))
     }
 
     /// Disable encoding, use raw byte storage.

@@ -632,6 +632,11 @@ class RefgetStore:
         Args:
             mode: The storage mode to switch to (StorageMode.Raw or StorageMode.Encoded).
 
+        Raises:
+            ValueError: If a sequence cannot be encoded with its stored
+                alphabet. The store's alphabet metadata is wrong and the store
+                must be re-imported. The store is left unchanged.
+
         Example::
 
             store = RefgetStore.in_memory()
@@ -643,6 +648,10 @@ class RefgetStore:
         """Enable 2-bit encoding for space efficiency.
 
         Re-encodes any existing Raw sequences in memory.
+
+        Raises:
+            ValueError: If a sequence cannot be encoded with its stored
+                alphabet (see set_encoding_mode).
 
         Example::
 

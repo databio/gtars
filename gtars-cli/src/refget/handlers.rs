@@ -100,9 +100,9 @@ fn run_build(matches: &ArgMatches) -> Result<()> {
     store.set_lock_options(lock_options_from(matches));
     store.set_force_alias(matches.get_flag("force_alias"));
     if raw {
-        store.set_encoding_mode(StorageMode::Raw);
+        store.set_encoding_mode(StorageMode::Raw)?;
     } else {
-        store.set_encoding_mode(StorageMode::Encoded);
+        store.set_encoding_mode(StorageMode::Encoded)?;
     }
 
     let mode = if raw { "Raw" } else { "Encoded" };
