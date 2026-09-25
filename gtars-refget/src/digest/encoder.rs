@@ -769,7 +769,7 @@ mod tests {
     fn test_streaming_encoder_matches_bulk_across_chunk_splits() {
         let cases: [(&Alphabet, &[u8]); 5] = [
             (&alphabet::DNA_2BIT_ALPHABET, b"ACGTTGCAAGCTTACGA"),
-            (&alphabet::DNA_3BIT_ALPHABET, b"ACGTNRYXNNACGTRYX"),
+            (&alphabet::DNA_3BIT_ALPHABET, b"ACGTNRYUNNACGTRYU"),
             (&alphabet::DNA_IUPAC_ALPHABET, b"ACGTURYSWKMBDHVNA"),
             (&alphabet::PROTEIN_ALPHABET, b"MAUGBZOJ*-.ACDEFGHIKLMNPQRSTVWYX"),
             (&alphabet::ASCII_ALPHABET, b"Hello, World! 1234"),
@@ -832,7 +832,7 @@ mod tests {
 
     #[test]
     fn test_dna_3bit_encoding() {
-        let sequence = b"ACGTNRYX"; // 8 chars * 3 bits/char = 24 bits.
+        let sequence = b"ACGTNRYU"; // 8 chars * 3 bits/char = 24 bits.
         let alphabet = &alphabet::DNA_3BIT_ALPHABET;
         let encoded = encode_sequence(sequence, alphabet).unwrap();
         // let ans =  vec![0b000, 0b001, 0b010, 0b011, 0b100, 0b101, 0b110, 0b111];
@@ -879,7 +879,7 @@ mod tests {
 
     #[test]
     fn test_decode_at_offset_dna_3bit() {
-        let sequence = b"ACGTNRYXACGTNRYX";
+        let sequence = b"ACGTNRYUACGTNRYU";
         let alphabet = &alphabet::DNA_3BIT_ALPHABET;
         check_offset_roundtrip(sequence, alphabet, 0, 8);
         check_offset_roundtrip(sequence, alphabet, 3, 6);

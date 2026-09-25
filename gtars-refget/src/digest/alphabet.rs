@@ -44,9 +44,9 @@ const GUESS_CHUNK: usize = 4096;
 ///
 /// Selection rule: the result is the first alphabet in [`ALPHABET_ORDER`]
 /// (Dna2bit, Dna3bit, DnaIupac, Protein, Ascii) that holds every byte seen.
-/// The alphabets are not strictly nested (for example `X` is in Dna3bit and
-/// Protein but not in DnaIupac), so the guesser intersects membership sets
-/// instead of assuming each alphabet is a superset of the one before it.
+/// The guesser intersects membership sets instead of assuming each alphabet
+/// is a superset of the one before it, so adding a symbol to one alphabet
+/// can never make selection lossy.
 ///
 /// Input must already be uppercased, as every ingest path does. Alphabets hold
 /// uppercase symbols only, so a lowercase byte selects Ascii, which round-trips
@@ -176,7 +176,8 @@ impl AlphabetType {
 /// UCSC 2bit layout: T=00, C=01, A=10, G=11.
 const DNA_2BIT_SYMBOLS: &[(u8, u8)] = &[(b'T', 0b00), (b'C', 0b01), (b'A', 0b10), (b'G', 0b11)];
 
-/// 3-bit DNA: A C G T plus N, R, Y and X.
+/// 3-bit DNA/RNA: A C G T plus N, R, Y and U. Code 0b111 was never produced
+/// before U took it, so older payloads decode unchanged.
 const DNA_3BIT_SYMBOLS: &[(u8, u8)] = &[
     (b'A', 0b000),
     (b'C', 0b001),
@@ -185,7 +186,7 @@ const DNA_3BIT_SYMBOLS: &[(u8, u8)] = &[
     (b'N', 0b100),
     (b'R', 0b101),
     (b'Y', 0b110),
-    (b'X', 0b111),
+    (b'U', 0b111),
 ];
 
 /// IUPAC DNA/RNA symbols mapped to a 4-bit code (16 possible values).
@@ -322,7 +323,7 @@ const DNA_2BIT_DECODING_ARRAY: [u8; 256] = build_decoding(DNA_2BIT_SYMBOLS, b'N'
 const DNA_2BIT_MEMBERSHIP: [bool; 256] = build_membership(DNA_2BIT_SYMBOLS);
 
 const DNA_3BIT_ENCODING_ARRAY: [u8; 256] = build_encoding(DNA_3BIT_SYMBOLS);
-const DNA_3BIT_DECODING_ARRAY: [u8; 256] = build_decoding(DNA_3BIT_SYMBOLS, b'X');
+const DNA_3BIT_DECODING_ARRAY: [u8; 256] = build_decoding(DNA_3BIT_SYMBOLS, b'N');
 const DNA_3BIT_MEMBERSHIP: [bool; 256] = build_membership(DNA_3BIT_SYMBOLS);
 
 const DNA_IUPAC_ENCODING_ARRAY: [u8; 256] = build_encoding(DNA_IUPAC_SYMBOLS);
@@ -589,11 +590,13 @@ mod tests {
         assert_eq!(guess_alphabet(b"MEFLU"), AlphabetType::Protein);
         // M, G, C, R and U are all IUPAC nucleotide letters, so this is DnaIupac.
         assert_eq!(guess_alphabet(b"MGCRU"), AlphabetType::DnaIupac);
-        assert_eq!(guess_alphabet(b"ACGTU"), AlphabetType::DnaIupac);
-        assert_eq!(guess_alphabet(b"U"), AlphabetType::DnaIupac);
+        assert_eq!(guess_alphabet(b"ACGTU"), AlphabetType::Dna3bit);
+        assert_eq!(guess_alphabet(b"ACGU"), AlphabetType::Dna3bit);
+        assert_eq!(guess_alphabet(b"U"), AlphabetType::Dna3bit);
         assert_eq!(guess_alphabet(b"B"), AlphabetType::DnaIupac);
         assert_eq!(guess_alphabet(b"MEFBZOJ"), AlphabetType::Protein);
-        assert_eq!(guess_alphabet(b"ACGTNX"), AlphabetType::Dna3bit);
+        // X is not a nucleotide code; it is only a Protein member.
+        assert_eq!(guess_alphabet(b"ACGTNX"), AlphabetType::Protein);
         assert_eq!(guess_alphabet(b"actg"), AlphabetType::Ascii);
         assert_eq!(guess_alphabet(b""), AlphabetType::Dna2bit);
     }

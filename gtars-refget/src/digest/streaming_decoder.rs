@@ -264,9 +264,8 @@ mod tests {
     fn fixtures() -> Vec<(&'static Alphabet, &'static [u8])> {
         vec![
             (&DNA_2BIT_ALPHABET, b"ACGTACGTACGTACGT" as &[u8]),
-            // All 8 Dna3bit symbols, including X (X is a Dna3bit member, so
-            // the guesser sends ACGTNRYX to Dna3bit).
-            (&DNA_3BIT_ALPHABET, b"ACGTNRYXACGTNRYC" as &[u8]),
+            // All 8 Dna3bit symbols, including U (RNA fits in 3 bits).
+            (&DNA_3BIT_ALPHABET, b"ACGTNRYUACGTNRYC" as &[u8]),
             // All 16 DnaIupac symbols including U; 17 symbols long so the
             // half-byte tail of the 4-bit packing is exercised. `-` dropped:
             // it is not a DnaIupac member (encodes to 0b0000, decodes 'N'),
@@ -343,7 +342,7 @@ mod tests {
     #[test]
     fn test_unaligned_both_3bit() {
         run_range_test(
-            b"ACGTNRYXACGTNRYX",
+            b"ACGTNRYUACGTNRYU",
             &DNA_3BIT_ALPHABET,
             1,
             7,
