@@ -201,6 +201,77 @@ class ImportReport:
     def __repr__(self) -> str: ...
     def __len__(self) -> int: ...
 
+class VerifyFailure:
+    """One sequence that failed :meth:`RefgetStore.verify` /
+    :meth:`ReadonlyRefgetStore.verify`.
+
+    Attributes:
+        digest: Stored sha512t24u digest of the sequence.
+        name: Sequence name.
+        alphabet: Detected alphabet.
+        length: Stored sequence length in bases.
+        kind: One of ``"digest_mismatch"``, ``"md5_mismatch"``,
+            ``"length_mismatch"``, ``"read_error"``. Precedence when a
+            sequence has multiple problems: read_error > length_mismatch >
+            digest_mismatch > md5_mismatch (only one failure is ever
+            reported per sequence).
+        bases_read: Number of bytes actually streamed/hashed before the
+            check stopped.
+        computed_sha512t24u: Recomputed digest. ``None`` only for a
+            ``"read_error"`` where zero bytes were read.
+        stored_md5: The md5 recorded in the store (may be empty).
+        computed_md5: Recomputed md5. ``None`` when md5 was not checked, or
+            for a ``"read_error"``.
+        error: The underlying I/O error, set for ``"read_error"``.
+    """
+
+    digest: str
+    name: str
+    alphabet: AlphabetType
+    length: int
+    kind: str
+    bases_read: int
+    computed_sha512t24u: Optional[str]
+    stored_md5: str
+    computed_md5: Optional[str]
+    error: Optional[str]
+
+    def __repr__(self) -> str: ...
+
+class VerifyReport:
+    """Result of :meth:`RefgetStore.verify` / :meth:`ReadonlyRefgetStore.verify`.
+
+    Attributes:
+        n_checked: Number of sequences verified.
+        n_ok: Number that verified clean.
+        n_failed: Number that failed (equal to ``len(failures)``).
+        by_alphabet: Per-alphabet ``(checked, failed)`` counts, keyed by the
+            alphabet's string form (e.g. ``"dna2bit"``, ``"dnaio"``,
+            ``"protein"``, ``"ASCII"``).
+        failures: One entry per failing sequence, sorted by digest.
+    """
+
+    n_checked: int
+    n_ok: int
+    n_failed: int
+    by_alphabet: Dict[str, tuple[int, int]]
+    failures: List[VerifyFailure]
+
+    @property
+    def ok(self) -> bool:
+        """True when no sequence failed verification."""
+        ...
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to a plain (JSON-serializable) dict."""
+        ...
+    def __repr__(self) -> str: ...
+    def __len__(self) -> int:
+        """Number of failing sequences."""
+        ...
+    def __bool__(self) -> bool:
+        """True when no sequence failed verification (same as ``.ok``)."""
+        ...
+
 class SequenceCollection:
     """A collection of biological sequences (e.g., a genome assembly).
 
@@ -1430,6 +1501,50 @@ class RefgetStore:
         """Load FHR metadata from a JSON file and attach it to a collection."""
         ...
 
+    def verify(
+        self,
+        digests: Optional[List[str]] = None,
+        collection: Optional[str] = None,
+        jobs: int = 0,
+        check_md5: bool = True,
+    ) -> VerifyReport:
+        """Verify sequences against their stored digests.
+
+        Streams each sequence's decoded bytes through the normal decode path
+        and recomputes its sha512t24u (and md5, when one is stored) to check
+        that the stored bytes still hash to the digest they are stored
+        under.
+
+        Args:
+            digests: Only verify these sequence digests (sha512t24u or md5,
+                "SQ." prefix optional). Mutually exclusive with
+                ``collection``. Default (``None``) with ``collection`` also
+                ``None``: verify every sequence in the store.
+            collection: Only verify the sequences belonging to this
+                collection: a digest, or ``"NAMESPACE:ALIAS"``. Mutually
+                exclusive with ``digests``.
+            jobs: Worker threads. 0 (default) = auto, 1 = serial.
+            check_md5: Also recompute and compare md5 when the store has one
+                recorded (default True).
+
+        Returns:
+            VerifyReport: Summary counts plus one VerifyFailure per bad
+            sequence.
+
+        Raises:
+            ValueError: If both ``digests`` and ``collection`` are given.
+            KeyError: If a requested digest, alias, or collection is not
+                found.
+
+        Example::
+
+            report = store.verify()
+            if not report.ok:
+                for f in report.failures:
+                    print(f.digest, f.kind)
+        """
+        ...
+
     def into_readonly(self) -> "ReadonlyRefgetStore":
         """Convert to a ReadonlyRefgetStore for concurrent read access.
 
@@ -1724,6 +1839,34 @@ class ReadonlyRefgetStore:
 
     def list_fhr_metadata(self) -> list[str]:
         """List all collection digests that have FHR metadata."""
+        ...
+
+    def verify(
+        self,
+        digests: Optional[List[str]] = None,
+        jobs: int = 0,
+        check_md5: bool = True,
+    ) -> VerifyReport:
+        """Verify sequences against their stored digests.
+
+        See :meth:`RefgetStore.verify` for what this checks. This requires
+        no preloading: it works directly off the store's sequence index.
+
+        Args:
+            digests: Only verify these sequence digests (sha512t24u or md5,
+                "SQ." prefix optional). Default (``None``): verify every
+                sequence in the store.
+            jobs: Worker threads. 0 (default) = auto, 1 = serial.
+            check_md5: Also recompute and compare md5 when the store has one
+                recorded (default True).
+
+        Returns:
+            VerifyReport: Summary counts plus one VerifyFailure per bad
+            sequence.
+
+        Raises:
+            KeyError: If a requested digest is not found.
+        """
         ...
 
     def __len__(self) -> int: ...

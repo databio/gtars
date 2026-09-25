@@ -16,7 +16,7 @@ use gtars_refget::digest::{
 };
 use gtars_refget::digest::{md5, sha512t24u, AlphabetType};
 use gtars_refget::fasta::FaiRecord;
-use gtars_refget::store::{FastaImportOptions, ImportReport, ReadonlyRefgetStore, RefgetStore, StorageMode, SyncStrategy};
+use gtars_refget::store::{FastaImportOptions, ImportReport, ReadonlyRefgetStore, RefgetStore, StorageMode, SyncStrategy, VerifyFailure, VerifyOptions, VerifyReport};
 use gtars_refget::{expand_fasta_inputs, FastaInputs};
 // use gtars::refget::store::RetrievedSequence; // This is the Rust-native struct
 
@@ -413,6 +413,181 @@ impl From<ImportReport> for PyImportReport {
             n_sequences_written: value.n_sequences_written,
             n_sequences_deduped: value.n_sequences_deduped,
             n_collections_new: value.n_collections_new,
+        }
+    }
+}
+
+/// One sequence that failed `RefgetStore.verify()` / `ReadonlyRefgetStore.verify()`.
+///
+/// Attributes:
+///     digest (str): Stored sha512t24u digest of the sequence.
+///     name (str): Sequence name.
+///     alphabet (AlphabetType): Detected alphabet.
+///     length (int): Stored sequence length in bases.
+///     kind (str): One of "digest_mismatch", "md5_mismatch", "length_mismatch",
+///         "read_error". Precedence when a sequence has multiple problems:
+///         read_error > length_mismatch > digest_mismatch > md5_mismatch (only
+///         one failure is ever reported per sequence).
+///     bases_read (int): Number of bytes actually streamed/hashed before the
+///         check stopped.
+///     computed_sha512t24u (str | None): Recomputed digest. None only for a
+///         "read_error" where zero bytes were read.
+///     stored_md5 (str): The md5 recorded in the store (may be empty).
+///     computed_md5 (str | None): Recomputed md5. None when md5 was not
+///         checked, or for a "read_error".
+///     error (str | None): The underlying I/O error, set for "read_error".
+#[pyclass(name = "VerifyFailure", module = "gtars.refget")]
+#[derive(Clone)]
+pub struct PyVerifyFailure {
+    #[pyo3(get)]
+    pub digest: String,
+    #[pyo3(get)]
+    pub name: String,
+    #[pyo3(get)]
+    pub alphabet: PyAlphabetType,
+    #[pyo3(get)]
+    pub length: usize,
+    #[pyo3(get)]
+    pub kind: String,
+    #[pyo3(get)]
+    pub bases_read: u64,
+    #[pyo3(get)]
+    pub computed_sha512t24u: Option<String>,
+    #[pyo3(get)]
+    pub stored_md5: String,
+    #[pyo3(get)]
+    pub computed_md5: Option<String>,
+    #[pyo3(get)]
+    pub error: Option<String>,
+}
+
+#[pymethods]
+impl PyVerifyFailure {
+    fn __repr__(&self) -> String {
+        format!(
+            "VerifyFailure(digest='{}', name='{}', kind='{}')",
+            self.digest, self.name, self.kind
+        )
+    }
+}
+
+impl From<VerifyFailure> for PyVerifyFailure {
+    fn from(value: VerifyFailure) -> Self {
+        PyVerifyFailure {
+            digest: value.digest,
+            name: value.name,
+            alphabet: PyAlphabetType::from(value.alphabet),
+            length: value.length,
+            kind: value.kind.as_str().to_string(),
+            bases_read: value.bases_read,
+            computed_sha512t24u: value.computed_sha512t24u,
+            stored_md5: value.stored_md5,
+            computed_md5: value.computed_md5,
+            error: value.error,
+        }
+    }
+}
+
+/// Result of `RefgetStore.verify()` / `ReadonlyRefgetStore.verify()`.
+///
+/// Attributes:
+///     n_checked (int): Number of sequences verified.
+///     n_ok (int): Number that verified clean.
+///     n_failed (int): Number that failed (equal to len(failures)).
+///     by_alphabet (dict[str, tuple[int, int]]): Per-alphabet (checked,
+///         failed) counts, keyed by the alphabet's string form (e.g.
+///         "dna2bit", "dnaio", "protein", "ASCII").
+///     failures (list[VerifyFailure]): One entry per failing sequence,
+///         sorted by digest.
+#[pyclass(name = "VerifyReport", module = "gtars.refget")]
+#[derive(Clone)]
+pub struct PyVerifyReport {
+    #[pyo3(get)]
+    pub n_checked: usize,
+    #[pyo3(get)]
+    pub n_ok: usize,
+    #[pyo3(get)]
+    pub n_failed: usize,
+    #[pyo3(get)]
+    pub by_alphabet: std::collections::HashMap<String, (usize, usize)>,
+    #[pyo3(get)]
+    pub failures: Vec<PyVerifyFailure>,
+}
+
+#[pymethods]
+impl PyVerifyReport {
+    /// True when no sequence failed verification.
+    #[getter]
+    fn ok(&self) -> bool {
+        self.n_failed == 0
+    }
+
+    /// Convert to a plain (JSON-serializable) dict.
+    fn to_dict<'py>(&self, py: Python<'py>) -> PyResult<Py<PyAny>> {
+        let dict = pyo3::types::PyDict::new(py);
+        dict.set_item("n_checked", self.n_checked)?;
+        dict.set_item("n_ok", self.n_ok)?;
+        dict.set_item("n_failed", self.n_failed)?;
+        let by_alphabet = pyo3::types::PyDict::new(py);
+        for (k, (checked, failed)) in &self.by_alphabet {
+            by_alphabet.set_item(k, (checked, failed))?;
+        }
+        dict.set_item("by_alphabet", by_alphabet)?;
+        let failures: Vec<Py<PyAny>> = self
+            .failures
+            .iter()
+            .map(|f| -> PyResult<Py<PyAny>> {
+                let d = pyo3::types::PyDict::new(py);
+                d.set_item("digest", &f.digest)?;
+                d.set_item("name", &f.name)?;
+                d.set_item("length", f.length)?;
+                d.set_item("kind", &f.kind)?;
+                d.set_item("bases_read", f.bases_read)?;
+                d.set_item("computed_sha512t24u", &f.computed_sha512t24u)?;
+                d.set_item("stored_md5", &f.stored_md5)?;
+                d.set_item("computed_md5", &f.computed_md5)?;
+                d.set_item("error", &f.error)?;
+                Ok(d.into())
+            })
+            .collect::<PyResult<_>>()?;
+        dict.set_item("failures", failures)?;
+        Ok(dict.into())
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "VerifyReport(n_checked={}, n_ok={}, n_failed={})",
+            self.n_checked, self.n_ok, self.n_failed
+        )
+    }
+
+    /// Number of failing sequences.
+    fn __len__(&self) -> usize {
+        self.n_failed
+    }
+
+    /// True when no sequence failed verification (same as `.ok`).
+    fn __bool__(&self) -> bool {
+        self.n_failed == 0
+    }
+}
+
+impl From<VerifyReport> for PyVerifyReport {
+    fn from(value: VerifyReport) -> Self {
+        PyVerifyReport {
+            n_checked: value.n_checked,
+            n_ok: value.n_ok,
+            n_failed: value.n_failed,
+            by_alphabet: value
+                .by_alphabet
+                .into_iter()
+                .map(|(k, v)| (k, (v.checked, v.failed)))
+                .collect(),
+            failures: value
+                .failures
+                .into_iter()
+                .map(PyVerifyFailure::from)
+                .collect(),
         }
     }
 }
@@ -3234,6 +3409,85 @@ impl PyRefgetStore {
         }
         Ok(py_results)
     }
+
+    /// Verify sequences against their stored digests.
+    ///
+    /// Streams each sequence's decoded bytes through the normal decode path
+    /// and recomputes its sha512t24u (and md5, when one is stored) to check
+    /// that the stored bytes still hash to the digest they are stored under.
+    ///
+    /// Args:
+    ///     digests: Only verify these sequence digests (sha512t24u or md5,
+    ///         "SQ." prefix optional). Mutually exclusive with `collection`.
+    ///         Default (None) with `collection` also None: verify every
+    ///         sequence in the store.
+    ///     collection: Only verify the sequences belonging to this
+    ///         collection: a digest, or "NAMESPACE:ALIAS". Mutually
+    ///         exclusive with `digests`.
+    ///     jobs: Worker threads. 0 (default) = auto, 1 = serial.
+    ///     check_md5: Also recompute and compare md5 when the store has one
+    ///         recorded (default True).
+    ///
+    /// Returns:
+    ///     VerifyReport: Summary counts plus one VerifyFailure per bad sequence.
+    ///
+    /// Raises:
+    ///     ValueError: If both `digests` and `collection` are given.
+    ///     KeyError: If a requested digest, alias, or collection is not found.
+    ///
+    /// Example:
+    ///     >>> report = store.verify()
+    ///     >>> if not report.ok:
+    ///     ...     for f in report.failures:
+    ///     ...         print(f.digest, f.kind)
+    #[pyo3(signature = (digests=None, collection=None, jobs=0, check_md5=true))]
+    fn verify(
+        &mut self,
+        py: Python<'_>,
+        digests: Option<Vec<String>>,
+        collection: Option<&str>,
+        jobs: usize,
+        check_md5: bool,
+    ) -> PyResult<PyVerifyReport> {
+        if digests.is_some() && collection.is_some() {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "Pass either 'digests' or 'collection', not both",
+            ));
+        }
+        let opts = VerifyOptions { jobs, check_md5 };
+
+        if let Some(raw) = collection {
+            let resolved = match raw.split_once(':') {
+                Some((ns, alias)) => self
+                    .inner
+                    .get_collection_metadata_by_alias(ns, alias)
+                    .map(|m| m.digest.clone())
+                    .ok_or_else(|| {
+                        pyo3::exceptions::PyKeyError::new_err(format!(
+                            "Collection alias '{}' not found",
+                            raw
+                        ))
+                    })?,
+                None => strip_sq_prefix(raw).to_string(),
+            };
+            let report = py
+                .detach(|| self.inner.verify_collection(&resolved, &opts))
+                .map_err(|e| {
+                    pyo3::exceptions::PyKeyError::new_err(format!(
+                        "Failed to verify collection {}: {}",
+                        resolved, e
+                    ))
+                })?;
+            return Ok(PyVerifyReport::from(report));
+        }
+
+        let stripped: Option<Vec<String>> = digests
+            .map(|ds| ds.iter().map(|d| strip_sq_prefix(d).to_string()).collect());
+        let report = py
+            .detach(|| self.inner.verify_sequences(stripped.as_deref(), &opts))
+            .map_err(|e| pyo3::exceptions::PyKeyError::new_err(format!("{}", e)))?;
+        Ok(PyVerifyReport::from(report))
+    }
 }
 
 /// Iterator for RefgetStore that yields SequenceMetadata.
@@ -3708,6 +3962,41 @@ impl PyReadonlyRefgetStore {
     fn __len__(&self) -> usize {
         self.store.sequence_digests().count()
     }
+
+    /// Verify sequences against their stored digests.
+    ///
+    /// See `RefgetStore.verify()` for what this checks. This requires no
+    /// preloading: it works directly off the store's sequence index.
+    ///
+    /// Args:
+    ///     digests: Only verify these sequence digests (sha512t24u or md5,
+    ///         "SQ." prefix optional). Default (None): verify every sequence
+    ///         in the store.
+    ///     jobs: Worker threads. 0 (default) = auto, 1 = serial.
+    ///     check_md5: Also recompute and compare md5 when the store has one
+    ///         recorded (default True).
+    ///
+    /// Returns:
+    ///     VerifyReport: Summary counts plus one VerifyFailure per bad sequence.
+    ///
+    /// Raises:
+    ///     KeyError: If a requested digest is not found.
+    #[pyo3(signature = (digests=None, jobs=0, check_md5=true))]
+    fn verify(
+        &self,
+        py: Python<'_>,
+        digests: Option<Vec<String>>,
+        jobs: usize,
+        check_md5: bool,
+    ) -> PyResult<PyVerifyReport> {
+        let opts = VerifyOptions { jobs, check_md5 };
+        let stripped: Option<Vec<String>> = digests
+            .map(|ds| ds.iter().map(|d| strip_sq_prefix(d).to_string()).collect());
+        let report = py
+            .detach(|| self.store.verify_sequences(stripped.as_deref(), &opts))
+            .map_err(|e| pyo3::exceptions::PyKeyError::new_err(format!("{}", e)))?;
+        Ok(PyVerifyReport::from(report))
+    }
 }
 
 /// Parse a strategy string into a SyncStrategy enum.
@@ -3802,6 +4091,8 @@ pub fn refget(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PySeqColDigestLvl1>()?;
     m.add_class::<PySequenceCollectionMetadata>()?;
     m.add_class::<PyImportReport>()?;
+    m.add_class::<PyVerifyFailure>()?;
+    m.add_class::<PyVerifyReport>()?;
     m.add_class::<PySequenceCollection>()?;
     m.add_class::<PyStorageMode>()?;
     m.add_class::<PyRefgetStore>()?;
