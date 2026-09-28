@@ -578,6 +578,45 @@ setMethod('stats', 'RefgetStore', function(store) {
   .Call(wrap__stats_store, store@ptr)
 })
 
+#' Verify sequences against their stored digests.
+#'
+#' Streams each sequence's decoded bytes through the normal decode path and
+#' recomputes its sha512t24u (and md5, when one is stored) to check that the
+#' stored bytes still hash to the digest they are stored under.
+#'
+#' Named \code{verify_store} (not \code{verify}) to avoid clashing with other
+#' packages' \code{verify} generic.
+#'
+#' @param store A RefgetStore object
+#' @param digests Optional character vector of sequence digests (sha512t24u
+#'   or md5) to verify. NULL (the default) verifies every sequence in the
+#'   store.
+#' @param jobs Worker threads. 0 (default) = auto, 1 = serial.
+#' @param check_md5 Also recompute and compare md5 when the store has one
+#'   recorded (default TRUE).
+#' @return A list with n_checked, n_ok, n_failed, and failures (a data.frame
+#'   with columns digest, name, alphabet, length, kind,
+#'   computed_sha512t24u, stored_md5, computed_md5, error -- one row per
+#'   failing sequence).
+#' @export
+setGeneric('verify_store', function(store, digests = NULL, jobs = 0L, check_md5 = TRUE) standardGeneric('verify_store'))
+setMethod('verify_store', 'RefgetStore', function(store, digests = NULL, jobs = 0L, check_md5 = TRUE) {
+  result <- .Call(wrap__verify_store, store@ptr, digests, as.integer(jobs), isTRUE(check_md5))
+  result$failures <- data.frame(
+    digest = as.character(result$failures$digest),
+    name = as.character(result$failures$name),
+    alphabet = as.character(result$failures$alphabet),
+    length = as.integer(result$failures$length),
+    kind = as.character(result$failures$kind),
+    computed_sha512t24u = as.character(result$failures$computed_sha512t24u),
+    stored_md5 = as.character(result$failures$stored_md5),
+    computed_md5 = as.character(result$failures$computed_md5),
+    error = as.character(result$failures$error),
+    stringsAsFactors = FALSE
+  )
+  result
+})
+
 # =========================================================================
 # Seqcol Spec Operations
 # =========================================================================

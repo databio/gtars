@@ -93,6 +93,10 @@ impl SequenceMetadataExt for SequenceMetadata {
                 let total_bits = self.length * bits_per_symbol;
                 total_bits.div_ceil(8)
             }
+            // Zstd compressed size is data-dependent and not derivable from
+            // metadata; report the logical (ASCII) length as an upper-bound
+            // estimate. Callers needing the true on-disk size must `du` the files.
+            crate::store::StorageMode::Zstd => self.length,
         }
     }
 }
@@ -390,7 +394,7 @@ mod tests {
     fn test_decode_handles_encoded_data() {
         let sequence = b"ACGT";
         let alphabet = lookup_alphabet(&AlphabetType::Dna2bit);
-        let encoded_data = encode_sequence(sequence, alphabet);
+        let encoded_data = encode_sequence(sequence, alphabet).unwrap();
 
         let record = SequenceRecord::Full {
             metadata: SequenceMetadata {

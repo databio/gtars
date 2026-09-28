@@ -23,14 +23,15 @@ pub mod streaming_decoder;
 pub mod types;
 
 // Re-export commonly used items at the module level
-pub use algorithms::{canonicalize_json, md5, sha512t24u};
+pub use algorithms::{canonicalize_json, md5, sha512t24u, SequenceHasher};
 pub use alphabet::{
     ASCII_ALPHABET, Alphabet, AlphabetGuesser, AlphabetType, DNA_2BIT_ALPHABET, DNA_3BIT_ALPHABET,
-    DNA_IUPAC_ALPHABET, PROTEIN_ALPHABET, guess_alphabet, lookup_alphabet,
+    ALPHABET_ORDER, DNA_IUPAC_ALPHABET, INVALID_CODE, PROTEIN_ALPHABET, guess_alphabet,
+    lookup_alphabet,
 };
 pub use auto_decompress::AutoDecompressWriter;
 pub use encoder::{
-    SequenceEncoder, byte_range_for_bases, decode_string_from_bytes, decode_substring_from_bytes,
+    EncodeError, SequenceEncoder, byte_range_for_bases, decode_string_from_bytes, decode_substring_from_bytes,
     decode_substring_from_bytes_at_offset, encode_sequence,
 };
 pub use fasta::{ParseOptions, digest_fasta_bytes, load_fasta_bytes, parse_fasta_header};

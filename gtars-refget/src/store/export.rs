@@ -51,6 +51,11 @@ pub(crate) fn write_fasta_record(
         }
         StorageMode::Raw => String::from_utf8(sequence_data.to_vec())
             .context("Failed to decode raw sequence as UTF-8")?,
+        StorageMode::Zstd => {
+            let ascii = zstd::decode_all(sequence_data)
+                .context("Failed to zstd-decompress sequence record")?;
+            String::from_utf8(ascii).context("Failed to decode sequence as UTF-8")?
+        }
     };
 
     let header = match &metadata.description {
