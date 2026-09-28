@@ -174,9 +174,9 @@ let clustered = a.cluster(1000);                   // per-region cluster id
 | `intersect(other)` | range-level intersection (`IntervalSetOps`) |
 | `concat(other)` | concatenate without merging |
 | `union(other)` | `concat(other).reduce()` |
-| `jaccard(other)` | bp-level Jaccard `|A ∩ B| / |A ∪ B|` (`IntervalSetOps`) |
+| `jaccard(other)` | bp-level Jaccard `\|A ∩ B\| / \|A ∪ B\|` (`IntervalSetOps`) |
 | `coverage(other)` | fraction of `self` bp covered by `other` (`IntervalSetOps`) |
-| `overlap_coefficient(other)` | `|A ∩ B| / min(|A|, |B|)` (`IntervalSetOps`) |
+| `overlap_coefficient(other)` | `\|A ∩ B\| / min(\|A\|, \|B\|)` (`IntervalSetOps`) |
 | `shift(offset)` | translate by signed bp offset (saturating at 0) |
 | `flank(width, use_start, both)` | upstream/downstream/both-side flanks |
 | `resize(width, fix)` | fixed width anchored at `"start"`, `"end"`, or `"center"` |

@@ -141,7 +141,7 @@ run_lola(
 |---|---|---|
 | `userSet` | `list[int]` | 0-based user-set index |
 | `dbSet` | `list[int]` | 0-based db-set index |
-| `collection` | `list[str | None]` | from `index.txt` |
+| `collection` | `list[str \| None]` | from `index.txt` |
 | `pValueLog` | `list[float]` | `-log10(p)` from Fisher's exact test, capped at ~322 |
 | `oddsRatio` | `list[float]` | CMLE odds ratio (matches R `fisher.test()$estimate`) |
 | `support` | `list[int]` | overlap count between user set and db set — the contingency `a` |
@@ -149,8 +149,8 @@ run_lola(
 | `maxRnk` | `list[int]` | max of the three ranks |
 | `meanRnk` | `list[float]` | mean of the three ranks |
 | `b`, `c`, `d` | `list[int]` | signed contingency values (can be negative if user set extends outside universe) |
-| `qValue` | `list[float | None]` | BH-adjusted p-value (applied automatically inside `run_lola`) |
-| `description`, `cellType`, `tissue`, `antibody`, `treatment`, `dataSource` | `list[str | None]` | from `index.txt` |
+| `qValue` | `list[float \| None]` | BH-adjusted p-value (applied automatically inside `run_lola`) |
+| `description`, `cellType`, `tissue`, `antibody`, `treatment`, `dataSource` | `list[str \| None]` | from `index.txt` |
 | `filename` | `list[str]` | db set file name |
 | `size` | `list[int]` | number of regions in the db set |
 
