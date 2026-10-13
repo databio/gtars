@@ -968,11 +968,14 @@ impl From<SequenceCollection> for PySequenceCollection {
 /// Variants:
 ///     Raw: Store sequences as raw bytes (1 byte per base).
 ///     Encoded: Store sequences with 2-bit encoding (4 bases per byte).
+///     Zstd: Each record compressed whole with zstd. Reported for stores
+///         built by other tools; cannot be set from Python.
 #[pyclass(name = "StorageMode", module = "gtars.refget")]
 #[derive(Clone)]
 pub enum PyStorageMode {
     Raw,
     Encoded,
+    Zstd,
 }
 
 impl From<StorageMode> for PyStorageMode {
@@ -980,6 +983,7 @@ impl From<StorageMode> for PyStorageMode {
         match mode {
             StorageMode::Raw => PyStorageMode::Raw,
             StorageMode::Encoded => PyStorageMode::Encoded,
+            StorageMode::Zstd => PyStorageMode::Zstd,
         }
     }
 }
@@ -989,6 +993,7 @@ impl From<PyStorageMode> for StorageMode {
         match mode {
             PyStorageMode::Raw => StorageMode::Raw,
             PyStorageMode::Encoded => StorageMode::Encoded,
+            PyStorageMode::Zstd => StorageMode::Zstd,
         }
     }
 }
@@ -1222,7 +1227,7 @@ impl PySequenceStream {
 ///         None for in-memory stores.
 ///     remote_url (str | None): Remote URL of the store if loaded remotely, None otherwise.
 ///     quiet (bool): Whether the store suppresses progress output.
-///     storage_mode (StorageMode): Current storage mode (Raw or Encoded).
+///     storage_mode (StorageMode): Current storage mode (Raw, Encoded, or Zstd).
 ///
 /// Note:
 ///     Boolean evaluation follows Python container semantics: an empty store is
@@ -1355,12 +1360,21 @@ impl PyRefgetStore {
     /// Args:
     ///     mode: The storage mode to switch to (StorageMode.Raw or StorageMode.Encoded)
     ///
+    /// Raises:
+    ///     ValueError: If mode is StorageMode.Zstd, which cannot be set from Python.
+    ///
     /// Example:
     ///     >>> from gtars.refget import RefgetStore, StorageMode
     ///     >>> store = RefgetStore.in_memory()
     ///     >>> store.set_encoding_mode(StorageMode.Raw)
-    fn set_encoding_mode(&mut self, mode: PyStorageMode) {
+    fn set_encoding_mode(&mut self, mode: PyStorageMode) -> PyResult<()> {
+        if matches!(mode, PyStorageMode::Zstd) {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "StorageMode.Zstd cannot be set from Python",
+            ));
+        }
         self.inner.set_encoding_mode(mode.into());
+        Ok(())
     }
 
     /// Enable 2-bit encoding for space efficiency.
@@ -1899,7 +1913,7 @@ impl PyRefgetStore {
         self.inner.remote_source().map(|s| s.to_string())
     }
 
-    /// Current storage mode (Raw or Encoded).
+    /// Current storage mode (Raw, Encoded, or Zstd).
     #[getter]
     fn storage_mode(&self) -> PyStorageMode {
         self.inner.storage_mode().into()
@@ -3687,7 +3701,7 @@ impl PyReadonlyRefgetStore {
         self.store.remote_source().map(|s| s.to_string())
     }
 
-    /// Current storage mode (Raw or Encoded).
+    /// Current storage mode (Raw, Encoded, or Zstd).
     #[getter]
     fn storage_mode(&self) -> PyStorageMode {
         self.store.storage_mode().into()
