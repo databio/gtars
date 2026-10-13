@@ -399,6 +399,13 @@ class TestRefget:
         assert decoded_raw == decoded_encoded
         assert decoded_raw == "TTGGGGAA"
 
+    def test_set_encoding_mode_rejects_zstd(self):
+        """Zstd is reported but cannot be set from Python"""
+        store = RefgetStore.in_memory()
+        with pytest.raises(ValueError):
+            store.set_encoding_mode(StorageMode.Zstd)
+        assert store.storage_mode == StorageMode.Encoded
+
     def test_load_fasta_function(self):
         """Test the new load_fasta() function"""
         fasta_path = "../tests/data/fasta/base.fa"

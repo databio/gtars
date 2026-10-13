@@ -155,6 +155,7 @@ pub fn get_storage_mode_store(store_ptr: Robj) -> extendr_api::Result<String> {
         Ok(match store.storage_mode() {
             StorageMode::Raw => "raw".to_string(),
             StorageMode::Encoded => "encoded".to_string(),
+            StorageMode::Zstd => "zstd".to_string(),
         })
     })
 }

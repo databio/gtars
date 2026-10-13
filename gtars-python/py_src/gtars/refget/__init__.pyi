@@ -316,10 +316,13 @@ class StorageMode(Enum):
     Variants:
         Raw: Store sequences as raw bytes (1 byte per base).
         Encoded: Store sequences with 2-bit encoding (4 bases per byte).
+        Zstd: Each record compressed whole with zstd. Reported for stores
+            built by other tools; cannot be set from Python.
     """
 
     Raw: int
     Encoded: int
+    Zstd: int
 
 class FhrMetadata:
     """FAIR Headers Reference genome metadata for a sequence collection.
@@ -358,7 +361,7 @@ class RefgetStore:
             None for in-memory stores.
         remote_url: Remote URL of the store if loaded remotely, None otherwise.
         quiet: Whether the store suppresses progress output.
-        storage_mode: Current storage mode (Raw or Encoded).
+        storage_mode: Current storage mode (Raw, Encoded, or Zstd).
 
     Note:
         **Boolean evaluation**: RefgetStore follows Python container semantics,
@@ -410,7 +413,7 @@ class RefgetStore:
 
     @property
     def storage_mode(self) -> StorageMode:
-        """Current storage mode (Raw or Encoded)."""
+        """Current storage mode (Raw, Encoded, or Zstd)."""
         ...
 
     @property
@@ -560,6 +563,9 @@ class RefgetStore:
 
         Args:
             mode: The storage mode to switch to (StorageMode.Raw or StorageMode.Encoded).
+
+        Raises:
+            ValueError: If mode is StorageMode.Zstd, which cannot be set from Python.
 
         Example::
 
@@ -1474,7 +1480,7 @@ class ReadonlyRefgetStore:
         cache_path: Local directory path where the store is located or cached.
             None for in-memory stores.
         remote_url: Remote URL of the store if loaded remotely, None otherwise.
-        storage_mode: Current storage mode (Raw or Encoded).
+        storage_mode: Current storage mode (Raw, Encoded, or Zstd).
 
     Example::
 
@@ -1489,7 +1495,7 @@ class ReadonlyRefgetStore:
 
     @property
     def storage_mode(self) -> StorageMode:
-        """Current storage mode (Raw or Encoded)."""
+        """Current storage mode (Raw, Encoded, or Zstd)."""
         ...
 
     # =========================================================================
