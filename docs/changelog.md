@@ -19,6 +19,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Stores built with 0.11.0 or earlier that contain `U` or `B` in proteins, or `U` in nucleotide sequences, must be re-imported. Run `gtars refget verify <store>` to list affected sequences.
 
+## [0.11.1] -- 2026-10-29
+
+### RefgetStore (`gtars-refget`)
+- Fix `get_sequence_by_name` scanning every record of a collection on each call, which made BED extraction quadratic on large collections (regression in 0.10.0)
+- `load_sequence` accepts `SQ.`-prefixed and MD5 digests
+- Correct the `open_remote` and `open_local` docs about which files they read
+
+### Python bindings (`gtars` PyPI package)
+- Fix the build: handle `StorageMode::Zstd` (0.11.0 did not compile)
+
 ## [0.11.0] -- 2026-09-22
 
 ### RefgetStore (`gtars-refget`)
