@@ -14,7 +14,7 @@ use gtars_refget::digest::{
     CollectionNameMatch, FaiMetadata, SeqColDigestLvl1, SequenceCollection,
     SequenceCollectionMetadata, SequenceMetadata, SequenceNameMatch, SequenceRecord,
 };
-use gtars_refget::digest::{md5, sha512t24u, AlphabetType};
+use gtars_refget::digest::{md5, sha512t24u, strip_sq_prefix, AlphabetType};
 use gtars_refget::fasta::FaiRecord;
 use gtars_refget::store::{FastaImportOptions, ImportReport, ReadonlyRefgetStore, RefgetStore, StorageMode, SyncStrategy};
 use gtars_refget::{expand_fasta_inputs, FastaInputs};
@@ -1127,14 +1127,6 @@ fn json_string_to_py(py: Python<'_>, json_str: &str) -> PyResult<Py<PyAny>> {
     Ok(result.into())
 }
 
-/// Strip "SQ." prefix from digest if present (case-insensitive).
-///
-/// This allows users to copy digests with the standard "SQ." prefix from
-/// APIs and documentation without the lookup failing silently.
-fn strip_sq_prefix(digest: &str) -> &str {
-    gtars_refget::digest::strip_sq_prefix(digest)
-}
-
 /// Lazy, O(1)-memory stream over a (sub)sequence's decoded ASCII bases (flow 2).
 ///
 /// Produced by `RefgetStore.stream_sequence()` / `ReadonlyRefgetStore.stream_sequence()`.
@@ -1976,7 +1968,6 @@ impl PyRefgetStore {
     ///     digest: The sequence's SHA-512/24u digest (with or without "SQ."
     ///         prefix) or MD5 digest.
     fn load_sequence(&mut self, digest: &str) -> PyResult<()> {
-        let digest = strip_sq_prefix(digest);
         self.inner.load_sequence(digest).map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
                 "Error loading sequence: {}",

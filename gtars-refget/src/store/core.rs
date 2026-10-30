@@ -200,7 +200,6 @@ impl RefgetStore {
         sequence_name: &str,
     ) -> Result<SequenceRecord> {
         let collection_digest = String::from_utf8_lossy(collection_digest.as_ref());
-        let collection_digest = strip_sq_prefix(&collection_digest);
         if !self.inner.is_collection_loaded(collection_digest.as_bytes()) {
             self.inner.load_collection(collection_digest.as_ref())?;
         }

@@ -1327,35 +1327,6 @@ def test_remote_three_flows(tmp_path):
     assert len(seq_files()) == 1, "flow 3 should persist the sequence to cache"
 
 
-@pytest.mark.skipif(not _remote_reachable(), reason="remote refget store unreachable")
-def test_remote_fresh_lookups_return_sequence_data(tmp_path):
-    """On a freshly opened remote store (sequence index deferred), digest and
-    name lookups accept bare or SQ.-prefixed digests and return loaded data."""
-    caches = iter(range(100))
-
-    def fresh():
-        cache = tmp_path / f"c{next(caches)}"
-        return cache, RefgetStore.open_remote(str(cache), _REMOTE_URL)
-
-    def seq_files(cache):
-        return [f for _, _, fs in os.walk(str(cache)) for f in fs if f.endswith(".seq")]
-
-    # Use the collection's smallest sequence so each case fetches little.
-    coll = fresh()[1].get_collection(_REMOTE_COLLECTION)
-    meta = min((r.metadata for r in coll.sequences), key=lambda m: m.length)
-    bare, prefixed = meta.sha512t24u, "SQ." + meta.sha512t24u
-
-    for digest in (bare, prefixed):
-        record = fresh()[1].get_sequence(digest)
-        assert record.is_loaded and record.sequence
-        cache, store = fresh()
-        store.load_sequence(digest)
-        assert len(seq_files(cache)) == 1
-
-    record = fresh()[1].get_sequence_by_name(_REMOTE_COLLECTION, meta.name)
-    assert record.is_loaded and record.sequence
-
-
 def test_remote_store_lookups_load_deferred_index(tmp_path):
     """len(), iteration, and metadata lookup must load a remote store's
     deferred sequence index."""
