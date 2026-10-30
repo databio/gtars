@@ -4109,6 +4109,45 @@ fn test_open_remote_uses_cached_manifest_when_offline() {
     assert!(seq.is_loaded());
 }
 
+/// A cached remote store opened offline defers `sequences.rgsi`, so these
+/// lookups exercise the deferred-index path. Each call gets a fresh open.
+#[test]
+fn test_remote_lookups_accept_prefixed_and_md5_digests() {
+    let remote_url = "http://127.0.0.1:1/store";
+    let dir = tempdir().unwrap();
+    let cache_path = dir.path().join("cache");
+    let fasta_path = dir.path().join("test.fa");
+    fs::write(&fasta_path, ">chr1\nATGCATGC\n").unwrap();
+
+    let mut writer = RefgetStore::on_disk(&cache_path).unwrap();
+    let (collection, _) = writer
+        .add_sequence_collection_from_fasta(&fasta_path, FastaImportOptions::new())
+        .unwrap();
+    drop(writer);
+    fs::write(cache_path.join(".origin"), format!("{}\n", remote_url)).unwrap();
+
+    let (sha_digest, md5_digest) = calculate_test_digests(b"ATGCATGC");
+    let sq_digest = format!("SQ.{}", sha_digest);
+    let fresh = || {
+        let store = RefgetStore::open_remote(&cache_path, remote_url).unwrap();
+        assert!(!store.inner.sequence_index_loaded);
+        store
+    };
+
+    let mut store = fresh();
+    store.load_sequence(&sq_digest).unwrap();
+    assert!(store.inner.is_sequence_loaded(&sha_digest));
+
+    let mut store = fresh();
+    store.load_sequence(&md5_digest).unwrap();
+    assert!(store.inner.is_sequence_loaded(&sha_digest));
+
+    assert!(fresh().get_sequence(&sq_digest).unwrap().is_loaded());
+    assert!(fresh().get_sequence_by_name(&collection.digest, "chr1").unwrap().is_loaded());
+    let sq_collection = format!("SQ.{}", collection.digest);
+    assert!(fresh().get_sequence_by_name(&sq_collection, "chr1").unwrap().is_loaded());
+}
+
 #[test]
 fn test_fd_cache_eviction_matches_resident_encoded() {
     run_fd_cache_eviction_for_mode(false);

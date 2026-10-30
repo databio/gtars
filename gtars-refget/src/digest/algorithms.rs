@@ -43,6 +43,17 @@ pub fn md5<T: AsRef<[u8]>>(input: T) -> String {
     format!("{:x}", hasher.finalize())
 }
 
+/// Strip a case-insensitive "SQ." prefix from a digest, if present.
+///
+/// Lets callers pass digests in the GA4GH "SQ."-prefixed form they get from
+/// seqcol APIs; store keys are the bare digest.
+pub fn strip_sq_prefix(digest: &str) -> &str {
+    match digest.get(..3) {
+        Some(prefix) if digest.len() > 3 && prefix.eq_ignore_ascii_case("SQ.") => &digest[3..],
+        _ => digest,
+    }
+}
+
 /// Apply RFC-8785 JSON Canonicalization Scheme (JCS) to a JSON value
 ///
 /// This function canonicalizes a JSON value according to RFC-8785 by:

@@ -1132,13 +1132,7 @@ fn json_string_to_py(py: Python<'_>, json_str: &str) -> PyResult<Py<PyAny>> {
 /// This allows users to copy digests with the standard "SQ." prefix from
 /// APIs and documentation without the lookup failing silently.
 fn strip_sq_prefix(digest: &str) -> &str {
-    if digest.len() > 3 {
-        let prefix = &digest[..3];
-        if prefix.eq_ignore_ascii_case("SQ.") {
-            return &digest[3..];
-        }
-    }
-    digest
+    gtars_refget::digest::strip_sq_prefix(digest)
 }
 
 /// Lazy, O(1)-memory stream over a (sub)sequence's decoded ASCII bases (flow 2).
@@ -1979,8 +1973,10 @@ impl PyRefgetStore {
     /// After this, get_substring() works for this specific digest.
     ///
     /// Args:
-    ///     digest: The sequence's SHA-512/24u digest.
+    ///     digest: The sequence's SHA-512/24u digest (with or without "SQ."
+    ///         prefix) or MD5 digest.
     fn load_sequence(&mut self, digest: &str) -> PyResult<()> {
+        let digest = strip_sq_prefix(digest);
         self.inner.load_sequence(digest).map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
                 "Error loading sequence: {}",
@@ -2555,7 +2551,7 @@ impl PyRefgetStore {
     ///
     /// Args:
     ///     path (str or Path): Local directory containing the refget store (must have
-    ///         rgstore.json and sequences.rgsi files).
+    ///         rgstore.json; sequences.rgsi and collections.rgci are read if present).
     ///
     /// Returns:
     ///         RefgetStore: Store with metadata loaded, sequences lazy-loaded.
@@ -2581,10 +2577,11 @@ impl PyRefgetStore {
 
     /// Open a remote RefgetStore with local caching.
     ///
-    /// Fetches metadata (rgstore.json, sequences.rgsi) from a remote URL immediately.
-    /// Sequence data (.seq files) are downloaded on-demand when first accessed and
-    /// cached locally. This is ideal for working with large remote genomes where
-    /// you only need specific sequences.
+    /// Fetches the store manifest (rgstore.json) and collection index
+    /// (collections.rgci) immediately. The sequence index (sequences.rgsi) is
+    /// fetched on first sequence access, and sequence data (.seq files) are
+    /// fetched on demand and cached locally. This is ideal for working with large
+    /// remote genomes where you only need specific sequences.
     ///
     /// By default, persistence is enabled (sequences are cached to disk).
     /// Call `disable_persistence()` after loading to keep only in memory.

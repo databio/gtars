@@ -499,7 +499,8 @@ class RefgetStore:
         Loads only lightweight metadata and stubs. Collections and sequences
         remain as stubs until explicitly accessed with get_collection()/get_sequence().
 
-        Expects: rgstore.json, sequences.rgsi, collections.rgci, collections/*.rgsi
+        Requires rgstore.json. Reads sequences.rgsi and collections.rgci (or
+        collections/*.rgsi) if present.
 
         Args:
             path: Local directory containing the refget store.
@@ -523,8 +524,10 @@ class RefgetStore:
     ) -> "RefgetStore":
         """Open a remote RefgetStore with local caching.
 
-        Loads only lightweight metadata and stubs from the remote URL.
-        Data is fetched on-demand when get_collection()/get_sequence() is called.
+        Loads only lightweight metadata and stubs from the remote URL: the store
+        manifest (rgstore.json) and collection index (collections.rgci). The
+        sequence index (sequences.rgsi) is fetched on first sequence access, and
+        sequence data (.seq files) on demand, cached locally.
 
         By default, persistence is enabled (sequences are cached to disk).
         Call `disable_persistence()` after loading to keep only in memory.
