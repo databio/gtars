@@ -32,6 +32,13 @@ Stores built with 0.11.0 or earlier that contain `U` or `B` in proteins, or `U` 
 - Add `compute_vrs_ids_parallel` for multi-threaded VRS ID output
 - `load_cdot` and `load_cdot_gz` take an optional `genome_build`
 
+### Other components
+- `gtars-core` 0.5.7: detect gzip input by magic bytes instead of file extension
+- `gtars-vrs` 0.7.2: parallel VRS-to-TSV output with per-worker formatting
+- `gtars` 0.10.1 and `gtars-cli` 0.10.1: depend on `gtars-refget` 0.11; refget commands use the lazy-loading store reads
+- R `gtars` 0.10.1: report `StorageMode::Zstd`; `get_sequence_metadata` loads the deferred sequence index
+- `gtars-node` 0.8.1: `list_sequences` and `get_sequence_metadata` load the deferred sequence index
+
 ## [0.11.0] -- 2026-09-22
 
 ### RefgetStore (`gtars-refget`)
