@@ -316,10 +316,13 @@ class StorageMode(Enum):
     Variants:
         Raw: Store sequences as raw bytes (1 byte per base).
         Encoded: Store sequences with 2-bit encoding (4 bases per byte).
+        Zstd: Each record compressed whole with zstd. Reported for stores
+            built by other tools; cannot be set from Python.
     """
 
     Raw: int
     Encoded: int
+    Zstd: int
 
 class FhrMetadata:
     """FAIR Headers Reference genome metadata for a sequence collection.
@@ -358,7 +361,7 @@ class RefgetStore:
             None for in-memory stores.
         remote_url: Remote URL of the store if loaded remotely, None otherwise.
         quiet: Whether the store suppresses progress output.
-        storage_mode: Current storage mode (Raw or Encoded).
+        storage_mode: Current storage mode (Raw, Encoded, or Zstd).
 
     Note:
         **Boolean evaluation**: RefgetStore follows Python container semantics,
@@ -410,7 +413,7 @@ class RefgetStore:
 
     @property
     def storage_mode(self) -> StorageMode:
-        """Current storage mode (Raw or Encoded)."""
+        """Current storage mode (Raw, Encoded, or Zstd)."""
         ...
 
     @property
@@ -496,7 +499,8 @@ class RefgetStore:
         Loads only lightweight metadata and stubs. Collections and sequences
         remain as stubs until explicitly accessed with get_collection()/get_sequence().
 
-        Expects: rgstore.json, sequences.rgsi, collections.rgci, collections/*.rgsi
+        Requires rgstore.json. Reads sequences.rgsi and collections.rgci (or
+        collections/*.rgsi) if present.
 
         Args:
             path: Local directory containing the refget store.
@@ -520,8 +524,10 @@ class RefgetStore:
     ) -> "RefgetStore":
         """Open a remote RefgetStore with local caching.
 
-        Loads only lightweight metadata and stubs from the remote URL.
-        Data is fetched on-demand when get_collection()/get_sequence() is called.
+        Loads only lightweight metadata and stubs from the remote URL: the store
+        manifest (rgstore.json) and collection index (collections.rgci). The
+        sequence index (sequences.rgsi) is fetched on first sequence access, and
+        sequence data (.seq files) on demand, cached locally.
 
         By default, persistence is enabled (sequences are cached to disk).
         Call `disable_persistence()` after loading to keep only in memory.
@@ -560,6 +566,9 @@ class RefgetStore:
 
         Args:
             mode: The storage mode to switch to (StorageMode.Raw or StorageMode.Encoded).
+
+        Raises:
+            ValueError: If mode is StorageMode.Zstd, which cannot be set from Python.
 
         Example::
 
@@ -1453,6 +1462,32 @@ class RefgetStore:
         """
         ...
 
+    def compute_vrs_ids_parallel(
+        self,
+        collection_digest: str,
+        vcf_path: str,
+        output_path: str,
+        threads: Optional[int] = None,
+    ) -> int:
+        """Compute GA4GH VRS Allele identifiers in parallel and stream them to a TSV.
+
+        Makes the collection's sequences resident (2-bit encoded, decoded on
+        the fly), then runs worker threads with the GIL released. BGZF input
+        uses the block-parallel reader; plain or gzip input uses a single
+        reader. Rows are written in VCF order, identical to ``compute_vrs_ids``.
+
+        Args:
+            collection_digest: Digest of the sequence collection (genome assembly).
+            vcf_path: Path to a VCF file (plain, gzip, or BGZF).
+            output_path: Destination TSV. A header row
+                ``chrom pos ref alt vrs_id`` is written first.
+            threads: Worker threads. Defaults to available cores.
+
+        Returns:
+            Number of VRS results written.
+        """
+        ...
+
     def __len__(self) -> int: ...
     def __iter__(self) -> Iterator[SequenceMetadata]: ...
     def __str__(self) -> str: ...
@@ -1474,7 +1509,7 @@ class ReadonlyRefgetStore:
         cache_path: Local directory path where the store is located or cached.
             None for in-memory stores.
         remote_url: Remote URL of the store if loaded remotely, None otherwise.
-        storage_mode: Current storage mode (Raw or Encoded).
+        storage_mode: Current storage mode (Raw, Encoded, or Zstd).
 
     Example::
 
@@ -1489,7 +1524,7 @@ class ReadonlyRefgetStore:
 
     @property
     def storage_mode(self) -> StorageMode:
-        """Current storage mode (Raw or Encoded)."""
+        """Current storage mode (Raw, Encoded, or Zstd)."""
         ...
 
     # =========================================================================

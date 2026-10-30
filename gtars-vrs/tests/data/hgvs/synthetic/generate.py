@@ -345,26 +345,50 @@ def get_genomic_ref(genome: bytes, g_pos_1based: int, length: int) -> bytes:
 # cdot JSON emission
 # ---------------------------------------------------------------------------
 
+CDOT_BUILD = "synthetic"
+
+
 def emit_cdot(path: Path) -> None:
     """Write a minimal cdot 0.2.x-shaped JSON document.
 
+    Matches real cdot files: per-build coordinates live under
+    `transcripts.<id>.genome_builds.<build>`, strand is "+"/"-", and each
+    exon is `[alt_start, alt_end, exon_ordinal, tx_start, tx_end, gap]`.
+
     Our internal `Tx` table stores exons and CDS as 1-based inclusive
-    (s, e) tuples. cdot / gtars-reftx use 0-based half-open intervals,
-    so we convert here: 1-based inclusive [s, e] -> 0-based half-open
-    [s-1, e].
+    (s, e) tuples. cdot genomic coords are 0-based half-open, so we convert
+    here: 1-based inclusive [s, e] -> 0-based half-open [s-1, e]. cdot
+    transcript coords (tx_start, tx_end) are 1-based inclusive.
     """
     transcripts = {}
     for tx in TRANSCRIPTS:
+        # Exon ordinals and transcript coords run 5'->3' along the transcript.
+        tx_order = tx.exons if tx.strand > 0 else list(reversed(tx.exons))
+        tx_coords = {}
+        pos = 1
+        for ordinal, (s, e) in enumerate(tx_order):
+            length = e - s + 1
+            tx_coords[(s, e)] = (ordinal, pos, pos + length - 1)
+            pos += length
+        exons = [[s - 1, e, *tx_coords[(s, e)], None] for (s, e) in tx.exons]
+        build = {
+            "contig": CHROM_NAME,
+            "strand": "+" if tx.strand > 0 else "-",
+            "exons": exons,
+        }
+        if tx.cds:
+            build["cds_start"] = tx.cds[0] - 1
+            build["cds_end"] = tx.cds[1]
         transcripts[tx.accession] = {
             "id": tx.accession,
             "gene_name": tx.accession.replace("NM_", "GENE_").replace("NR_", "GENE_"),
-            "contig": CHROM_NAME,
-            "strand": tx.strand,  # cdot uses +1/-1 ints (per gtars-reftx loader)
-            "cds_start": (tx.cds[0] - 1) if tx.cds else None,
-            "cds_end": tx.cds[1] if tx.cds else None,
-            "exons": [[s - 1, e] for (s, e) in tx.exons],
+            "genome_builds": {CDOT_BUILD: build},
         }
-    doc = {"transcripts": transcripts}
+    doc = {
+        "cdot_version": "0.2.x-synthetic",
+        "genome_builds": [CDOT_BUILD],
+        "transcripts": transcripts,
+    }
     path.write_text(json.dumps(doc, indent=2, sort_keys=True))
 
 

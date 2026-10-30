@@ -19,6 +19,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Stores built with 0.11.0 or earlier that contain `U` or `B` in proteins, or `U` in nucleotide sequences, must be re-imported. Run `gtars refget verify <store>` to list affected sequences.
 
+## [0.11.1] -- 2026-10-29
+
+### RefgetStore (`gtars-refget`)
+- Fix `get_sequence_by_name` scanning every record of a collection on each call, which made BED extraction quadratic on large collections (regression in 0.10.0)
+- `load_sequence` accepts `SQ.`-prefixed and MD5 digests
+- `ingest_cdot` reads the real cdot JSON layout and takes a genome build argument (signature change)
+- Correct the `open_remote` and `open_local` docs about which files they read
+
+### Python bindings (`gtars` PyPI package)
+- Fix the build: handle `StorageMode::Zstd` (0.11.0 did not compile). Zstd stores can be read; `set_encoding_mode` rejects Zstd.
+- Add `compute_vrs_ids_parallel` for multi-threaded VRS ID output
+- `load_cdot` and `load_cdot_gz` take an optional `genome_build`
+
+### Other components
+- `gtars-core` 0.5.7: detect gzip input by magic bytes instead of file extension
+- `gtars-vrs` 0.7.2: parallel VRS-to-TSV output with per-worker formatting
+- `gtars` 0.10.1 and `gtars-cli` 0.10.1: depend on `gtars-refget` 0.11; refget commands use the lazy-loading store reads
+- R `gtars` 0.10.1: report `StorageMode::Zstd`; `get_sequence_metadata` loads the deferred sequence index
+- `gtars-node` 0.8.1: `list_sequences` and `get_sequence_metadata` load the deferred sequence index
+
 ## [0.11.0] -- 2026-09-22
 
 ### RefgetStore (`gtars-refget`)

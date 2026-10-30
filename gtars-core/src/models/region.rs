@@ -110,3 +110,30 @@ impl Display for Region {
 //
 //     }
 // }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rstest::rstest;
+
+    fn region(start: u32, end: u32) -> Region {
+        Region {
+            chr: "chr1".to_string(),
+            start,
+            end,
+            rest: None,
+        }
+    }
+
+    #[rstest]
+    #[case::overlap((100, 200), (150, 250), 0)]
+    #[case::contained((100, 300), (150, 200), 0)]
+    // half-open touching intervals are distance 0
+    #[case::adjacent((100, 200), (200, 300), 0)]
+    #[case::gap((100, 200), (250, 300), 50)]
+    fn test_distance_to(#[case] a: (u32, u32), #[case] b: (u32, u32), #[case] expected: i64) {
+        let (a, b) = (region(a.0, a.1), region(b.0, b.1));
+        assert_eq!(a.distance_to(&b), expected);
+        assert_eq!(b.distance_to(&a), expected);
+    }
+}

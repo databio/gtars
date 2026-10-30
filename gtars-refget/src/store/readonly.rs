@@ -1886,14 +1886,22 @@ impl ReadonlyRefgetStore {
             ));
         }
 
-        let digest_key = self.name_lookup.get(&collection_key)
-            .and_then(|name_map| name_map.get(sequence_name).cloned())
+        let (idx, _, digest_key) = self.name_lookup.get(&collection_key)
+            .and_then(|name_map| name_map.get_full(sequence_name))
             .ok_or_else(|| anyhow!("Sequence '{}' not found in collection", sequence_name))?;
+        let digest_key = *digest_key;
 
-        let coll_record = self
-            .collection_sequence_metadata(&collection_key)?
-            .iter()
-            .find(|r| r.metadata().sha512t24u.to_key() == digest_key)
+        // The name's position in name_lookup is the record's index; scan only
+        // if they disagree (e.g. duplicate names), since a per-call scan is
+        // quadratic over a BED file.
+        let records = self.collection_sequence_metadata(&collection_key)?;
+        let matches = |r: &&SequenceRecord| {
+            r.metadata().name == sequence_name && r.metadata().sha512t24u.to_key() == digest_key
+        };
+        let coll_record = records
+            .get(idx)
+            .filter(matches)
+            .or_else(|| records.iter().find(matches))
             .ok_or_else(|| anyhow!("Sequence '{}' not found in collection", sequence_name))?;
 
         let mut meta = coll_record.metadata().clone();
