@@ -293,6 +293,10 @@ fn build_collection_full(
                         encoder.finalize()
                     }
                     StorageMode::Raw => raw_bytes,
+                    // Zstd stores compress the whole ASCII body at the store's
+                    // write seam (add_sequence_record[_deferred_write]); pass
+                    // ASCII through here unpacked.
+                    StorageMode::Zstd => raw_bytes,
                 };
 
                 let metadata = SequenceMetadata {
@@ -400,6 +404,9 @@ fn build_collection_full(
                         encoder.finalize()
                     }
                     StorageMode::Raw => digested.raw_bytes,
+                    // See the Zstd note above: pass ASCII through; the store
+                    // write seam owns compression.
+                    StorageMode::Zstd => digested.raw_bytes,
                 };
                 ReadySequence {
                     metadata: digested.metadata,
@@ -570,6 +577,9 @@ fn build_collection_from_cached_metadata(
                 encoder.finalize()
             }
             StorageMode::Raw => unit.raw_bytes,
+            // See the Zstd note above: pass ASCII through; the store write seam
+            // owns compression.
+            StorageMode::Zstd => unit.raw_bytes,
         };
         let ready = ReadySequence {
             metadata: unit.metadata,

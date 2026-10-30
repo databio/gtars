@@ -93,6 +93,10 @@ impl SequenceMetadataExt for SequenceMetadata {
                 let total_bits = self.length * bits_per_symbol;
                 total_bits.div_ceil(8)
             }
+            // Zstd compressed size is data-dependent and not derivable from
+            // metadata; report the logical (ASCII) length as an upper-bound
+            // estimate. Callers needing the true on-disk size must `du` the files.
+            crate::store::StorageMode::Zstd => self.length,
         }
     }
 }
