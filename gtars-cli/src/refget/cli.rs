@@ -4,6 +4,7 @@ pub const REFGET_CMD: &str = "refget";
 pub const REFGET_BUILD: &str = "build";
 pub const REFGET_EXPORT: &str = "export";
 pub const REFGET_LOCK_STATUS: &str = "lock-status";
+pub const REFGET_VERIFY: &str = "verify";
 
 pub fn create_refget_cli() -> Command {
     Command::new(REFGET_CMD)
@@ -128,6 +129,56 @@ pub fn create_refget_cli() -> Command {
                         .value_parser(clap::value_parser!(usize))
                         .default_value("80")
                         .help("Sequence line width. 0 = unwrapped, one sequence per line (what GGCAT/SSHash expect)"),
+                ),
+        )
+        .subcommand(
+            Command::new(REFGET_VERIFY)
+                .about("Verify that stored sequences still hash to the digests they are stored under.")
+                .arg(
+                    Arg::new("store")
+                        .required(true)
+                        .help("Path to the RefgetStore directory"),
+                )
+                .arg(
+                    Arg::new("collection")
+                        .long("collection")
+                        .short('c')
+                        .conflicts_with("digest")
+                        .help("Verify only this collection: a digest, or NAMESPACE:ALIAS as given to `build --collection-alias`."),
+                )
+                .arg(
+                    Arg::new("digest")
+                        .long("digest")
+                        .short('d')
+                        .num_args(1..)
+                        .conflicts_with("collection")
+                        .help("Verify only these sequence digest(s) (sha512t24u or md5, 'SQ.' prefix optional)"),
+                )
+                .arg(
+                    Arg::new("jobs")
+                        .long("jobs")
+                        .short('j')
+                        .value_parser(clap::value_parser!(usize))
+                        .default_value("0")
+                        .help("Worker threads (0 = auto, 1 = serial)"),
+                )
+                .arg(
+                    Arg::new("no_md5")
+                        .long("no-md5")
+                        .action(ArgAction::SetTrue)
+                        .help("Skip recomputing and comparing md5 (sha512t24u is always checked)"),
+                )
+                .arg(
+                    Arg::new("json")
+                        .long("json")
+                        .action(ArgAction::SetTrue)
+                        .help("Write the full verification report as JSON instead of a TSV failure listing"),
+                )
+                .arg(
+                    Arg::new("output")
+                        .long("output")
+                        .short('o')
+                        .help("Write the report to this file instead of stdout"),
                 ),
         )
 }

@@ -642,6 +642,13 @@ iter_sequences_store <- function(store_ptr) .Call(wrap__iter_sequences_store, st
 #' @param store_ptr External pointer to RefgetStore
 stats_store <- function(store_ptr) .Call(wrap__stats_store, store_ptr)
 
+#' Verify sequences against their stored digests.
+#' @param store_ptr External pointer to RefgetStore
+#' @param digests Optional character vector of sequence digests to verify (NULL = all)
+#' @param jobs Worker threads (0 = auto)
+#' @param check_md5 Also recompute and compare md5 when the store has one recorded
+verify_store <- function(store_ptr, digests, jobs, check_md5) .Call(wrap__verify_store, store_ptr, digests, jobs, check_md5)
+
 #' Get level 1 representation (attribute digests) for a collection
 #' @param store_ptr External pointer to RefgetStore
 #' @param digest Collection digest

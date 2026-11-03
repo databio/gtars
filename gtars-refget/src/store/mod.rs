@@ -98,6 +98,7 @@ mod import;
 mod persistence;
 #[cfg(feature = "filesystem")]
 mod export;
+mod verify;
 
 // The bulk of the store tests import FASTA via the filesystem-only API.
 #[cfg(all(test, feature = "filesystem"))]
@@ -150,12 +151,12 @@ mod nofs_tests {
 
         store.disable_encoding();
         assert_eq!(store.mode, StorageMode::Raw);
-        store.enable_encoding();
+        store.enable_encoding().unwrap();
         assert_eq!(store.mode, StorageMode::Encoded);
 
-        store.set_encoding_mode(StorageMode::Raw);
+        store.set_encoding_mode(StorageMode::Raw).unwrap();
         assert_eq!(store.mode, StorageMode::Raw);
-        store.set_encoding_mode(StorageMode::Encoded);
+        store.set_encoding_mode(StorageMode::Encoded).unwrap();
         assert_eq!(store.mode, StorageMode::Encoded);
     }
 }
@@ -170,6 +171,9 @@ pub use self::fhr_metadata::{
     FhrMetadata, FhrAuthor, FhrIdentifier, FhrTaxon, FhrVitalStats,
     // Disk I/O helpers used by persistence and externally
     load_sidecars, write_sidecars, write_sidecar, remove_sidecar, sidecar_path, load_from_json,
+};
+pub use self::verify::{
+    AlphabetVerifyCounts, VerifyFailure, VerifyFailureKind, VerifyOptions, VerifyReport,
 };
 
 use serde::{Deserialize, Serialize};
