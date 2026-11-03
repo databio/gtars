@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.2] -- 2026-11-03
+
+This release is the `gtars` Python package only. The `gtars-refget` crate changes below change its Rust API, so the crate ships separately as 0.12.0.
+
 ### RefgetStore (`gtars-refget`)
 - Fix residues that did not round-trip through `StorageMode::Encoded`:
   - `D` and `H` in the IUPAC alphabet decoded as `H` and `V`. Fixed in the decoder, so existing stores read correctly without re-importing.
@@ -17,7 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add `verify` to check that every stored sequence still hashes to its digest (Rust, CLI `gtars refget verify`, Python `store.verify()`, R `verify_store()`)
 - Faster alphabet detection and encoding
 
-Stores built with 0.11.0 or earlier that contain `U` or `B` in proteins, or `U` in nucleotide sequences, must be re-imported. Run `gtars refget verify <store>` to list affected sequences.
+### Python bindings (`gtars` PyPI package)
+- Built on the fixes above, so FASTA exported from a store keeps `D`, `H` and `V`
+- Add `RefgetStore.verify()`; `set_encoding_mode` raises `ValueError` when a sequence cannot be encoded
+
+Stores built with 0.11.1 or earlier that contain `U` or `B` in proteins, or `U` in nucleotide sequences, must be re-imported. Run `store.verify()` to list affected sequences.
 
 ## [0.11.1] -- 2026-10-29
 

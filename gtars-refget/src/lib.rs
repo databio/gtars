@@ -46,6 +46,7 @@ pub use digest::{
     DNA_2BIT_ALPHABET,
     DNA_3BIT_ALPHABET,
     DNA_IUPAC_ALPHABET,
+    EncodeError,
     FaiMetadata,
     // Streaming
     FastaStreamHasher,
