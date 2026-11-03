@@ -23,7 +23,7 @@ pub mod streaming_decoder;
 pub mod types;
 
 // Re-export commonly used items at the module level
-pub use algorithms::{canonicalize_json, md5, sha512t24u, SequenceHasher};
+pub use algorithms::{canonicalize_json, md5, sha512t24u, strip_sq_prefix, SequenceHasher};
 pub use alphabet::{
     ASCII_ALPHABET, Alphabet, AlphabetGuesser, AlphabetType, DNA_2BIT_ALPHABET, DNA_3BIT_ALPHABET,
     ALPHABET_ORDER, DNA_IUPAC_ALPHABET, INVALID_CODE, PROTEIN_ALPHABET, guess_alphabet,

@@ -14,7 +14,7 @@ use gtars_refget::digest::{
     CollectionNameMatch, FaiMetadata, SeqColDigestLvl1, SequenceCollection,
     SequenceCollectionMetadata, SequenceMetadata, SequenceNameMatch, SequenceRecord,
 };
-use gtars_refget::digest::{md5, sha512t24u, AlphabetType};
+use gtars_refget::digest::{md5, sha512t24u, strip_sq_prefix, AlphabetType};
 use gtars_refget::fasta::FaiRecord;
 use gtars_refget::store::{FastaImportOptions, ImportReport, ReadonlyRefgetStore, RefgetStore, StorageMode, SyncStrategy, VerifyFailure, VerifyOptions, VerifyReport};
 use gtars_refget::{expand_fasta_inputs, FastaInputs};
@@ -1143,11 +1143,14 @@ impl From<SequenceCollection> for PySequenceCollection {
 /// Variants:
 ///     Raw: Store sequences as raw bytes (1 byte per base).
 ///     Encoded: Store sequences with 2-bit encoding (4 bases per byte).
+///     Zstd: Each record compressed whole with zstd. Reported for stores
+///         built by other tools; cannot be set from Python.
 #[pyclass(name = "StorageMode", module = "gtars.refget")]
 #[derive(Clone)]
 pub enum PyStorageMode {
     Raw,
     Encoded,
+    Zstd,
 }
 
 impl From<StorageMode> for PyStorageMode {
@@ -1155,6 +1158,7 @@ impl From<StorageMode> for PyStorageMode {
         match mode {
             StorageMode::Raw => PyStorageMode::Raw,
             StorageMode::Encoded => PyStorageMode::Encoded,
+            StorageMode::Zstd => PyStorageMode::Zstd,
         }
     }
 }
@@ -1164,6 +1168,7 @@ impl From<PyStorageMode> for StorageMode {
         match mode {
             PyStorageMode::Raw => StorageMode::Raw,
             PyStorageMode::Encoded => StorageMode::Encoded,
+            PyStorageMode::Zstd => StorageMode::Zstd,
         }
     }
 }
@@ -1297,20 +1302,6 @@ fn json_string_to_py(py: Python<'_>, json_str: &str) -> PyResult<Py<PyAny>> {
     Ok(result.into())
 }
 
-/// Strip "SQ." prefix from digest if present (case-insensitive).
-///
-/// This allows users to copy digests with the standard "SQ." prefix from
-/// APIs and documentation without the lookup failing silently.
-fn strip_sq_prefix(digest: &str) -> &str {
-    if digest.len() > 3 {
-        let prefix = &digest[..3];
-        if prefix.eq_ignore_ascii_case("SQ.") {
-            return &digest[3..];
-        }
-    }
-    digest
-}
-
 /// Lazy, O(1)-memory stream over a (sub)sequence's decoded ASCII bases (flow 2).
 ///
 /// Produced by `RefgetStore.stream_sequence()` / `ReadonlyRefgetStore.stream_sequence()`.
@@ -1397,7 +1388,7 @@ impl PySequenceStream {
 ///         None for in-memory stores.
 ///     remote_url (str | None): Remote URL of the store if loaded remotely, None otherwise.
 ///     quiet (bool): Whether the store suppresses progress output.
-///     storage_mode (StorageMode): Current storage mode (Raw or Encoded).
+///     storage_mode (StorageMode): Current storage mode (Raw, Encoded, or Zstd).
 ///
 /// Note:
 ///     Boolean evaluation follows Python container semantics: an empty store is
@@ -1530,16 +1521,25 @@ impl PyRefgetStore {
     /// Args:
     ///     mode: The storage mode to switch to (StorageMode.Raw or StorageMode.Encoded)
     ///
+    /// Raises:
+    ///     ValueError: If mode is StorageMode.Zstd, which cannot be set from Python.
+    ///
     /// Example:
     ///     >>> from gtars.refget import RefgetStore, StorageMode
     ///     >>> store = RefgetStore.in_memory()
     ///     >>> store.set_encoding_mode(StorageMode.Raw)
     ///
     /// Raises:
-    ///     ValueError: If a sequence cannot be encoded with its stored
+    ///     ValueError: If mode is StorageMode.Zstd, which cannot be set from
+    ///         Python, or if a sequence cannot be encoded with its stored
     ///         alphabet. The store's alphabet metadata is wrong and the store
     ///         must be re-imported. The store is left unchanged.
     fn set_encoding_mode(&mut self, mode: PyStorageMode) -> PyResult<()> {
+        if matches!(mode, PyStorageMode::Zstd) {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "StorageMode.Zstd cannot be set from Python",
+            ));
+        }
         self.inner
             .set_encoding_mode(mode.into())
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("{e:#}")))
@@ -2087,7 +2087,7 @@ impl PyRefgetStore {
         self.inner.remote_source().map(|s| s.to_string())
     }
 
-    /// Current storage mode (Raw or Encoded).
+    /// Current storage mode (Raw, Encoded, or Zstd).
     #[getter]
     fn storage_mode(&self) -> PyStorageMode {
         self.inner.storage_mode().into()
@@ -2153,7 +2153,8 @@ impl PyRefgetStore {
     /// After this, get_substring() works for this specific digest.
     ///
     /// Args:
-    ///     digest: The sequence's SHA-512/24u digest.
+    ///     digest: The sequence's SHA-512/24u digest (with or without "SQ."
+    ///         prefix) or MD5 digest.
     fn load_sequence(&mut self, digest: &str) -> PyResult<()> {
         self.inner.load_sequence(digest).map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
@@ -2729,7 +2730,7 @@ impl PyRefgetStore {
     ///
     /// Args:
     ///     path (str or Path): Local directory containing the refget store (must have
-    ///         rgstore.json and sequences.rgsi files).
+    ///         rgstore.json; sequences.rgsi and collections.rgci are read if present).
     ///
     /// Returns:
     ///         RefgetStore: Store with metadata loaded, sequences lazy-loaded.
@@ -2755,10 +2756,11 @@ impl PyRefgetStore {
 
     /// Open a remote RefgetStore with local caching.
     ///
-    /// Fetches metadata (rgstore.json, sequences.rgsi) from a remote URL immediately.
-    /// Sequence data (.seq files) are downloaded on-demand when first accessed and
-    /// cached locally. This is ideal for working with large remote genomes where
-    /// you only need specific sequences.
+    /// Fetches the store manifest (rgstore.json) and collection index
+    /// (collections.rgci) immediately. The sequence index (sequences.rgsi) is
+    /// fetched on first sequence access, and sequence data (.seq files) are
+    /// fetched on demand and cached locally. This is ideal for working with large
+    /// remote genomes where you only need specific sequences.
     ///
     /// By default, persistence is enabled (sequences are cached to disk).
     /// Call `disable_persistence()` after loading to keep only in memory.
@@ -4000,7 +4002,7 @@ impl PyReadonlyRefgetStore {
         self.store.remote_source().map(|s| s.to_string())
     }
 
-    /// Current storage mode (Raw or Encoded).
+    /// Current storage mode (Raw, Encoded, or Zstd).
     #[getter]
     fn storage_mode(&self) -> PyStorageMode {
         self.store.storage_mode().into()

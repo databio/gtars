@@ -9,7 +9,7 @@ use std::path::Path;
 use anyhow::Result;
 use std::fs::create_dir_all;
 
-use crate::digest::{SequenceCollection, SequenceRecord};
+use crate::digest::{SequenceCollection, SequenceRecord, strip_sq_prefix};
 // Only the filesystem FASTA-import wrappers use this return type.
 #[cfg(feature = "filesystem")]
 use crate::digest::SequenceCollectionMetadata;
@@ -123,10 +123,15 @@ impl RefgetStore {
         self.inner.load_collection(digest)
     }
 
-    /// Load a single sequence by digest.
+    /// Load a single sequence by digest. Accepts "SQ."-prefixed and MD5
+    /// digests; the disk loader needs the canonical SHA-512/24u key.
     pub fn load_sequence(&mut self, digest: &str) -> Result<()> {
         self.inner.ensure_sequence_index_loaded()?;
-        self.inner.load_sequence(digest)
+        let canonical_digest = self
+            .inner
+            .get_sequence(strip_sq_prefix(digest))
+            .map(|record| record.metadata().sha512t24u.clone())?;
+        self.inner.load_sequence(&canonical_digest)
     }
 
     // =====================================================================
@@ -176,9 +181,10 @@ impl RefgetStore {
     /// canonical SHA-512/24u key, so resolve before loading.
     pub fn get_sequence<K: AsRef<[u8]>>(&mut self, digest: K) -> Result<SequenceRecord> {
         self.inner.ensure_sequence_index_loaded()?;
+        let digest = String::from_utf8_lossy(digest.as_ref());
         let canonical_digest = self
             .inner
-            .get_sequence(digest.as_ref())
+            .get_sequence(strip_sq_prefix(&digest))
             .map(|record| record.metadata().sha512t24u.clone())?;
         if !self.inner.is_sequence_loaded(&canonical_digest) {
             self.inner.load_sequence(&canonical_digest)?;

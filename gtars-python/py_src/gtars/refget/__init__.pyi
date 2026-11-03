@@ -387,10 +387,13 @@ class StorageMode(Enum):
     Variants:
         Raw: Store sequences as raw bytes (1 byte per base).
         Encoded: Store sequences with 2-bit encoding (4 bases per byte).
+        Zstd: Each record compressed whole with zstd. Reported for stores
+            built by other tools; cannot be set from Python.
     """
 
     Raw: int
     Encoded: int
+    Zstd: int
 
 class FhrMetadata:
     """FAIR Headers Reference genome metadata for a sequence collection.
@@ -429,7 +432,7 @@ class RefgetStore:
             None for in-memory stores.
         remote_url: Remote URL of the store if loaded remotely, None otherwise.
         quiet: Whether the store suppresses progress output.
-        storage_mode: Current storage mode (Raw or Encoded).
+        storage_mode: Current storage mode (Raw, Encoded, or Zstd).
 
     Note:
         **Boolean evaluation**: RefgetStore follows Python container semantics,
@@ -481,7 +484,7 @@ class RefgetStore:
 
     @property
     def storage_mode(self) -> StorageMode:
-        """Current storage mode (Raw or Encoded)."""
+        """Current storage mode (Raw, Encoded, or Zstd)."""
         ...
 
     @property
@@ -567,7 +570,8 @@ class RefgetStore:
         Loads only lightweight metadata and stubs. Collections and sequences
         remain as stubs until explicitly accessed with get_collection()/get_sequence().
 
-        Expects: rgstore.json, sequences.rgsi, collections.rgci, collections/*.rgsi
+        Requires rgstore.json. Reads sequences.rgsi and collections.rgci (or
+        collections/*.rgsi) if present.
 
         Args:
             path: Local directory containing the refget store.
@@ -591,8 +595,10 @@ class RefgetStore:
     ) -> "RefgetStore":
         """Open a remote RefgetStore with local caching.
 
-        Loads only lightweight metadata and stubs from the remote URL.
-        Data is fetched on-demand when get_collection()/get_sequence() is called.
+        Loads only lightweight metadata and stubs from the remote URL: the store
+        manifest (rgstore.json) and collection index (collections.rgci). The
+        sequence index (sequences.rgsi) is fetched on first sequence access, and
+        sequence data (.seq files) on demand, cached locally.
 
         By default, persistence is enabled (sequences are cached to disk).
         Call `disable_persistence()` after loading to keep only in memory.
@@ -636,6 +642,7 @@ class RefgetStore:
             ValueError: If a sequence cannot be encoded with its stored
                 alphabet. The store's alphabet metadata is wrong and the store
                 must be re-imported. The store is left unchanged.
+            ValueError: If mode is StorageMode.Zstd, which cannot be set from Python.
 
         Example::
 
@@ -1624,7 +1631,7 @@ class ReadonlyRefgetStore:
         cache_path: Local directory path where the store is located or cached.
             None for in-memory stores.
         remote_url: Remote URL of the store if loaded remotely, None otherwise.
-        storage_mode: Current storage mode (Raw or Encoded).
+        storage_mode: Current storage mode (Raw, Encoded, or Zstd).
 
     Example::
 
@@ -1639,7 +1646,7 @@ class ReadonlyRefgetStore:
 
     @property
     def storage_mode(self) -> StorageMode:
-        """Current storage mode (Raw or Encoded)."""
+        """Current storage mode (Raw, Encoded, or Zstd)."""
         ...
 
     # =========================================================================
