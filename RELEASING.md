@@ -34,14 +34,16 @@ differs (`v` vs `c`). Keep the `-v`.
 
 ## How to cut a release
 
-1. Bump the component's version (e.g. `gtars-r/DESCRIPTION` + `gtars-r/src/rust/Cargo.toml`,
+1. Review open PRs (`gh pr list`). Merge any fix that belongs in this release
+   first, or note why it can wait.
+2. Bump the component's version (e.g. `gtars-r/DESCRIPTION` + `gtars-r/src/rust/Cargo.toml`,
    or the crate's `Cargo.toml`). Merge to `master`.
-2. Add an entry to the changelog, `docs/changelog.md` (published to the docs site).
+3. Add an entry to the changelog, `docs/changelog.md` (published to the docs site).
    Follow the existing format: `## [version] -- YYYY-MM-DD`, then short bullets
    grouped by component. Keep it concise.
-3. Create the GitHub Release (e.g. with `releasegh`), naming the tag
+4. Create the GitHub Release (e.g. with `releasegh`), naming the tag
    `<package>-v<version>`. Use the changelog entry as the release notes.
-4. Only that component's job runs; everything else is skipped.
+5. Only that component's job runs; everything else is skipped.
 
 ## Bindings vs crates
 
