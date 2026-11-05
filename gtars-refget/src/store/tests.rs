@@ -5132,6 +5132,285 @@ fn test_conflicting_alias_errors_unless_forced() {
     );
 }
 
+// =========================================================================
+// Alias clashes inside one load
+//
+// One namespace maps each alias to one digest. A single load (one TSV, or one
+// FASTA's header tags) that maps an alias to two digests used to let the last
+// row win silently, which is how every genome's `chr1` collapsed onto one.
+// =========================================================================
+
+/// Two distinct, real sequence digests.
+fn digests_ab() -> (String, String) {
+    (sha512t24u(b"AAAACCCC"), sha512t24u(b"GGGGTTTT"))
+}
+
+/// Write an alias TSV (`alias\tdigest` per row) and return its path.
+fn write_alias_tsv(dir: &std::path::Path, name: &str, rows: &[(&str, &str)]) -> String {
+    let path = dir.join(name);
+    let body: String = rows.iter().map(|(a, d)| format!("{}\t{}\n", a, d)).collect();
+    fs::write(&path, body).unwrap();
+    path.to_str().unwrap().to_string()
+}
+
+fn has_pending_alias_in(store: &RefgetStore, namespace: &str) -> bool {
+    store
+        .pending
+        .lock()
+        .unwrap()
+        .aliases
+        .iter()
+        .any(|(_, ns, _)| ns == namespace)
+}
+
+#[test]
+fn test_alias_load_intra_file_clash_errors() {
+    let dir = tempdir().unwrap();
+    let (a, b) = digests_ab();
+    // Two clashing aliases, so the count is reported as plural.
+    let tsv = write_alias_tsv(
+        dir.path(),
+        "ucsc.tsv",
+        &[("chr1", &a), ("chr2", &a), ("chr1", &b), ("chr2", &b)],
+    );
+
+    // In memory.
+    let mut store = RefgetStore::in_memory();
+    let err = store
+        .load_sequence_aliases("ucsc", &tsv)
+        .expect_err("one alias mapped to two digests must error");
+    let msg = err.to_string();
+    assert!(msg.starts_with("alias conflict"), "got: {}", msg);
+    assert!(msg.contains("'chr1'"), "error should name the alias: {}", msg);
+    assert!(msg.contains(&a) && msg.contains(&b), "error should name both digests: {}", msg);
+    assert!(msg.contains("line 1") && msg.contains("line 3"), "error should give line numbers: {}", msg);
+    assert!(msg.contains("2 aliases in this file clash"), "error should give the count: {}", msg);
+    assert!(store.list_sequence_aliases("ucsc").is_none(), "nothing may be loaded");
+    assert!(!has_pending_alias_in(&store, "ucsc"), "nothing may be pending");
+
+    // On disk: nothing is written either.
+    let store_path = dir.path().join("store");
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    store
+        .load_sequence_aliases("ucsc", &tsv)
+        .expect_err("one alias mapped to two digests must error on disk too");
+    assert!(store.list_sequence_aliases("ucsc").is_none());
+    assert!(!store_path.join("aliases/sequences/ucsc.tsv").exists());
+}
+
+#[test]
+fn test_alias_load_intra_file_clash_ignores_force() {
+    let dir = tempdir().unwrap();
+    let (a, b) = digests_ab();
+    let tsv = write_alias_tsv(dir.path(), "ucsc.tsv", &[("chr1", &a), ("chr1", &b)]);
+
+    let mut store = RefgetStore::in_memory();
+    store.set_force_alias(true);
+    let err = store
+        .load_sequence_aliases("ucsc", &tsv)
+        .expect_err("force-alias must not let the last row win");
+    assert!(err.to_string().contains("1 alias in this file clashes"), "got: {}", err);
+    assert!(store.list_sequence_aliases("ucsc").is_none());
+}
+
+#[test]
+fn test_alias_load_exact_duplicate_rows_ok() {
+    let dir = tempdir().unwrap();
+    let (a, _) = digests_ab();
+    let tsv = write_alias_tsv(dir.path(), "ncbi.tsv", &[("NC_000001.11", &a), ("NC_000001.11", &a)]);
+
+    let mut store = RefgetStore::in_memory();
+    assert_eq!(store.load_sequence_aliases("ncbi", &tsv).unwrap(), 1);
+    assert_eq!(store.aliases.resolve_sequence("ncbi", "NC_000001.11"), Some(a.to_key()));
+
+    // Re-loading the same file is idempotent.
+    assert_eq!(store.load_sequence_aliases("ncbi", &tsv).unwrap(), 1);
+}
+
+#[test]
+fn test_alias_load_returns_distinct_count() {
+    let dir = tempdir().unwrap();
+    let (a, b) = digests_ab();
+    let tsv = write_alias_tsv(
+        dir.path(),
+        "ncbi.tsv",
+        &[("NC_000001.11", &a), ("NC_000002.12", &b), ("NC_000001.11", &a)],
+    );
+
+    let mut store = RefgetStore::in_memory();
+    assert_eq!(store.load_sequence_aliases("ncbi", &tsv).unwrap(), 2);
+    assert_eq!(store.list_sequence_aliases("ncbi").unwrap().len(), 2);
+}
+
+#[test]
+fn test_alias_load_conflicts_with_existing_unless_forced() {
+    let dir = tempdir().unwrap();
+    let (a, b) = digests_ab();
+    let tsv = write_alias_tsv(dir.path(), "ns.tsv", &[("y", &a), ("x", &b)]);
+
+    // In-memory store: there is no commit, so this used to have no check at all.
+    let mut store = RefgetStore::in_memory();
+    store.add_sequence_alias("ns", "x", &a).unwrap();
+
+    let err = store
+        .load_sequence_aliases("ns", &tsv)
+        .expect_err("re-pointing an existing alias must error by default");
+    assert!(err.to_string().starts_with("alias conflict"), "got: {}", err);
+    assert_eq!(store.aliases.resolve_sequence("ns", "x"), Some(a.to_key()));
+    assert!(
+        store.aliases.resolve_sequence("ns", "y").is_none(),
+        "a refused load must not apply its other rows"
+    );
+
+    store.set_force_alias(true);
+    assert_eq!(store.load_sequence_aliases("ns", &tsv).unwrap(), 2);
+    assert_eq!(store.aliases.resolve_sequence("ns", "x"), Some(b.to_key()));
+    assert_eq!(store.aliases.resolve_sequence("ns", "y"), Some(a.to_key()));
+}
+
+#[test]
+fn test_add_alias_same_digest_is_noop() {
+    let (a, _) = digests_ab();
+    let mut store = RefgetStore::in_memory();
+    store.add_sequence_alias("ncbi", "NC_000001.11", &a).unwrap();
+    store.add_sequence_alias("ncbi", "NC_000001.11", &a).unwrap();
+    assert_eq!(store.list_sequence_aliases("ncbi").unwrap().len(), 1);
+    assert_eq!(store.aliases.resolve_sequence("ncbi", "NC_000001.11"), Some(a.to_key()));
+}
+
+#[test]
+fn test_add_alias_conflict_in_memory_store() {
+    let (a, b) = digests_ab();
+    let mut store = RefgetStore::in_memory();
+    store.add_sequence_alias("ncbi", "NC_000001.11", &a).unwrap();
+    store.pending.lock().unwrap().aliases.clear();
+
+    let err = store
+        .add_sequence_alias("ncbi", "NC_000001.11", &b)
+        .expect_err("a different digest must error by default");
+    let msg = err.to_string();
+    assert!(msg.starts_with("alias conflict"), "got: {}", msg);
+    assert!(msg.contains(&a) && msg.contains(&b), "got: {}", msg);
+    assert_eq!(store.aliases.resolve_sequence("ncbi", "NC_000001.11"), Some(a.to_key()));
+    assert!(!has_pending_alias_in(&store, "ncbi"), "a refused add must not be pending");
+
+    store.set_force_alias(true);
+    store
+        .add_sequence_alias("ncbi", "NC_000001.11", &b)
+        .expect("force-alias must re-point the alias");
+    assert_eq!(store.aliases.resolve_sequence("ncbi", "NC_000001.11"), Some(b.to_key()));
+}
+
+#[test]
+fn test_collection_alias_load_intra_file_clash_errors() {
+    let dir = tempdir().unwrap();
+    let (a, b) = digests_ab();
+    let tsv = write_alias_tsv(dir.path(), "ucsc.tsv", &[("hg38", &a), ("hg38", &b)]);
+
+    let mut store = RefgetStore::in_memory();
+    store.set_force_alias(true);
+    let err = store
+        .load_collection_aliases("ucsc", &tsv)
+        .expect_err("one collection alias mapped to two digests must error");
+    let msg = err.to_string();
+    assert!(msg.starts_with("alias conflict in collections"), "got: {}", msg);
+    assert!(msg.contains("'hg38'"), "got: {}", msg);
+    assert!(store.list_collection_aliases("ucsc").is_none());
+
+    let store_path = dir.path().join("store");
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    store.load_collection_aliases("ucsc", &tsv).unwrap_err();
+    assert!(!store_path.join("aliases/collections/ucsc.tsv").exists());
+}
+
+#[test]
+fn test_collection_alias_conflict_in_memory_store() {
+    let (a, b) = digests_ab();
+    let dir = tempdir().unwrap();
+    let tsv = write_alias_tsv(dir.path(), "ucsc.tsv", &[("hg38", &b)]);
+
+    let mut store = RefgetStore::in_memory();
+    store.add_collection_alias("ucsc", "hg38", &a).unwrap();
+    store.add_collection_alias("ucsc", "hg38", &a).expect("same digest is a no-op");
+
+    let err = store
+        .add_collection_alias("ucsc", "hg38", &b)
+        .expect_err("a different digest must error by default");
+    assert!(err.to_string().starts_with("alias conflict in collections"), "got: {}", err);
+    store
+        .load_collection_aliases("ucsc", &tsv)
+        .expect_err("a load must not re-point it either");
+    assert_eq!(store.aliases.resolve_collection("ucsc", "hg38"), Some(a.to_key()));
+
+    store.set_force_alias(true);
+    store.add_collection_alias("ucsc", "hg38", &b).unwrap();
+    assert_eq!(store.aliases.resolve_collection("ucsc", "hg38"), Some(b.to_key()));
+}
+
+#[test]
+fn test_import_header_alias_clash_errors() {
+    let dir = tempdir().unwrap();
+    let fasta = dir.path().join("clash.fa");
+    fs::write(&fasta, ">chr1 ucsc:chrX\nAAAACCCC\n>chr2 ucsc:chrX\nGGGGTTTT\n").unwrap();
+
+    let mut store = RefgetStore::in_memory();
+    store.set_force_alias(true);
+    let err = store
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new().namespaces(&["ucsc"]))
+        .expect_err("one header alias tagged onto two sequences must error");
+    let msg = err.to_string();
+    assert!(msg.starts_with("alias conflict"), "got: {}", msg);
+    assert!(msg.contains("'chrX'"), "got: {}", msg);
+    assert!(msg.contains("1 alias in this file clashes"), "got: {}", msg);
+    assert!(store.collections.is_empty(), "the rejected collection must not be in the store");
+    assert!(store.name_lookup.is_empty());
+    assert!(store.list_sequence_aliases("ucsc").is_none());
+
+    // Same check on disk: no collection file and no alias TSV left behind.
+    let store_path = dir.path().join("store");
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    store
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new().namespaces(&["ucsc"]))
+        .unwrap_err();
+    assert!(store.collections.is_empty());
+    let orphan_rgsi = fs::read_dir(store_path.join("collections"))
+        .map(|rd| rd.filter_map(|e| e.ok()).any(|e| e.file_name().to_string_lossy().ends_with(".rgsi")))
+        .unwrap_or(false);
+    assert!(!orphan_rgsi, "a rejected import must not leave a collection .rgsi");
+    assert!(!store_path.join("aliases/sequences/ucsc.tsv").exists());
+}
+
+/// Two FASTAs in one import run that tag the same alias onto different
+/// sequences: the second file is checked against the first file's aliases,
+/// which are already in memory.
+#[test]
+fn test_import_header_alias_clash_across_files_errors() {
+    let dir = tempdir().unwrap();
+    let fasta_a = dir.path().join("a.fa");
+    fs::write(&fasta_a, ">chr1 ucsc:chrM\nAAAACCCC\n").unwrap();
+    let fasta_b = dir.path().join("b.fa");
+    fs::write(&fasta_b, ">chr1 ucsc:chrM\nGGGGTTTT\n").unwrap();
+
+    let mut store = RefgetStore::in_memory();
+    let err = store
+        .add_sequence_collections_from_fastas(
+            &[fasta_a.clone(), fasta_b.clone()],
+            FastaImportOptions::new().namespaces(&["ucsc"]),
+        )
+        .expect_err("the same header alias on two genomes must error");
+    assert!(err.to_string().starts_with("alias conflict"), "got: {:#}", err);
+
+    // With force-alias, re-pointing an existing binding is allowed.
+    let mut store = RefgetStore::in_memory();
+    store.set_force_alias(true);
+    store
+        .add_sequence_collections_from_fastas(
+            &[fasta_a, fasta_b],
+            FastaImportOptions::new().namespaces(&["ucsc"]),
+        )
+        .expect("force-alias re-points an alias bound by an earlier file");
+}
+
 /// `rgstore.json` is published LAST, so the digests it advertises always
 /// describe files that are already on disk.
 #[test]

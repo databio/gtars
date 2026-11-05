@@ -372,10 +372,11 @@ pub struct ReadonlyRefgetStore {
     pub(crate) commit_lock: Option<Arc<StoreLock>>,
     /// Timeout/staleness settings used when acquiring the store write lock.
     pub(crate) lock_options: LockOptions,
-    /// Overwrite an alias already published on disk with a different target,
-    /// instead of erroring on the conflict. Off by default: two writers binding
-    /// one human-readable name to different content is a semantic conflict, not
-    /// a merge detail.
+    /// Re-point an existing alias (in memory, or already published on disk) to
+    /// a different target, instead of erroring on the conflict. Off by default:
+    /// binding one human-readable name to different content is a semantic
+    /// conflict, not a merge detail. Never overrides a clash within one load
+    /// (one TSV, or one FASTA's header tags).
     pub(crate) force_alias: bool,
 }
 
@@ -629,8 +630,9 @@ impl ReadonlyRefgetStore {
         self.lock_options = options;
     }
 
-    /// Allow a commit to overwrite an alias another writer already published
-    /// under a different digest, instead of erroring on the conflict.
+    /// Allow re-pointing an existing alias (in memory, or one another writer
+    /// already published) to a different digest, instead of erroring on the
+    /// conflict. A load that maps one alias to two digests still errors.
     pub fn set_force_alias(&mut self, force: bool) {
         self.force_alias = force;
     }

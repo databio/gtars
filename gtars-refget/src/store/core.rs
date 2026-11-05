@@ -464,7 +464,7 @@ impl RefgetStore {
         self.inner.set_lock_options(options);
     }
 
-    /// Allow a commit to overwrite an alias another writer already published.
+    /// Allow re-pointing an existing alias to a different digest.
     pub fn set_force_alias(&mut self, force: bool) {
         self.inner.set_force_alias(force);
     }

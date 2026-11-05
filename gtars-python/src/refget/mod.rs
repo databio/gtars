@@ -2360,8 +2360,9 @@ impl PyRefgetStore {
         self.inner.set_lock_options(opts);
     }
 
-    /// Allow a commit to overwrite an alias another writer already published
-    /// under a different digest, instead of raising on the conflict.
+    /// Allow re-pointing an existing alias (in memory, or one another writer
+    /// already published) to a different digest, instead of raising on the
+    /// conflict. A load that maps one alias to two digests still raises.
     fn set_force_alias(&mut self, force: bool) {
         self.inner.set_force_alias(force);
     }

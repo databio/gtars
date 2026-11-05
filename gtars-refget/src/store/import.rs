@@ -1169,6 +1169,9 @@ impl ReadonlyRefgetStore {
         // ever references. The actual alias registration still happens below,
         // once the collection is registered, and is published with it.
         self.check_import_collection_alias(collection_alias, &metadata.digest, force)?;
+        // Same for the header-tag sequence aliases: a clash within this file,
+        // or with an existing binding, must fail before anything is touched.
+        self.check_import_sequence_aliases(&scratch.aliases, source_path)?;
 
         if !force && self.collections.contains_key(&coll_key) {
             // Register the name even on the in-run duplicate path: the
@@ -1215,7 +1218,7 @@ impl ReadonlyRefgetStore {
         // Register aliases in FASTA order. Pending only: they are published
         // with the indexes in the final commit, not one TSV rewrite per header.
         for (ns, alias_value, sha512t24u) in &scratch.aliases {
-            self.add_sequence_alias_pending(ns, alias_value, sha512t24u);
+            self.add_sequence_alias_pending(ns, alias_value, sha512t24u)?;
         }
 
         // Register the collection alias (if requested). Conflicts were already

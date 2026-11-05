@@ -7,7 +7,7 @@ use super::*;
 use super::readonly::ReadonlyRefgetStore;
 use super::core::RefgetStore;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File, create_dir_all};
 use std::io::{BufRead, BufReader};
 use std::path::Path;
@@ -51,11 +51,48 @@ pub struct AliasManager {
 // Private helpers (operate on any AliasStore)
 // =========================================================================
 
-fn alias_add(store: &mut AliasStore, namespace: &str, alias: &str, digest: DigestKey) {
+/// Error if `namespace` already binds `alias` to a digest other than `digest`,
+/// unless `force`. Read-only: the shared check behind every checked add.
+fn alias_check_existing(
+    store: &AliasStore,
+    kind: AliasKind,
+    namespace: &str,
+    alias: &str,
+    digest: &DigestKey,
+    force: bool,
+) -> Result<()> {
+    match alias_resolve(store, namespace, alias) {
+        Some(existing) if existing != *digest && !force => Err(anyhow::anyhow!(
+            "alias conflict in {} namespace '{}': '{}' already points to {}, \
+             refusing to point it to {}. Aliases must be unique within a namespace; \
+             use force-alias (CLI: --force-alias) only to deliberately re-point it.",
+            kind.subdir(),
+            namespace,
+            alias,
+            key_to_digest_string(&existing),
+            key_to_digest_string(digest),
+        )),
+        _ => Ok(()),
+    }
+}
+
+/// Bind `alias` -> `digest` in `namespace`. Same digest: no-op. Different
+/// digest: error unless `force`. A refused add leaves `store` untouched (no
+/// empty namespace is created).
+fn alias_add(
+    store: &mut AliasStore,
+    kind: AliasKind,
+    namespace: &str,
+    alias: &str,
+    digest: DigestKey,
+    force: bool,
+) -> Result<()> {
+    alias_check_existing(store, kind, namespace, alias, &digest, force)?;
     store
         .entry(namespace.to_string())
         .or_default()
         .insert(alias.to_string(), digest);
+    Ok(())
 }
 
 fn alias_resolve(store: &AliasStore, namespace: &str, alias: &str) -> Option<DigestKey> {
@@ -96,28 +133,114 @@ fn alias_remove(store: &mut AliasStore, namespace: &str, alias: &str) -> bool {
     }
 }
 
-/// Load a TSV into `store` under `namespace`, returning the alias names read.
+/// Load a user-supplied TSV into `store` under `namespace`, all or nothing.
+/// Returns the distinct alias names bound, in first-seen order.
 ///
 /// Returns the names rather than a count because the store-level loaders have to
 /// record each one as a pending change — a commit only publishes aliases this
 /// handle actually touched.
-fn alias_load_tsv(store: &mut AliasStore, namespace: &str, path: &Path) -> Result<Vec<String>> {
+///
+/// Refuses the whole file, leaving `store` untouched, when:
+/// * the file maps one alias to two different digests. Always an error, even
+///   with `force`: one batch can never mean two things by one name, and letting
+///   the last row win is how per-genome names like `chr1` silently collapsed
+///   onto one genome.
+/// * an alias already in `store` points elsewhere, unless `force`.
+///
+/// Exact duplicate rows are fine and count once.
+fn alias_load_tsv(
+    store: &mut AliasStore,
+    kind: AliasKind,
+    namespace: &str,
+    path: &Path,
+    force: bool,
+) -> Result<Vec<String>> {
+    // Phase 1: parse every row.
     let file = File::open(path)?;
     let reader = BufReader::new(file);
-    let mut loaded = Vec::new();
-    for line in reader.lines() {
+    let mut rows: Vec<(usize, String, DigestKey)> = Vec::new();
+    for (idx, line) in reader.lines().enumerate() {
         let line = line?;
         if line.starts_with('#') || line.trim().is_empty() {
             continue;
         }
         let parts: Vec<&str> = line.splitn(2, '\t').collect();
         if parts.len() == 2 {
-            let key = parts[1].to_key();
-            alias_add(store, namespace, parts[0], key);
-            loaded.push(parts[0].to_string());
+            rows.push((idx + 1, parts[0].to_string(), parts[1].to_key()));
         }
     }
-    Ok(loaded)
+
+    // Phase 2: within this file, one alias must map to one digest.
+    let mut first_seen: HashMap<&str, (DigestKey, usize)> = HashMap::new();
+    let mut distinct: Vec<(&str, DigestKey)> = Vec::new();
+    let mut clashing: HashSet<&str> = HashSet::new();
+    let mut first_clash: Option<(&str, DigestKey, usize, DigestKey, usize)> = None;
+    for (line_no, alias, digest) in &rows {
+        match first_seen.get(alias.as_str()) {
+            None => {
+                first_seen.insert(alias, (*digest, *line_no));
+                distinct.push((alias, *digest));
+            }
+            Some(&(first_digest, first_line)) if first_digest != *digest => {
+                clashing.insert(alias);
+                if first_clash.is_none() {
+                    first_clash = Some((alias, first_digest, first_line, *digest, *line_no));
+                }
+            }
+            Some(_) => {}
+        }
+    }
+    if let Some((alias, digest_a, line_a, digest_b, line_b)) = first_clash {
+        return Err(anyhow::anyhow!(
+            "alias conflict in {} namespace '{}': '{}' maps '{}' to two different digests \
+             ({} on line {}, {} on line {}); {}. A namespace maps each alias to one digest; \
+             per-genome names such as chromosome names are not aliases.",
+            kind.subdir(),
+            namespace,
+            path.display(),
+            alias,
+            key_to_digest_string(&digest_a),
+            line_a,
+            key_to_digest_string(&digest_b),
+            line_b,
+            clash_scale(clashing.len()),
+        ));
+    }
+
+    // Phase 3: no alias may silently re-point an existing binding.
+    for (alias, digest) in &distinct {
+        alias_check_existing(store, kind, namespace, alias, digest, force)?;
+    }
+
+    // Phase 4: apply. Validated above, so nothing below can fail.
+    if !distinct.is_empty() {
+        let ns = store.entry(namespace.to_string()).or_default();
+        for (alias, digest) in &distinct {
+            ns.insert(alias.to_string(), *digest);
+        }
+    }
+    Ok(distinct.into_iter().map(|(alias, _)| alias.to_string()).collect())
+}
+
+/// "N aliases in this file clash", reporting the scale of a clash: thousands
+/// means a design mistake, not a typo.
+fn clash_scale(n: usize) -> String {
+    if n == 1 {
+        "1 alias in this file clashes".to_string()
+    } else {
+        format!("{} aliases in this file clash", n)
+    }
+}
+
+/// Read an alias TSV without clash checks, last row winning. Only for files
+/// gtars wrote itself from a map (so they cannot hold a clash); being strict
+/// here would make a store unopenable over one hand-edited file.
+fn alias_read_tsv_unchecked(store: &mut AliasStore, namespace: &str, path: &Path) -> Result<()> {
+    let map = super::persistence::read_alias_tsv(path)?;
+    if !map.is_empty() {
+        store.entry(namespace.to_string()).or_default().extend(map);
+    }
+    Ok(())
 }
 
 fn load_aliases_from_dir(store: &mut AliasStore, dir: &Path) -> Result<()> {
@@ -133,7 +256,7 @@ fn load_aliases_from_dir(store: &mut AliasStore, dir: &Path) -> Result<()> {
                 .and_then(|s| s.to_str())
                 .context("Invalid filename")?
                 .to_string();
-            alias_load_tsv(store, &namespace, &path)?;
+            alias_read_tsv_unchecked(store, &namespace, &path)?;
         }
     }
     Ok(())
@@ -169,9 +292,11 @@ impl AliasManager {
 
     // --- Sequence aliases ---
 
-    pub fn add_sequence(&mut self, namespace: &str, alias: &str, digest: &str) {
+    /// Bind a sequence alias. Errors if it already points to a different
+    /// digest, unless `force`.
+    pub fn add_sequence(&mut self, namespace: &str, alias: &str, digest: &str, force: bool) -> Result<()> {
         let key = digest.to_key();
-        alias_add(&mut self.sequence_aliases, namespace, alias, key);
+        alias_add(&mut self.sequence_aliases, AliasKind::Sequence, namespace, alias, key, force)
     }
 
     pub fn resolve_sequence(&self, namespace: &str, alias: &str) -> Option<DigestKey> {
@@ -195,16 +320,19 @@ impl AliasManager {
         alias_remove(&mut self.sequence_aliases, namespace, alias)
     }
 
-    /// Load a TSV of sequence aliases, returning the alias names read.
-    pub fn load_sequence_tsv(&mut self, namespace: &str, path: &Path) -> Result<Vec<String>> {
-        alias_load_tsv(&mut self.sequence_aliases, namespace, path)
+    /// Load a TSV of sequence aliases, all or nothing, returning the distinct
+    /// alias names bound. See [`alias_load_tsv`] for what is refused.
+    pub fn load_sequence_tsv(&mut self, namespace: &str, path: &Path, force: bool) -> Result<Vec<String>> {
+        alias_load_tsv(&mut self.sequence_aliases, AliasKind::Sequence, namespace, path, force)
     }
 
     // --- Collection aliases ---
 
-    pub fn add_collection(&mut self, namespace: &str, alias: &str, digest: &str) {
+    /// Bind a collection alias. Errors if it already points to a different
+    /// digest, unless `force`.
+    pub fn add_collection(&mut self, namespace: &str, alias: &str, digest: &str, force: bool) -> Result<()> {
         let key = digest.to_key();
-        alias_add(&mut self.collection_aliases, namespace, alias, key);
+        alias_add(&mut self.collection_aliases, AliasKind::Collection, namespace, alias, key, force)
     }
 
     pub fn resolve_collection(&self, namespace: &str, alias: &str) -> Option<DigestKey> {
@@ -228,9 +356,10 @@ impl AliasManager {
         alias_remove(&mut self.collection_aliases, namespace, alias)
     }
 
-    /// Load a TSV of collection aliases, returning the alias names read.
-    pub fn load_collection_tsv(&mut self, namespace: &str, path: &Path) -> Result<Vec<String>> {
-        alias_load_tsv(&mut self.collection_aliases, namespace, path)
+    /// Load a TSV of collection aliases, all or nothing, returning the distinct
+    /// alias names bound. See [`alias_load_tsv`] for what is refused.
+    pub fn load_collection_tsv(&mut self, namespace: &str, path: &Path, force: bool) -> Result<Vec<String>> {
+        alias_load_tsv(&mut self.collection_aliases, AliasKind::Collection, namespace, path, force)
     }
 
     // --- Persistence ---
@@ -258,14 +387,14 @@ impl AliasManager {
         for ns in sequence_namespaces {
             let path = seq_dir.join(format!("{}.tsv", ns));
             if path.exists() {
-                alias_load_tsv(&mut self.sequence_aliases, ns, &path)?;
+                alias_read_tsv_unchecked(&mut self.sequence_aliases, ns, &path)?;
             }
         }
         let coll_dir = aliases_dir.join("collections");
         for ns in collection_namespaces {
             let path = coll_dir.join(format!("{}.tsv", ns));
             if path.exists() {
-                alias_load_tsv(&mut self.collection_aliases, ns, &path)?;
+                alias_read_tsv_unchecked(&mut self.collection_aliases, ns, &path)?;
             }
         }
         Ok(())
@@ -321,8 +450,12 @@ impl Default for AliasManager {
 
 impl ReadonlyRefgetStore {
     /// Add a sequence alias and persist to disk if applicable.
+    ///
+    /// Re-adding the same binding is a no-op. Pointing an existing alias at a
+    /// different digest errors unless `force_alias` is set; a refused add
+    /// leaves memory, pending changes and disk untouched.
     pub fn add_sequence_alias(&mut self, namespace: &str, alias: &str, digest: &str) -> Result<()> {
-        self.aliases.add_sequence(namespace, alias, digest);
+        self.aliases.add_sequence(namespace, alias, digest, self.force_alias)?;
         self.record(|p| p.add_alias(AliasKind::Sequence, namespace, alias));
         self.persist_alias_namespace(AliasKind::Sequence, namespace)?;
         Ok(())
@@ -369,9 +502,14 @@ impl ReadonlyRefgetStore {
         Ok(removed)
     }
 
-    /// Load sequence aliases from a TSV file into a namespace.
+    /// Load sequence aliases from a TSV file into a namespace, all or nothing.
+    ///
+    /// Returns the number of distinct aliases bound. Errors, loading nothing,
+    /// if the file maps one alias to two different digests (always, even with
+    /// `force_alias`), or if it would re-point an existing alias (unless
+    /// `force_alias`).
     pub fn load_sequence_aliases(&mut self, namespace: &str, path: &str) -> Result<usize> {
-        let loaded = self.aliases.load_sequence_tsv(namespace, Path::new(path))?;
+        let loaded = self.aliases.load_sequence_tsv(namespace, Path::new(path), self.force_alias)?;
         self.record(|p| {
             for alias in &loaded {
                 p.add_alias(AliasKind::Sequence, namespace, alias);
@@ -382,8 +520,12 @@ impl ReadonlyRefgetStore {
     }
 
     /// Add a collection alias and persist to disk if applicable.
+    ///
+    /// Re-adding the same binding is a no-op. Pointing an existing alias at a
+    /// different digest errors unless `force_alias` is set; a refused add
+    /// leaves memory, pending changes and disk untouched.
     pub fn add_collection_alias(&mut self, namespace: &str, alias: &str, digest: &str) -> Result<()> {
-        self.aliases.add_collection(namespace, alias, digest);
+        self.aliases.add_collection(namespace, alias, digest, self.force_alias)?;
         self.record(|p| p.add_alias(AliasKind::Collection, namespace, alias));
         self.persist_alias_namespace(AliasKind::Collection, namespace)?;
         Ok(())
@@ -472,8 +614,9 @@ impl ReadonlyRefgetStore {
         // concurrent reader (permanently so, if that final commit fails).
         // Publishing both in the same commit closes that window. `force` is
         // carried along so the on-disk conflict check honors it too, instead
-        // of only the handle-wide `force_alias` flag.
-        self.aliases.add_collection(namespace, alias, collection_digest);
+        // of only the handle-wide `force_alias` flag. Forced in memory because
+        // the check above already applied this call's own `force`.
+        self.aliases.add_collection(namespace, alias, collection_digest, true)?;
         self.record(|p| {
             if force {
                 p.add_forced_alias(AliasKind::Collection, namespace, alias);
@@ -484,13 +627,73 @@ impl ReadonlyRefgetStore {
         Ok(())
     }
 
+    /// Check FASTA header-tag sequence aliases `(namespace, alias, digest)`
+    /// from one file, WITHOUT mutating anything, so an import can refuse them
+    /// before it touches any state.
+    ///
+    /// The same alias tagged onto two different sequences in one file is
+    /// always an error (it ignores `force_alias`): that is a per-genome name,
+    /// not an alias. An alias that already points to a different digest
+    /// errors unless `force_alias`.
+    pub(crate) fn check_import_sequence_aliases(
+        &self,
+        aliases: &[(String, String, String)],
+        source: &Path,
+    ) -> Result<()> {
+        let mut first_seen: HashMap<(&str, &str), DigestKey> = HashMap::new();
+        let mut clashing: HashSet<(&str, &str)> = HashSet::new();
+        let mut first_clash: Option<(&str, &str, DigestKey, DigestKey)> = None;
+        for (namespace, alias, digest) in aliases {
+            let key = digest.to_key();
+            match first_seen.get(&(namespace.as_str(), alias.as_str())) {
+                None => {
+                    first_seen.insert((namespace, alias), key);
+                }
+                Some(&first) if first != key => {
+                    clashing.insert((namespace, alias));
+                    if first_clash.is_none() {
+                        first_clash = Some((namespace, alias, first, key));
+                    }
+                }
+                Some(_) => {}
+            }
+        }
+        if let Some((namespace, alias, digest_a, digest_b)) = first_clash {
+            return Err(anyhow::anyhow!(
+                "alias conflict in {} namespace '{}': '{}' tags '{}' onto two different \
+                 sequences ({} and {}); {}. A namespace maps each alias to one digest; \
+                 per-genome names such as chromosome names are not aliases.",
+                AliasKind::Sequence.subdir(),
+                namespace,
+                source.display(),
+                alias,
+                key_to_digest_string(&digest_a),
+                key_to_digest_string(&digest_b),
+                clash_scale(clashing.len()),
+            ));
+        }
+        // In FASTA order, so the error names the first offending header.
+        for (namespace, alias, digest) in aliases {
+            alias_check_existing(
+                &self.aliases.sequence_aliases,
+                AliasKind::Sequence,
+                namespace,
+                alias,
+                &digest.to_key(),
+                self.force_alias,
+            )?;
+        }
+        Ok(())
+    }
+
     /// Register a sequence alias in memory and mark it pending, WITHOUT
     /// publishing the namespace TSV. Used by the FASTA import path, which
     /// commits all of its changes together at the end; publishing per alias
     /// would rewrite the TSV (and the manifest) once per header.
-    pub(crate) fn add_sequence_alias_pending(&mut self, namespace: &str, alias: &str, digest: &str) {
-        self.aliases.add_sequence(namespace, alias, digest);
+    pub(crate) fn add_sequence_alias_pending(&mut self, namespace: &str, alias: &str, digest: &str) -> Result<()> {
+        self.aliases.add_sequence(namespace, alias, digest, self.force_alias)?;
         self.record(|p| p.add_alias(AliasKind::Sequence, namespace, alias));
+        Ok(())
     }
 
     /// Resolve a collection alias to collection metadata.
@@ -532,9 +735,14 @@ impl ReadonlyRefgetStore {
         Ok(removed)
     }
 
-    /// Load collection aliases from a TSV file into a namespace.
+    /// Load collection aliases from a TSV file into a namespace, all or nothing.
+    ///
+    /// Returns the number of distinct aliases bound. Errors, loading nothing,
+    /// if the file maps one alias to two different digests (always, even with
+    /// `force_alias`), or if it would re-point an existing alias (unless
+    /// `force_alias`).
     pub fn load_collection_aliases(&mut self, namespace: &str, path: &str) -> Result<usize> {
-        let loaded = self.aliases.load_collection_tsv(namespace, Path::new(path))?;
+        let loaded = self.aliases.load_collection_tsv(namespace, Path::new(path), self.force_alias)?;
         self.record(|p| {
             for alias in &loaded {
                 p.add_alias(AliasKind::Collection, namespace, alias);
@@ -877,7 +1085,7 @@ mod tests {
         let mut mgr = AliasManager::new();
         assert!(mgr.is_empty());
 
-        mgr.add_sequence("ncbi", "NC_000001.11", "abc123");
+        mgr.add_sequence("ncbi", "NC_000001.11", "abc123", false).unwrap();
         assert!(!mgr.is_empty());
 
         let key = mgr.resolve_sequence("ncbi", "NC_000001.11");
@@ -891,9 +1099,9 @@ mod tests {
     #[test]
     fn test_reverse_lookup() {
         let mut mgr = AliasManager::new();
-        mgr.add_sequence("ncbi", "NC_000001.11", "digest1");
-        mgr.add_sequence("ucsc", "chr1", "digest1");
-        mgr.add_sequence("ncbi", "NC_000002.12", "digest2");
+        mgr.add_sequence("ncbi", "NC_000001.11", "digest1", false).unwrap();
+        mgr.add_sequence("ucsc", "chr1", "digest1", false).unwrap();
+        mgr.add_sequence("ncbi", "NC_000002.12", "digest2", false).unwrap();
 
         let aliases = mgr.reverse_lookup_sequence("digest1");
         assert_eq!(aliases.len(), 2);
@@ -907,8 +1115,8 @@ mod tests {
     #[test]
     fn test_namespaces_and_list() {
         let mut mgr = AliasManager::new();
-        mgr.add_sequence("ncbi", "NC_000001.11", "d1");
-        mgr.add_sequence("ucsc", "chr1", "d1");
+        mgr.add_sequence("ncbi", "NC_000001.11", "d1", false).unwrap();
+        mgr.add_sequence("ucsc", "chr1", "d1", false).unwrap();
 
         let ns = mgr.sequence_namespaces();
         assert!(ns.contains(&"ncbi".to_string()));
@@ -921,7 +1129,7 @@ mod tests {
     #[test]
     fn test_remove() {
         let mut mgr = AliasManager::new();
-        mgr.add_sequence("ncbi", "NC_000001.11", "d1");
+        mgr.add_sequence("ncbi", "NC_000001.11", "d1", false).unwrap();
 
         assert!(mgr.remove_sequence("ncbi", "NC_000001.11"));
         assert!(mgr.resolve_sequence("ncbi", "NC_000001.11").is_none());
@@ -933,8 +1141,8 @@ mod tests {
     #[test]
     fn test_collection_aliases() {
         let mut mgr = AliasManager::new();
-        mgr.add_collection("ucsc", "hg38", "coll_digest");
-        mgr.add_collection("gencode", "GRCh38.p14", "coll_digest");
+        mgr.add_collection("ucsc", "hg38", "coll_digest", false).unwrap();
+        mgr.add_collection("gencode", "GRCh38.p14", "coll_digest", false).unwrap();
 
         assert!(mgr.resolve_collection("ucsc", "hg38").is_some());
         assert_eq!(mgr.collection_namespaces().len(), 2);
@@ -952,8 +1160,8 @@ mod tests {
         let aliases_dir = dir.path().join("aliases");
 
         let mut mgr = AliasManager::new();
-        mgr.add_sequence("ncbi", "NC_000001.11", "seq_digest");
-        mgr.add_collection("ucsc", "hg38", "coll_digest");
+        mgr.add_sequence("ncbi", "NC_000001.11", "seq_digest", false).unwrap();
+        mgr.add_collection("ucsc", "hg38", "coll_digest", false).unwrap();
 
         mgr.write_to_dir(&aliases_dir).unwrap();
 
@@ -980,8 +1188,8 @@ mod tests {
         let aliases_dir = dir.path().join("aliases");
 
         let mut mgr = AliasManager::new();
-        mgr.add_sequence("ncbi", "NC_000001.11", "d1");
-        mgr.add_sequence("ucsc", "chr1", "d2");
+        mgr.add_sequence("ncbi", "NC_000001.11", "d1", false).unwrap();
+        mgr.add_sequence("ucsc", "chr1", "d2", false).unwrap();
 
         let tsv = aliases_dir.join("sequences/ncbi.tsv");
         super::super::persistence::write_alias_namespace(
@@ -1036,7 +1244,7 @@ mod tests {
         std::fs::write(&tsv_path, "NC_000001.11\tsome_digest\n# comment\n\nNC_000002.12\tanother_digest\n").unwrap();
 
         let mut mgr = AliasManager::new();
-        let loaded = mgr.load_sequence_tsv("ncbi", &tsv_path).unwrap();
+        let loaded = mgr.load_sequence_tsv("ncbi", &tsv_path, false).unwrap();
         assert_eq!(loaded, vec!["NC_000001.11", "NC_000002.12"]);
         assert!(mgr.resolve_sequence("ncbi", "NC_000001.11").is_some());
         assert!(mgr.resolve_sequence("ncbi", "NC_000002.12").is_some());
