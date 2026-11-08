@@ -5,7 +5,10 @@ use gtars_refget::digest::{
 };
 use gtars_refget::digest::{md5, sha512t24u, AlphabetType};
 use gtars_refget::FhrMetadata;
-use gtars_refget::store::{FastaImportOptions, RefgetStore, RetrievedSequence, StorageMode};
+use gtars_refget::store::{
+    ExportOptions, ExportSelection, ExportSummary, FastaImportOptions, LabelTemplate, Molecule,
+    RefgetStore, RetrievedSequence, StorageMode,
+};
 
 // =========================================================================
 // Helper macro for extracting store from external pointer
@@ -880,61 +883,65 @@ pub fn write_store(store_ptr: Robj) -> extendr_api::Result<()> {
     })
 }
 
-/// Export sequences from a collection to FASTA
-/// @param store_ptr External pointer to RefgetStore
-/// @param collection_digest Collection digest
-/// @param output_path Output FASTA file path
-/// @param sequence_names Optional vector of sequence names to export (NULL for all)
-/// @param line_width Bases per line (default 80)
-#[extendr]
-pub fn export_fasta_store(
-    store_ptr: Robj,
-    collection_digest: &str,
-    output_path: &str,
-    sequence_names: Robj,
-    line_width: i32,
-) -> extendr_api::Result<()> {
-    with_store!(store_ptr, store, {
-        let names: Option<Vec<String>> = if sequence_names.is_null() {
-            None
-        } else {
-            Some(sequence_names.as_str_vector().unwrap_or_default().iter().map(|s| s.to_string()).collect())
-        };
-        let names_refs = names
-            .as_ref()
-            .map(|v| v.iter().map(|s| s.as_str()).collect::<Vec<&str>>());
-        let width = if line_width <= 0 {
-            None
-        } else {
-            Some(line_width as usize)
-        };
-        store
-            .export_fasta(collection_digest, output_path, names_refs, width)
-            .map_err(|e| format!("Error exporting FASTA: {}", e).into())
-    })
+fn r_str_vec(x: &Robj) -> Option<Vec<String>> {
+    if x.is_null() {
+        None
+    } else {
+        Some(x.as_str_vector().unwrap_or_default().iter().map(|s| s.to_string()).collect())
+    }
 }
 
-/// Export sequences by their digests to FASTA
+fn summary_list(s: &ExportSummary) -> Robj {
+    list!(
+        n_records = s.n_records as f64,
+        n_bases = s.n_bases as f64,
+        n_fallbacks = s.n_fallbacks as f64,
+        n_deduplicated = s.n_deduplicated as f64
+    )
+    .into()
+}
+
+/// Export sequences to FASTA (a file, or stdout with "-")
 /// @param store_ptr External pointer to RefgetStore
-/// @param seq_digests Vector of sequence digests
-/// @param output_path Output FASTA file path
-/// @param line_width Bases per line (default 80)
+/// @param output_path Output FASTA file path, or "-" for stdout
+/// @param collections Collection digests (NULL unless selecting collections)
+/// @param names Sequence names to keep in each collection (NULL for all)
+/// @param seq_digests Sequence digests (NULL unless selecting by digest)
+/// @param all Export every collection plus sequences in no collection
+/// @param label Label template, e.g. "{seq}", "name", "{col}/{name}"
+/// @param molecule NULL, "dna" or "protein"
+/// @param line_width Bases per line (0 = unwrapped, negative = default 80)
 #[extendr]
-pub fn export_fasta_by_digests_store(
+#[allow(clippy::too_many_arguments)]
+pub fn export_fasta_store(
     store_ptr: Robj,
-    seq_digests: Vec<String>,
     output_path: &str,
+    collections: Robj,
+    names: Robj,
+    seq_digests: Robj,
+    all: bool,
+    label: &str,
+    molecule: Robj,
     line_width: i32,
-) -> extendr_api::Result<()> {
+) -> extendr_api::Result<Robj> {
+    let selection = ExportSelection::from_parts(
+        r_str_vec(&collections),
+        r_str_vec(&names),
+        r_str_vec(&seq_digests),
+        all,
+    )
+    .map_err(|e| e.to_string())?;
+    let molecule = r_str_vec(&molecule);
+    let opts = ExportOptions {
+        label: LabelTemplate::parse(label).map_err(|e| e.to_string())?,
+        molecule: Molecule::from_opt(molecule.as_ref().and_then(|v| v.first()).map(String::as_str))
+            .map_err(|e| e.to_string())?,
+        line_width: if line_width < 0 { None } else { Some(line_width as usize) },
+    };
     with_store!(store_ptr, store, {
-        let digests_refs: Vec<&str> = seq_digests.iter().map(|s| s.as_str()).collect();
-        let width = if line_width <= 0 {
-            None
-        } else {
-            Some(line_width as usize)
-        };
         store
-            .export_fasta_by_digests(digests_refs, output_path, width)
+            .export_fasta(&selection, output_path, &opts)
+            .map(|s| summary_list(&s))
             .map_err(|e| format!("Error exporting FASTA: {}", e).into())
     })
 }
@@ -943,17 +950,21 @@ pub fn export_fasta_by_digests_store(
 /// @param store_ptr External pointer to RefgetStore
 /// @param collection_digest Sequence collection digest
 /// @param bed_file_path Path to BED file
-/// @param output_file_path Path to output FASTA file
+/// @param output_file_path Path to output FASTA file, or "-" for stdout
+/// @param label Label template; ":start-end" is appended to each label
 #[extendr]
 pub fn get_seqs_bed_file_store(
     store_ptr: Robj,
     collection_digest: &str,
     bed_file_path: &str,
     output_file_path: &str,
-) -> extendr_api::Result<()> {
+    label: &str,
+) -> extendr_api::Result<Robj> {
+    let label = LabelTemplate::parse(label).map_err(|e| e.to_string())?;
     with_store!(store_ptr, store, {
         store
-            .export_fasta_from_regions(collection_digest, bed_file_path, output_file_path)
+            .export_fasta_from_regions(collection_digest, bed_file_path, output_file_path, &label)
+            .map(|s| summary_list(&s))
             .map_err(|e| format!("Error writing sequences to file: {}", e).into())
     })
 }
@@ -1669,7 +1680,6 @@ extendr_module! {
     fn write_store_to_directory_store;
     fn write_store;
     fn export_fasta_store;
-    fn export_fasta_by_digests_store;
     fn get_seqs_bed_file_store;
     fn get_seqs_bed_file_to_vec_store;
     fn get_seqs_bed_file_to_df_store;

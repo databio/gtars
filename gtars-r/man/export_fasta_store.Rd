@@ -2,27 +2,39 @@
 % Please edit documentation in R/extendr-wrappers.R
 \name{export_fasta_store}
 \alias{export_fasta_store}
-\title{Export sequences from a collection to FASTA}
+\title{Export sequences to FASTA (a file, or stdout with "-")}
 \usage{
 export_fasta_store(
   store_ptr,
-  collection_digest,
   output_path,
-  sequence_names,
+  collections,
+  names,
+  seq_digests,
+  all,
+  label,
+  molecule,
   line_width
 )
 }
 \arguments{
 \item{store_ptr}{External pointer to RefgetStore}
 
-\item{collection_digest}{Collection digest}
+\item{output_path}{Output FASTA file path, or "-" for stdout}
 
-\item{output_path}{Output FASTA file path}
+\item{collections}{Collection digests (NULL unless selecting collections)}
 
-\item{sequence_names}{Optional vector of sequence names to export (NULL for all)}
+\item{names}{Sequence names to keep in each collection (NULL for all)}
 
-\item{line_width}{Bases per line (default 80)}
+\item{seq_digests}{Sequence digests (NULL unless selecting by digest)}
+
+\item{all}{Export every collection plus sequences in no collection}
+
+\item{label}{Label template, e.g. "{seq}", "name", "{col}/{name}"}
+
+\item{molecule}{NULL, "dna" or "protein"}
+
+\item{line_width}{Bases per line (0 = unwrapped, negative = default 80)}
 }
 \description{
-Export sequences from a collection to FASTA
+Export sequences to FASTA (a file, or stdout with "-")
 }

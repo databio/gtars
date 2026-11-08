@@ -44,6 +44,19 @@ fn store_with_one_collection(fasta_content: &str) -> (RefgetStore, String) {
 }
 
 /// Creates a test store with 3 sequences for export testing.
+/// Select one collection (optionally only some names) for export.
+fn coll_sel<K: AsRef<[u8]>>(digest: K, names: Option<&[&str]>) -> ExportSelection {
+    ExportSelection::Collections {
+        digests: vec![String::from_utf8_lossy(digest.as_ref()).into_owned()],
+        names: names.map(|n| n.iter().map(|s| s.to_string()).collect()),
+    }
+}
+
+/// Export options that label records by name.
+fn name_opts(line_width: Option<usize>) -> ExportOptions {
+    ExportOptions { label: LabelTemplate::parse("name").unwrap(), molecule: None, line_width }
+}
+
 fn setup_export_test_store(temp_path: &std::path::Path) -> (RefgetStore, DigestKey) {
     let fasta_content = ">chr1\nATGCATGCATGC\n>chr2\nGGGGAAAA\n>chr3\nTTTTCCCC\n";
     let temp_fasta_path = temp_path.join("test.fa");
@@ -167,6 +180,7 @@ chr2\t0\t4
             collection_digest_ref,
             temp_bed_path.to_str().unwrap(),
             temp_output_fa_path.to_str().unwrap(),
+            &LabelTemplate::parse("name").unwrap(),
         )
         .expect("export_fasta_from_regions failed");
 
@@ -805,7 +819,7 @@ fn test_export_fasta_all_sequences() {
 
     let output_path = temp_dir.path().join("exported_all.fa");
     store
-        .export_fasta(&collection_digest, &output_path, None, Some(80))
+        .export_fasta(&coll_sel(collection_digest, None), &output_path, &name_opts(Some(80)))
         .unwrap();
 
     let exported = fs::read_to_string(&output_path).unwrap();
@@ -820,7 +834,7 @@ fn test_export_fasta_subset_sequences() {
 
     let output_path = temp_dir.path().join("exported_subset.fa");
     store
-        .export_fasta(&collection_digest, &output_path, Some(vec!["chr1", "chr3"]), Some(80))
+        .export_fasta(&coll_sel(collection_digest, Some(&["chr1", "chr3"])), &output_path, &name_opts(Some(80)))
         .unwrap();
 
     let exported = fs::read_to_string(&output_path).unwrap();
@@ -857,7 +871,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCC
     let collections: Vec<_> = store1.collections.keys().cloned().collect();
     let collection_digest = collections[0];
     let exported_path = temp_path.join("exported.fa");
-    store1.export_fasta(&collection_digest, &exported_path, None, Some(60)).expect("Failed to export FASTA");
+    store1.export_fasta(&coll_sel(collection_digest, None), &exported_path, &name_opts(Some(60))).expect("Failed to export FASTA");
 
     let mut store2 = RefgetStore::in_memory();
     store2
@@ -886,13 +900,23 @@ fn test_export_fasta_by_digests() {
         .values()
         .map(|r| r.metadata().sha512t24u.clone())
         .collect();
-    let digest_refs: Vec<&str> = digests.iter().map(|s| s.as_str()).collect();
 
     let output_path = temp_dir.path().join("exported_by_digests.fa");
-    store.export_fasta_by_digests(digest_refs, &output_path, Some(80)).unwrap();
+    let opts = ExportOptions { line_width: Some(80), ..Default::default() };
+    store.export_fasta(&ExportSelection::SeqDigests(digests.clone()), &output_path, &opts).unwrap();
 
     let exported = fs::read_to_string(&output_path).unwrap();
-    assert!(exported.contains(">chr1") && exported.contains(">chr2") && exported.contains(">chr3"));
+    for d in &digests {
+        assert!(exported.contains(&format!(">SQ.{}\n", d)), "missing {d}");
+    }
+
+    // SQ.-prefixed digests are accepted, and a name template falls back to {seq}.
+    let prefixed: Vec<String> = digests.iter().map(|d| format!("SQ.{}", d)).collect();
+    let summary = store
+        .export_fasta(&ExportSelection::SeqDigests(prefixed), &output_path, &name_opts(None))
+        .unwrap();
+    assert_eq!(summary.n_fallbacks, digests.len());
+    assert_eq!(fs::read_to_string(&output_path).unwrap().matches(">SQ.").count(), digests.len());
 }
 
 #[test]
@@ -903,9 +927,9 @@ fn test_export_fasta_error_handling() {
     let output_path = temp_dir.path().join("should_fail.fa");
 
     let fake_collection = b"fake_collection_digest_12345678";
-    assert!(store.export_fasta(fake_collection, &output_path, None, Some(80)).is_err());
+    assert!(store.export_fasta(&coll_sel(fake_collection, None), &output_path, &name_opts(Some(80))).is_err());
 
-    assert!(store.export_fasta(&collection_digest, &output_path, Some(vec!["nonexistent_chr"]), Some(80)).is_err());
+    assert!(store.export_fasta(&coll_sel(collection_digest, Some(&["nonexistent_chr"])), &output_path, &name_opts(Some(80))).is_err());
 }
 
 #[test]
@@ -938,7 +962,7 @@ fn test_export_fasta_after_load_local() {
 
     let output_path = temp_path.join("exported.fa");
     loaded_store
-        .export_fasta(&collection_digest, &output_path, None, Some(80))
+        .export_fasta(&coll_sel(collection_digest, None), &output_path, &name_opts(Some(80)))
         .expect("export_fasta should work on disk-loaded stores");
 
     let exported = fs::read_to_string(&output_path).unwrap();
@@ -4003,11 +4027,13 @@ fn test_lazy_sequence_reads_load_only_requested_records() {
 }
 
 #[test]
-fn test_export_fasta_lazy_loads_only_requested_sequence() {
+fn test_export_fasta_streams_without_loading_from_deferred_state() {
     // Same deferred-remote-index simulation as
     // test_lazy_sequence_reads_load_only_requested_records, but exercising
     // the mutable export_fasta wrapper directly from the deferred state
     // (before anything else has touched the collection or its sequences).
+    // The export loads the index and collection metadata, but streams the
+    // sequence bytes without loading any sequence into the store.
     let dir = tempdir().unwrap();
     let store_path = dir.path().join("store");
     let fasta_path = dir.path().join("test.fa");
@@ -4041,27 +4067,25 @@ fn test_export_fasta_lazy_loads_only_requested_sequence() {
 
     let output_path = dir.path().join("export_chr1.fa");
     store
-        .export_fasta(&collection.digest, &output_path, Some(vec!["chr1"]), None)
-        .expect("export_fasta should lazily load only the requested sequence");
+        .export_fasta(&coll_sel(&collection.digest, Some(&["chr1"])), &output_path, &name_opts(None))
+        .expect("export_fasta should stream the requested sequence");
 
     let exported = fs::read_to_string(&output_path).unwrap();
     assert!(exported.contains(">chr1"));
     assert!(exported.contains("ATGCATGC"));
     assert!(!exported.contains(">chr2"));
 
+    assert!(store.inner.sequence_index_loaded);
     assert!(
-        store.inner.is_sequence_loaded(&first.sha512t24u),
-        "chr1 should be loaded after exporting it"
+        !store.inner.is_sequence_loaded(&first.sha512t24u),
+        "chr1 should stay unloaded: export streams it"
     );
-    assert!(
-        !store.inner.is_sequence_loaded(&second.sha512t24u),
-        "chr2 should remain unloaded: it was not requested"
-    );
+    assert!(!store.inner.is_sequence_loaded(&second.sha512t24u));
 }
 
 #[test]
-fn test_export_fasta_lazy_loads_duplicate_named_sequences() {
-    // Two records share a name; export must load whichever one it writes.
+fn test_export_fasta_duplicate_named_sequences() {
+    // Two records share a name within one collection.
     let dir = tempdir().unwrap();
     let store_path = dir.path().join("store");
     let fasta_path = dir.path().join("dup.fa");
@@ -4075,10 +4099,19 @@ fn test_export_fasta_lazy_loads_duplicate_named_sequences() {
 
     let mut store = RefgetStore::open_local(&store_path).unwrap();
     let output_path = dir.path().join("dup_out.fa");
+    // Same label for two different sequences is a clash.
+    let err = store
+        .export_fasta(&coll_sel(&collection.digest, Some(&["dup"])), &output_path, &name_opts(None))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("'dup'") && err.contains("{col}"), "{err}");
+    // Digest labels keep both.
     store
-        .export_fasta(&collection.digest, &output_path, Some(vec!["dup"]), None)
-        .expect("export should load the sequence it writes");
-    assert!(fs::read_to_string(&output_path).unwrap().starts_with(">dup\n"));
+        .export_fasta(&coll_sel(&collection.digest, Some(&["dup"])), &output_path, &ExportOptions::default())
+        .expect("digest labels are unique");
+    let out = fs::read_to_string(&output_path).unwrap();
+    assert_eq!(out.matches(">SQ.").count(), 2);
+    assert!(out.contains("AAAA") && out.contains("CCCC"));
 }
 
 #[test]
@@ -6145,4 +6178,312 @@ fn verify_parallel_matches_serial() {
         assert_eq!(a.kind, b.kind);
     }
     assert_eq!(serial.by_alphabet, parallel.by_alphabet);
+}
+
+// =========================================================================
+// Streaming export: chunked decode, no lingering loads, label rules
+// =========================================================================
+
+/// Decode a whole sequence and wrap it: the reference the chunked writer must match.
+fn reference_record(header: &str, seq: &str, line_width: usize) -> String {
+    let mut out = format!(">{}\n", header);
+    if line_width == 0 {
+        out.push_str(seq);
+        out.push('\n');
+    } else {
+        for line in seq.as_bytes().chunks(line_width) {
+            out.push_str(std::str::from_utf8(line).unwrap());
+            out.push('\n');
+        }
+    }
+    out
+}
+
+#[test]
+fn test_write_fasta_record_chunking_matches_whole_decode() {
+    use super::export::write_fasta_record;
+    use crate::digest::{encode_sequence, lookup_alphabet};
+
+    let alphabets = [
+        (AlphabetType::Dna2bit, "ACGT"),
+        (AlphabetType::Dna3bit, "ACGTN"),
+        (AlphabetType::DnaIupac, "ACGTRYKMN"),
+        (AlphabetType::Protein, "ACDEFGHIKLMNPQRSTVWY*"),
+    ];
+    let chunk_bases = 5;
+    for (alphabet, letters) in alphabets {
+        for line_width in [0usize, 1, 3, 7, 80] {
+            // Lengths around the effective chunk edge, which is a multiple of line_width.
+            let chunk = if line_width == 0 { chunk_bases } else { (chunk_bases / line_width).max(1) * line_width };
+            for len in [0, 1, chunk - 1, chunk, chunk + 1, 3 * chunk + 2] {
+                let seq: String = letters.chars().cycle().take(len).collect();
+                let meta = SequenceMetadata { length: len, alphabet, ..Default::default() };
+                let encoded = encode_sequence(&seq, lookup_alphabet(&alphabet)).unwrap();
+                let zstd = zstd::encode_all(seq.as_bytes(), 3).unwrap();
+                for (mode, data) in [
+                    (StorageMode::Encoded, encoded.as_slice()),
+                    (StorageMode::Raw, seq.as_bytes()),
+                    (StorageMode::Zstd, zstd.as_slice()),
+                ] {
+                    let mut out: Vec<u8> = Vec::new();
+                    write_fasta_record(&mut out, "h", &meta, data, mode, line_width, chunk_bases).unwrap();
+                    assert_eq!(
+                        String::from_utf8(out).unwrap(),
+                        reference_record("h", &seq, line_width),
+                        "{alphabet:?} {mode:?} len={len} width={line_width}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn test_export_leaves_no_sequence_loaded() {
+    let dir = tempdir().unwrap();
+    let store_path = dir.path().join("store");
+    let fasta = dir.path().join("t.fa");
+    fs::write(&fasta, ">chr1\nACGTACGTAC\n>chr2\nGGGGAAAA\n").unwrap();
+    let digest = {
+        let mut w = RefgetStore::on_disk(&store_path).unwrap();
+        w.add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new()).unwrap().0.digest
+    };
+    let bed = dir.path().join("r.bed");
+    fs::write(&bed, "chr1\t0\t4\nchr2\t2\t6\n").unwrap();
+
+    let mut store = RefgetStore::open_local(&store_path).unwrap();
+    store.set_quiet(true);
+    let out = dir.path().join("o.fa");
+    let all_digests: Vec<String> = store.list_sequences().unwrap().into_iter().map(|m| m.sha512t24u).collect();
+    let selections = [
+        coll_sel(&digest, None),
+        coll_sel(&digest, Some(&["chr2"])),
+        ExportSelection::SeqDigests(all_digests.clone()),
+        ExportSelection::All,
+    ];
+    for sel in &selections {
+        for opts in [ExportOptions::default(), name_opts(None)] {
+            store.export_fasta(sel, &out, &opts).unwrap();
+            for d in &all_digests {
+                assert!(!store.is_sequence_loaded(d), "{sel:?} left {d} loaded");
+            }
+        }
+    }
+    let label = LabelTemplate::parse("name").unwrap();
+    store
+        .export_fasta_from_regions(&digest, bed.to_str().unwrap(), out.to_str().unwrap(), &label)
+        .unwrap();
+    assert_eq!(fs::read_to_string(&out).unwrap(), ">chr1:0-4\nACGT\n>chr2:2-6\nGGAA\n");
+    for d in &all_digests {
+        assert!(!store.is_sequence_loaded(d));
+    }
+}
+
+#[test]
+fn test_sequence_bytes_does_not_create_local_file() {
+    let dir = tempdir().unwrap();
+    let store_path = dir.path().join("store");
+    let fasta = dir.path().join("t.fa");
+    fs::write(&fasta, ">chr1\nACGTACGTAC\n").unwrap();
+    {
+        let mut w = RefgetStore::on_disk(&store_path).unwrap();
+        w.add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new()).unwrap();
+    }
+    let mut store = RefgetStore::open_local(&store_path).unwrap();
+    let meta = store.list_sequences().unwrap().remove(0);
+    let path = store.sequence_file_path(&meta.sha512t24u).unwrap();
+    fs::remove_file(&path).unwrap();
+    assert!(store.inner.sequence_bytes(&meta.sha512t24u.to_key()).is_err());
+    assert!(!path.exists(), "sequence_bytes must not create the .seq file");
+}
+
+/// Label-rule fixture:
+/// - collections A and B share S1 under the same name (`chr1`) and S2 under
+///   different names (`x` in A, `y` in B); A also has `onlyA`;
+/// - collection C (`c1`) has two aliases in one namespace;
+/// - S1 has aliases in two sequence namespaces;
+/// - one orphan sequence in no collection, with no alias.
+struct LabelFixture {
+    store: RefgetStore,
+    a: String,
+    b: String,
+    c: String,
+    s1: String,
+    orphan: String,
+    _dir: tempfile::TempDir,
+}
+
+fn label_fixture() -> LabelFixture {
+    let dir = tempdir().unwrap();
+    let write = |name: &str, body: &str| {
+        let p = dir.path().join(name);
+        fs::write(&p, body).unwrap();
+        p
+    };
+    let fa = write("a.fa", ">chr1\nACGTACGT\n>x\nGGGGCCCC\n>onlyA\nTTTTAAAA\n");
+    let fb = write("b.fa", ">chr1\nACGTACGT\n>y\nGGGGCCCC\n>onlyB\nCCCCAAAA\n");
+    let fc = write("c.fa", ">c1\nAACCGGTT\n");
+    let fo = write("o.fa", ">orphan\nTGCATGCA\n");
+
+    let mut store = RefgetStore::in_memory();
+    store.set_quiet(true);
+    let a = store.add_sequence_collection_from_fasta(&fa, FastaImportOptions::new()).unwrap().0.digest;
+    let b = store.add_sequence_collection_from_fasta(&fb, FastaImportOptions::new()).unwrap().0.digest;
+    let c = store.add_sequence_collection_from_fasta(&fc, FastaImportOptions::new()).unwrap().0.digest;
+
+    // The orphan: a sequence record with no collection.
+    let mut other = RefgetStore::in_memory();
+    other.add_sequence_collection_from_fasta(&fo, FastaImportOptions::new()).unwrap();
+    let (okey, orec) = other.inner.sequence_store.iter().next().map(|(k, r)| (*k, r.clone())).unwrap();
+    let orphan = orec.metadata().sha512t24u.clone();
+    store.inner.sequence_store.insert(okey, orec);
+
+    let s1 = store.get_sequence_by_name(&a, "chr1").unwrap().metadata().sha512t24u.clone();
+    store.add_sequence_alias("refseq", "NC_1", &s1).unwrap();
+    store.add_sequence_alias("ensembl", "E1", &s1).unwrap();
+    store.add_collection_alias("ucsc", "genA", &a).unwrap();
+    store.add_collection_alias("ucsc", "genB", &b).unwrap();
+    store.add_collection_alias("ucsc", "zzz", &c).unwrap();
+    store.add_collection_alias("ucsc", "cgen", &c).unwrap();
+
+    LabelFixture { store, a, b, c, s1, orphan, _dir: dir }
+}
+
+fn export_headers(store: &mut RefgetStore, sel: &ExportSelection, label: &str) -> anyhow::Result<(Vec<String>, ExportSummary)> {
+    let dir = tempdir().unwrap();
+    let out = dir.path().join("o.fa");
+    let opts = ExportOptions { label: LabelTemplate::parse(label)?, molecule: None, line_width: None };
+    let summary = store.export_fasta(sel, &out, &opts)?;
+    let headers = fs::read_to_string(&out)
+        .unwrap()
+        .lines()
+        .filter_map(|l| l.strip_prefix('>').map(str::to_string))
+        .collect();
+    Ok((headers, summary))
+}
+
+#[test]
+fn test_label_seq_with_all_writes_each_sequence_once() {
+    let mut f = label_fixture();
+    let (headers, summary) = export_headers(&mut f.store, &ExportSelection::All, "{seq}").unwrap();
+    let mut unique: Vec<String> = f.store.list_sequences().unwrap().into_iter().map(|m| format!("SQ.{}", m.sha512t24u)).collect();
+    unique.sort();
+    assert_eq!(headers, unique, "digest order, each once");
+    assert!(headers.contains(&format!("SQ.{}", f.orphan)));
+    assert_eq!(summary.n_records, unique.len());
+    assert_eq!(summary.n_fallbacks, 0);
+}
+
+#[test]
+fn test_label_collection_name_writes_each_genome_copy() {
+    let mut f = label_fixture();
+    let (headers, summary) = export_headers(&mut f.store, &ExportSelection::All, "{col}/{name}").unwrap();
+    for h in [format!("{}/chr1", f.a), format!("{}/chr1", f.b), format!("{}/x", f.a), format!("{}/y", f.b)] {
+        assert!(headers.contains(&h), "missing {h}");
+    }
+    // 3 + 3 + 1 collection records, plus the orphan as {seq}, counted as a fallback.
+    assert_eq!(summary.n_records, 8);
+    assert_eq!(headers.last().unwrap(), &format!("SQ.{}", f.orphan));
+    assert_eq!(summary.n_fallbacks, 1);
+
+    let (headers, _) = export_headers(&mut f.store, &ExportSelection::All, "{col:ucsc}/{name}").unwrap();
+    assert!(headers.contains(&"genA/chr1".to_string()));
+    assert!(headers.contains(&"genB/chr1".to_string()));
+    // First sorted alias wins: cgen < zzz.
+    assert!(headers.contains(&"cgen/c1".to_string()));
+}
+
+#[test]
+fn test_label_alias_fallbacks_are_counted() {
+    let mut f = label_fixture();
+    let (headers, summary) = export_headers(&mut f.store, &coll_sel(&f.a, None), "seq:refseq").unwrap();
+    assert_eq!(headers[0], "NC_1");
+    assert!(headers[1].starts_with("SQ."));
+    assert_eq!(summary.n_fallbacks, 2);
+
+    // Unknown namespace errors and lists the store's namespaces.
+    let err = export_headers(&mut f.store, &coll_sel(&f.a, None), "seq:nope").unwrap_err().to_string();
+    assert!(err.contains("nope") && err.contains("refseq") && err.contains("ensembl"), "{err}");
+    let err = export_headers(&mut f.store, &coll_sel(&f.a, None), "{col:nope}/{name}").unwrap_err().to_string();
+    assert!(err.contains("nope") && err.contains("ucsc"), "{err}");
+}
+
+#[test]
+fn test_label_name_with_all_clash_and_dedup() {
+    let mut f = label_fixture();
+    let dir = tempdir().unwrap();
+    let out = dir.path().join("o.fa");
+    // Same name, same sequence everywhere: dedup, no error.
+    let (headers, summary) = export_headers(&mut f.store, &coll_sel_many(&[&f.a, &f.b], Some(&["chr1"])), "name").unwrap();
+    assert_eq!(headers, vec!["chr1"]);
+    assert_eq!(summary.n_deduplicated, 1);
+    // Across the whole fixture the only repeated name is chr1, same sequence.
+    let (_, summary) = export_headers(&mut f.store, &ExportSelection::All, "name").unwrap();
+    assert_eq!(summary.n_deduplicated, 1);
+
+    // A clash: a new collection where `chr1` is a different sequence.
+    let fd = dir.path().join("d.fa");
+    fs::write(&fd, ">chr1\nCCCCCCCC\n").unwrap();
+    f.store.add_sequence_collection_from_fasta(&fd, FastaImportOptions::new()).unwrap();
+    let opts = ExportOptions { label: LabelTemplate::parse("name").unwrap(), ..Default::default() };
+    let err = f.store.export_fasta(&ExportSelection::All, &out, &opts).unwrap_err().to_string();
+    assert!(err.contains("'chr1'") && err.contains("collection") && err.contains("{col}"), "{err}");
+    assert!(!out.exists(), "no output may be written before a label clash error");
+}
+
+fn coll_sel_many(digests: &[&str], names: Option<&[&str]>) -> ExportSelection {
+    ExportSelection::Collections {
+        digests: digests.iter().map(|d| d.to_string()).collect(),
+        names: names.map(|n| n.iter().map(|s| s.to_string()).collect()),
+    }
+}
+
+#[test]
+fn test_label_same_for_one_collection_or_all() {
+    let mut f = label_fixture();
+    for t in ["{seq}", "{col}/{name}", "{col:ucsc}#{name}", "seq:refseq"] {
+        let (one, _) = export_headers(&mut f.store, &coll_sel(&f.b, None), t).unwrap();
+        let (all, _) = export_headers(&mut f.store, &ExportSelection::All, t).unwrap();
+        for h in &one {
+            assert!(all.contains(h), "{t}: {h} missing from All");
+        }
+    }
+    let _ = (&f.c, &f.s1);
+}
+
+#[test]
+fn test_label_whitespace_is_an_error() {
+    let mut f = label_fixture();
+    f.store.add_sequence_alias("spacey", "has space", &f.s1.clone()).unwrap();
+    let err = export_headers(&mut f.store, &coll_sel(&f.a, None), "seq:spacey").unwrap_err().to_string();
+    assert!(err.contains("whitespace"), "{err}");
+    let err = export_headers(&mut f.store, &coll_sel(&f.a, None), "{name} x").unwrap_err().to_string();
+    assert!(err.contains("whitespace"), "{err}");
+}
+
+#[test]
+fn test_molecule_filter() {
+    let dir = tempdir().unwrap();
+    let fasta = dir.path().join("mix.fa");
+    fs::write(&fasta, ">dna\nACGTACGT\n>prot\nMKVLAAGIVGEFHW\n").unwrap();
+    let mut store = RefgetStore::in_memory();
+    store.set_quiet(true);
+    let digest = store.add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new()).unwrap().0.digest;
+    let out = dir.path().join("o.fa");
+    for (molecule, expected) in [
+        (None, vec!["dna", "prot"]),
+        (Some(Molecule::Dna), vec!["dna"]),
+        (Some(Molecule::Protein), vec!["prot"]),
+    ] {
+        let opts = ExportOptions { label: LabelTemplate::parse("name").unwrap(), molecule, line_width: None };
+        store.export_fasta(&coll_sel(&digest, None), &out, &opts).unwrap();
+        let headers: Vec<String> = fs::read_to_string(&out)
+            .unwrap()
+            .lines()
+            .filter_map(|l| l.strip_prefix('>').map(str::to_string))
+            .collect();
+        assert_eq!(headers, expected, "{molecule:?}");
+    }
+    assert!("rna".parse::<Molecule>().is_err());
+    assert_eq!("DNA".parse::<Molecule>().unwrap(), Molecule::Dna);
 }

@@ -435,7 +435,7 @@ test_that("verify_store detects a corrupted sequence", {
   expect_equal(result2$n_failed, 1)
 })
 
-test_that("export_fasta creates valid FASTA", {
+test_that("export_fasta creates valid FASTA with digest labels", {
   skip_if_no_fasta()
   store <- refget_store()
   set_quiet(store, TRUE)
@@ -445,13 +445,13 @@ test_that("export_fasta creates valid FASTA", {
   export_path <- file.path(tempdir(), "refget_export.fa")
   on.exit(unlink(export_path))
 
-  export_fasta(store, result@digest, export_path)
-  expect_true(file.exists(export_path))
-  lines <- readLines(export_path)
-  expect_true(any(grepl("^>", lines)))
+  summary <- export_fasta(store, export_path, collections = result@digest)
+  expect_equal(summary$n_records, length(result@sequences))
+  headers <- grep("^>", readLines(export_path), value = TRUE)
+  expect_true(all(startsWith(headers, ">SQ.")))
 })
 
-test_that("export_fasta with sequence_names subset works", {
+test_that("export_fasta with names subset and name labels works", {
   skip_if_no_fasta()
   store <- refget_store()
   set_quiet(store, TRUE)
@@ -462,12 +462,33 @@ test_that("export_fasta with sequence_names subset works", {
   on.exit(unlink(export_path))
 
   seq_names <- sapply(result@sequences[1:2], function(s) s@metadata@name)
-  export_fasta(store, result@digest, export_path,
-               sequence_names = seq_names, line_width = 60L)
-  expect_true(file.exists(export_path))
+  export_fasta(store, export_path, collections = result@digest,
+               names = seq_names, label = "name", line_width = 60L)
+  headers <- grep("^>", readLines(export_path), value = TRUE)
+  expect_equal(headers, paste0(">", seq_names))
 })
 
-test_that("export_fasta_by_digests works", {
+test_that("export_fasta labels with {col}/{name} and all = TRUE", {
+  skip_if_no_fasta()
+  store <- refget_store()
+  set_quiet(store, TRUE)
+  result <- digest_fasta(fasta_path)
+  import_fasta(store, fasta_path)
+
+  export_path <- file.path(tempdir(), "refget_export_col.fa")
+  on.exit(unlink(export_path))
+
+  export_fasta(store, export_path, all = TRUE, label = "{col}/{name}")
+  headers <- grep("^>", readLines(export_path), value = TRUE)
+  seq_names <- sapply(result@sequences, function(s) s@metadata@name)
+  expect_equal(headers, paste0(">", result@digest, "/", seq_names))
+
+  summary <- export_fasta(store, export_path, all = TRUE)
+  expect_equal(summary$n_records, length(unique(
+    sapply(result@sequences, function(s) s@metadata@sha512t24u))))
+})
+
+test_that("export_fasta by seq_digests works", {
   skip_if_no_fasta()
   store <- refget_store()
   set_quiet(store, TRUE)
@@ -478,8 +499,25 @@ test_that("export_fasta_by_digests works", {
   on.exit(unlink(export_path))
 
   digests <- sapply(result@sequences[1:2], function(s) s@metadata@sha512t24u)
-  export_fasta_by_digests(store, digests, export_path, line_width = 70L)
-  expect_true(file.exists(export_path))
+  export_fasta(store, export_path, seq_digests = digests, line_width = 70L)
+  headers <- grep("^>", readLines(export_path), value = TRUE)
+  expect_equal(headers, paste0(">SQ.", digests))
+})
+
+test_that("export_fasta rejects bad templates and selections", {
+  skip_if_no_fasta()
+  store <- refget_store()
+  set_quiet(store, TRUE)
+  result <- digest_fasta(fasta_path)
+  import_fasta(store, fasta_path)
+  out <- file.path(tempdir(), "refget_export_bad.fa")
+  on.exit(unlink(out))
+
+  expect_error(export_fasta(store, out, collections = result@digest, label = "{nope}"),
+               "unknown field")
+  expect_error(export_fasta(store, out), "exactly one")
+  expect_error(export_fasta(store, out, collections = result@digest, molecule = "rna"),
+               "molecule")
 })
 
 # =========================================================================
@@ -498,10 +536,10 @@ test_that("BED file sequence extraction to FASTA works", {
 
   writeLines(c("chr1\t0\t4", "chr2\t0\t4"), temp_bed)
 
-  get_seqs_bed_file(store, result@digest, temp_bed, temp_out)
+  get_seqs_bed_file(store, result@digest, temp_bed, temp_out, label = "name")
   expect_true(file.exists(temp_out))
   output_content <- readLines(temp_out)
-  expect_true(length(output_content) > 0)
+  expect_equal(output_content[1], ">chr1:0-4")
 })
 
 test_that("BED file sequence extraction to vector works", {

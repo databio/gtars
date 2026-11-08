@@ -16,7 +16,7 @@ use gtars_refget::digest::{
 };
 use gtars_refget::digest::{md5, sha512t24u, strip_sq_prefix, AlphabetType};
 use gtars_refget::fasta::FaiRecord;
-use gtars_refget::store::{FastaImportOptions, ImportReport, ReadonlyRefgetStore, RefgetStore, StorageMode, SyncStrategy, VerifyFailure, VerifyOptions, VerifyReport};
+use gtars_refget::store::{ExportOptions, ExportSelection, ExportSummary, FastaImportOptions, ImportReport, LabelError, LabelTemplate, Molecule, ReadonlyRefgetStore, RefgetStore, StorageMode, SyncStrategy, VerifyFailure, VerifyOptions, VerifyReport};
 use gtars_refget::{expand_fasta_inputs, FastaInputs};
 // use gtars::refget::store::RetrievedSequence; // This is the Rust-native struct
 
@@ -2838,39 +2838,53 @@ impl PyRefgetStore {
 
     /// Export sequences from BED file regions to a FASTA file.
     ///
-    /// Reads a BED file defining genomic regions and exports the sequences
-    /// for those regions to a FASTA file.
+    /// Reads a BED file defining genomic regions and writes one record per
+    /// region, labeled by `label` with `:start-end` appended.
     ///
     /// Args:
     ///     collection_digest: The collection's SHA-512/24u digest.
     ///     bed_file_path: Path to BED file defining regions.
-    ///     output_file_path: Path to write the output FASTA file.
+    ///     output_file_path: Path to write the output FASTA file; "-" writes to stdout.
+    ///     label: Label template (default "{seq}"); see `export_fasta`.
+    ///
+    /// Returns:
+    ///     dict: Summary counts (n_records, n_bases, n_fallbacks, n_deduplicated).
     ///
     /// Raises:
+    ///     ValueError: If the label template is invalid.
     ///     IOError: If files cannot be read/written or sequences not found.
     ///
     /// Example:
     ///     >>> store.export_fasta_from_regions(
     ///     ...     "uC_UorBNf3YUu1YIDainBhI94CedlNeH",
     ///     ...     "regions.bed",
-    ///     ...     "output.fa"
+    ///     ...     "output.fa",
+    ///     ...     label="name",
     ///     ... )
-    fn export_fasta_from_regions(
-        &self,
+    #[pyo3(signature = (collection_digest, bed_file_path, output_file_path, label="{seq}"))]
+    fn export_fasta_from_regions<'py>(
+        &mut self,
+        py: Python<'py>,
         collection_digest: &str,
         bed_file_path: &Bound<'_, PyAny>,
         output_file_path: &Bound<'_, PyAny>,
-    ) -> PyResult<()> {
+        label: &str,
+    ) -> PyResult<Bound<'py, pyo3::types::PyDict>> {
         let bed_file_path = bed_file_path.to_string();
         let output_file_path = output_file_path.to_string();
-        self.inner
-            .export_fasta_from_regions(collection_digest, &bed_file_path, &output_file_path)
-            .map_err(|e| {
-                PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
-                    "Error exporting FASTA from regions: {}",
-                    e
-                ))
+        let label = LabelTemplate::parse(label).map_err(export_err)?;
+        let inner = &mut self.inner;
+        let summary = py
+            .detach(|| {
+                inner.export_fasta_from_regions(
+                    collection_digest,
+                    &bed_file_path,
+                    &output_file_path,
+                    &label,
+                )
             })
+            .map_err(export_err)?;
+        summary_dict(py, &summary)
     }
 
     /// Get substrings for BED file regions as a list.
@@ -2938,108 +2952,76 @@ impl PyRefgetStore {
         Ok(py_results)
     }
 
-    /// Export sequences from a collection to a FASTA file.
+    /// Export sequences as FASTA, to a file or to stdout.
     ///
-    /// This method exports sequences from a specific sequence collection (genome assembly)
-    /// using the collection digest. You can optionally filter which sequences to export
-    /// by providing sequence names.
+    /// Choose records with exactly one of `collections`, `seq_digests` or
+    /// `all`, and choose how they are labeled with `label`. Exports stream one
+    /// sequence at a time (memory stays flat) and leave the store's loaded
+    /// state unchanged; a remote store's sequences are not cached to disk.
     ///
-    /// **Use this method when:** You have a collection digest and want to export sequences
-    /// from that specific collection, optionally filtering by chromosome/sequence names.
-    ///
-    /// **Contrast with export_fasta_by_digests:** That method exports sequences by their
-    /// individual sequence digests (not collection digest) and bypasses collection
-    /// information entirely.
-    ///
-    /// Args:
-    ///     collection_digest: The collection's SHA-512/24u digest (identifies the genome
-    ///         assembly/sequence collection).
-    ///     output_path: Path to write the output FASTA file.
-    ///     sequence_names: Optional list of sequence names to export (e.g., ["chr1", "chr2"]).
-    ///         If None, exports all sequences in the collection.
-    ///     line_width: Number of bases per line in output FASTA (default: 80).
-    ///
-    /// Raises:
-    ///     IOError: If file cannot be written or collection/sequences not found.
-    ///
-    /// Example:
-    ///     >>> # Export all sequences from a collection
-    ///     >>> store.export_fasta("uC_UorBNf3YUu1YIDainBhI94CedlNeH", "output.fa", None, None)
-    ///     >>> # Export only chr1 and chr2
-    ///     >>> store.export_fasta("uC_UorBNf3YUu1YIDainBhI94CedlNeH", "output.fa", ["chr1", "chr2"], None)
-    #[pyo3(signature = (collection_digest, output_path, sequence_names=None, line_width=None))]
-    fn export_fasta(
-        &mut self,
-        collection_digest: &str,
-        output_path: &Bound<'_, PyAny>,
-        sequence_names: Option<Vec<String>>,
-        line_width: Option<usize>,
-    ) -> PyResult<()> {
-        let output_path = output_path.to_string();
-        let sequence_names_refs = sequence_names
-            .as_ref()
-            .map(|names| names.iter().map(|s| s.as_str()).collect::<Vec<&str>>());
-        self.inner
-            .export_fasta(
-                collection_digest,
-                &output_path,
-                sequence_names_refs,
-                line_width,
-            )
-            .map_err(|e| {
-                PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
-                    "Error exporting FASTA: {}",
-                    e
-                ))
-            })
-    }
-
-    /// Export sequences by their individual sequence digests to a FASTA file.
-    ///
-    /// This method exports sequences directly by their SHA-512/24u sequence digests,
-    /// bypassing collection information. Useful when you have specific sequence
-    /// identifiers and want to retrieve them regardless of which collection(s) they
-    /// belong to.
-    ///
-    /// **Use this method when:** You have a list of sequence digests (SHA-512/24u)
-    /// and want to export those specific sequences from the global sequence store.
-    ///
-    /// **Contrast with export_fasta:** That method uses a collection digest and
-    /// optionally filters by sequence names within that collection.
+    /// Label fields: `{seq}` sequence digest as a refget ID (`SQ.…`, the
+    /// default), `{seq:NS}` the sequence's alias in namespace NS, `{col}`
+    /// collection digest, `{col:NS}` the collection's alias in namespace NS,
+    /// `{name}` the sequence's name in its collection. Literal text is copied
+    /// as-is; a single field may drop its braces (`"name"`). A missing alias
+    /// falls back to the digest; records with no collection get `{seq}`. The
+    /// same label for the same sequence is written once; the same label for
+    /// different sequences is an error, raised before any output.
     ///
     /// Args:
-    ///     seq_digests: List of SHA-512/24u sequence digests (not collection digests)
-    ///         to export. Each digest identifies an individual sequence.
-    ///     output_path: Path to write the output FASTA file.
-    ///     line_width: Number of bases per line in output FASTA (default: 80).
+    ///     output_path: Path to write the FASTA file ('.gz' compresses); "-" writes to stdout.
+    ///     collections: Collection digest(s) to export.
+    ///     names: Only these sequence names in each selected collection.
+    ///     seq_digests: Sequence digests to export (no collection context).
+    ///     all: Export every collection plus sequences in no collection.
+    ///     label: Label template (default "{seq}").
+    ///     molecule: "dna" or "protein" to keep only that molecule type.
+    ///     line_width: Bases per line (default 80; 0 = one line per sequence).
+    ///
+    /// Returns:
+    ///     dict: Summary counts (n_records, n_bases, n_fallbacks, n_deduplicated).
     ///
     /// Raises:
-    ///     IOError: If file cannot be written or sequences not found.
+    ///     ValueError: Bad selection, label template, namespace, molecule, or a label clash.
+    ///     BrokenPipeError: The reader closed stdout (for example `| head`).
+    ///     IOError: If the file cannot be written or sequences are not found.
     ///
     /// Example:
-    ///     >>> # Export specific sequences by their digests
-    ///     >>> seq_digests = [
-    ///     ...     "aKF498dAxcJAqme6QYQ7EZ07-fiw8Kw2",
-    ///     ...     "bXE123dAxcJAqme6QYQ7EZ07-fiw8Kw2"
-    ///     ... ]
-    ///     >>> store.export_fasta_by_digests(seq_digests, "output.fa", None)
-    #[pyo3(signature = (seq_digests, output_path, line_width=None))]
-    fn export_fasta_by_digests(
+    ///     >>> store.export_fasta("hg38.fa", collections=[digest], label="name")
+    ///     >>> store.export_fasta("-", all=True)  # every sequence once, labeled SQ.…
+    ///     >>> store.export_fasta("all.fa", all=True, label="{col:ucsc}/{name}")
+    #[pyo3(signature = (output_path, collections=None, names=None, seq_digests=None, all=false, label="{seq}", molecule=None, line_width=None))]
+    #[allow(clippy::too_many_arguments)]
+    fn export_fasta<'py>(
         &mut self,
-        seq_digests: Vec<String>,
+        py: Python<'py>,
         output_path: &Bound<'_, PyAny>,
+        collections: Option<&Bound<'_, PyAny>>,
+        names: Option<Vec<String>>,
+        seq_digests: Option<Vec<String>>,
+        all: bool,
+        label: &str,
+        molecule: Option<&str>,
         line_width: Option<usize>,
-    ) -> PyResult<()> {
+    ) -> PyResult<Bound<'py, pyo3::types::PyDict>> {
         let output_path = output_path.to_string();
-        let digests_refs: Vec<&str> = seq_digests.iter().map(|s| s.as_str()).collect();
-        self.inner
-            .export_fasta_by_digests(digests_refs, &output_path, line_width)
-            .map_err(|e| {
-                PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
-                    "Error exporting FASTA by digests: {}",
-                    e
-                ))
-            })
+        let collections: Option<Vec<String>> = match collections {
+            None => None,
+            Some(c) if c.is_instance_of::<PyString>() => Some(vec![c.extract()?]),
+            Some(c) => Some(c.extract()?),
+        };
+        let selection = ExportSelection::from_parts(collections, names, seq_digests, all)
+            .map_err(export_err)?;
+        let opts = ExportOptions {
+            label: LabelTemplate::parse(label).map_err(export_err)?,
+            molecule: Molecule::from_opt(molecule).map_err(export_err)?,
+            line_width,
+        };
+        let inner = &mut self.inner;
+        let summary = py
+            .detach(|| inner.export_fasta(&selection, &output_path, &opts))
+            .map_err(export_err)?;
+        summary_dict(py, &summary)
     }
 
     // =========================================================================
@@ -4163,4 +4145,29 @@ pub fn refget(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyRetrievedSequence>()?;
     m.add_class::<PyFhrMetadata>()?;
     Ok(())
+}
+
+/// Map an export error: label problems -> ValueError, a closed pipe ->
+/// BrokenPipeError, anything else -> IOError.
+fn export_err(e: anyhow::Error) -> PyErr {
+    if e.chain().any(|c| c.downcast_ref::<LabelError>().is_some()) {
+        return pyo3::exceptions::PyValueError::new_err(format!("{}", e));
+    }
+    let broken_pipe = e.chain().any(|c| {
+        c.downcast_ref::<std::io::Error>()
+            .is_some_and(|io| io.kind() == std::io::ErrorKind::BrokenPipe)
+    });
+    if broken_pipe {
+        return pyo3::exceptions::PyBrokenPipeError::new_err(format!("{}", e));
+    }
+    PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error exporting FASTA: {}", e))
+}
+
+fn summary_dict<'py>(py: Python<'py>, s: &ExportSummary) -> PyResult<Bound<'py, pyo3::types::PyDict>> {
+    let d = pyo3::types::PyDict::new(py);
+    d.set_item("n_records", s.n_records)?;
+    d.set_item("n_bases", s.n_bases)?;
+    d.set_item("n_fallbacks", s.n_fallbacks)?;
+    d.set_item("n_deduplicated", s.n_deduplicated)?;
+    Ok(d)
 }

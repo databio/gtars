@@ -1,5 +1,43 @@
 # Changelog
 
+## Unreleased
+
+### Breaking
+
+- `gtars-refget`: FASTA export is one method with two independent choices.
+  `export_fasta(selection, output, opts)` replaces `export_fasta` and
+  `export_fasta_by_digests`. `ExportSelection` picks the records (one or more
+  collections with optional names, a list of sequence digests, or `All`), and
+  `ExportOptions.label` (a `LabelTemplate`) picks how they are labeled.
+  The default label is `{seq}` (`SQ.<digest>`), so callers that want
+  chromosome names must pass `{name}`. FASTA descriptions are no longer written.
+  The same change applies to the Python (`export_fasta(output_path,
+  collections=..., seq_digests=..., all=..., label=...)`), R (`export_fasta`)
+  and CLI (`gtars refget export`) interfaces.
+- `gtars-refget`: `export_fasta_from_regions` takes a label template and
+  appends `:start-end` to each label. It now returns an `ExportSummary`.
+
+### Added
+
+- `gtars-refget`: label templates with the fields `{seq}`, `{seq:NS}`,
+  `{col}`, `{col:NS}` and `{name}`, for example `{col:ucsc}/{name}`. A missing
+  alias falls back to the digest. A label repeated for the same sequence is
+  written once; a label repeated for different sequences is an error raised
+  before any output.
+- `gtars-refget`: export every sequence in a store (`ExportSelection::All`,
+  `--all`, `all=True`), and filter by molecule (`dna` or `protein`).
+- Exports write to stdout when the output path is `-`. `gtars refget export`
+  defaults to stdout, takes `--collection` more than once, and exits quietly
+  when the reader closes the pipe. Python raises `BrokenPipeError` in that case.
+
+### Fixed
+
+- `gtars-refget`: exports stream one sequence at a time and decode in chunks.
+  Peak memory is one sequence's stored bytes plus a 1 MB chunk, instead of
+  every exported sequence held in memory and never released. Exports leave
+  the store's loaded state unchanged and never write a remote store's `.seq`
+  files into the local cache.
+
 ## 0.10.0 - 2026-09-05
 
 A `gtars-refget` store-safety and store-operations release. Component

@@ -161,23 +161,13 @@ fn export_bare_digest_still_works() {
     let scratch = Scratch::new("digest");
     let store_dir = build_aliased_store(&scratch);
 
-    // List collections to find the bare digest for the resolved alias.
-    let show = run_export(&[
-        "-s",
-        store_dir.to_str().unwrap(),
-        "-c",
-        "ucsc:test",
-        "-o",
-        scratch.path().join("first.fa").to_str().unwrap(),
-    ]);
-    assert!(show.status.success());
-    let stderr = String::from_utf8_lossy(&show.stderr);
-    let digest = stderr
-        .split("Exported collection ")
-        .nth(1)
-        .and_then(|rest| rest.split_whitespace().next())
-        .expect("expected digest in export output")
-        .to_string();
+    // The store's one collection file is named by its digest.
+    let digest = std::fs::read_dir(store_dir.join("collections"))
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter_map(|e| e.file_name().to_str()?.strip_suffix(".rgsi").map(str::to_string))
+        .next()
+        .expect("expected one collection file");
 
     let out_fa = scratch.path().join("out.fa");
     let output = run_export(&[
@@ -194,4 +184,24 @@ fn export_bare_digest_still_works() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert!(out_fa.exists());
+}
+
+#[test]
+fn export_streams_to_stdout_with_labels() {
+    let scratch = Scratch::new("stdout");
+    let store_dir = build_aliased_store(&scratch);
+
+    let output = run_export(&["-s", store_dir.to_str().unwrap(), "--all", "-l", "{col:ucsc}/{name}"]);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout, ">test/chr1\nAAAACCCC\n>test/chr2\nGGGGTTTT\n");
+
+    let output = run_export(&["-s", store_dir.to_str().unwrap(), "--all"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.matches(">SQ.").count(), 2);
+
+    let output = run_export(&["-s", store_dir.to_str().unwrap(), "--all", "-l", "{bad}"]);
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("unknown field"));
 }

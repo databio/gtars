@@ -709,25 +709,51 @@ setMethod('write_store', 'RefgetStore', function(store) {
   invisible(store)
 })
 
+#' Export sequences as FASTA, to a file or to stdout.
+#'
+#' Choose records with exactly one of \code{collections}, \code{seq_digests}
+#' or \code{all}; choose how they are labeled with \code{label}. Exports
+#' stream one sequence at a time and leave the store's loaded state unchanged.
+#'
+#' Label fields: \code{{seq}} sequence digest (\code{SQ.}...), the default;
+#' \code{{seq:NS}} the sequence's alias in namespace NS; \code{{col}}
+#' collection digest; \code{{col:NS}} the collection's alias in namespace NS;
+#' \code{{name}} the sequence's name in its collection. A single field may drop
+#' its braces (\code{"name"}). A missing alias falls back to the digest. The
+#' same label for the same sequence is written once; the same label for
+#' different sequences is an error, raised before any output.
+#'
+#' @param store A RefgetStore object
+#' @param output_path Output FASTA path ('.gz' compresses), or "-" for stdout
+#' @param collections Collection digest(s) to export
+#' @param names Only these sequence names in each selected collection
+#' @param seq_digests Sequence digests to export (no collection context)
+#' @param all Export every collection plus sequences in no collection
+#' @param label Label template (default "{seq}")
+#' @param molecule NULL, "dna" or "protein"
+#' @param line_width Bases per line (default 80; 0 = one line per sequence)
+#' @return A named list of counts: n_records, n_bases, n_fallbacks, n_deduplicated
 #' @export
-setGeneric('export_fasta', function(store, collection_digest, output_path, sequence_names = NULL, line_width = 80L) standardGeneric('export_fasta'))
-setMethod('export_fasta', 'RefgetStore', function(store, collection_digest, output_path, sequence_names = NULL, line_width = 80L) {
-  .Call(wrap__export_fasta_store, store@ptr, collection_digest, output_path, sequence_names, as.integer(line_width))
-  invisible(store)
+setGeneric('export_fasta', function(store, output_path, collections = NULL, names = NULL, seq_digests = NULL, all = FALSE, label = "{seq}", molecule = NULL, line_width = 80L) standardGeneric('export_fasta'))
+setMethod('export_fasta', 'RefgetStore', function(store, output_path, collections = NULL, names = NULL, seq_digests = NULL, all = FALSE, label = "{seq}", molecule = NULL, line_width = 80L) {
+  invisible(.Call(wrap__export_fasta_store, store@ptr, output_path, collections, names, seq_digests, all, label, molecule, as.integer(line_width)))
 })
 
+#' Export BED regions from a collection as FASTA.
+#'
+#' Writes one record per region, labeled by \code{label} (see
+#' \code{export_fasta}) with \code{:start-end} appended.
+#'
+#' @param store A RefgetStore object
+#' @param collection_digest Sequence collection digest
+#' @param bed_file_path Path to BED file
+#' @param output_file_path Output FASTA path, or "-" for stdout
+#' @param label Label template (default "{seq}")
+#' @return A named list of counts
 #' @export
-setGeneric('export_fasta_by_digests', function(store, seq_digests, output_path, line_width = 80L) standardGeneric('export_fasta_by_digests'))
-setMethod('export_fasta_by_digests', 'RefgetStore', function(store, seq_digests, output_path, line_width = 80L) {
-  .Call(wrap__export_fasta_by_digests_store, store@ptr, seq_digests, output_path, as.integer(line_width))
-  invisible(store)
-})
-
-#' @export
-setGeneric('get_seqs_bed_file', function(store, collection_digest, bed_file_path, output_file_path) standardGeneric('get_seqs_bed_file'))
-setMethod('get_seqs_bed_file', 'RefgetStore', function(store, collection_digest, bed_file_path, output_file_path) {
-  .Call(wrap__get_seqs_bed_file_store, store@ptr, collection_digest, bed_file_path, output_file_path)
-  invisible(store)
+setGeneric('get_seqs_bed_file', function(store, collection_digest, bed_file_path, output_file_path, label = "{seq}") standardGeneric('get_seqs_bed_file'))
+setMethod('get_seqs_bed_file', 'RefgetStore', function(store, collection_digest, bed_file_path, output_file_path, label = "{seq}") {
+  invisible(.Call(wrap__get_seqs_bed_file_store, store@ptr, collection_digest, bed_file_path, output_file_path, label))
 })
 
 #' @export
