@@ -4112,6 +4112,19 @@ fn test_export_fasta_duplicate_named_sequences() {
     let out = fs::read_to_string(&output_path).unwrap();
     assert_eq!(out.matches(">SQ.").count(), 2);
     assert!(out.contains("AAAA") && out.contains("CCCC"));
+
+    // A BED region on a repeated name labels the record whose bases it writes.
+    let bed = dir.path().join("dup.bed");
+    fs::write(&bed, "dup\t0\t4\n").unwrap();
+    let out_str = output_path.to_str().unwrap();
+    store
+        .export_fasta_from_regions(&collection.digest, bed.to_str().unwrap(), out_str, &LabelTemplate::default())
+        .unwrap();
+    let out = fs::read_to_string(&output_path).unwrap();
+    let (header, bases) = out.trim_end().split_once('\n').unwrap();
+    let digest = header.trim_start_matches(">SQ.").split(':').next().unwrap();
+    assert_eq!(bases, "CCCC");
+    assert_eq!(store.get_substring(digest, 0, 4).unwrap(), bases);
 }
 
 #[test]

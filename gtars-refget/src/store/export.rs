@@ -540,13 +540,14 @@ impl ReadonlyRefgetStore {
         let collection_str = key_to_digest_string(&collection_key);
         let maps = self.label_alias_maps(label)?;
 
-        // Label each name once, from this collection's own records.
+        // Label each name once, from this collection's own records. A repeated
+        // name keeps its last record, as the region lookup does.
         let mut name_labels: HashMap<&str, (String, bool)> = HashMap::new();
         for rec in self.collection_sequence_metadata(&collection_key)? {
             let meta = rec.metadata();
             let rendered = label.render(&meta.sha512t24u, Some((&collection_str, &meta.name)), &maps);
             check_label_whitespace(&rendered.0)?;
-            name_labels.entry(meta.name.as_str()).or_insert(rendered);
+            name_labels.insert(meta.name.as_str(), rendered);
         }
 
         let seq_iter = self.substrings_from_regions(&collection_digest, bed_file_path)?;
@@ -741,16 +742,16 @@ impl ReadonlyRefgetStore {
         let key = digest.to_key();
         let digest_str = key_to_digest_string(&key);
         let records = self.collection_sequence_metadata(&key)?;
+        let wanted: Option<HashSet<&str>> = names.map(|ns| ns.iter().map(String::as_str).collect());
         if let Some(names) = names {
-            for n in names {
-                if !records.iter().any(|r| &r.metadata().name == n) {
-                    return Err(anyhow!("Sequence '{}' not found in collection {}", n, digest_str));
-                }
+            let present: HashSet<&str> = records.iter().map(|r| r.metadata().name.as_str()).collect();
+            if let Some(n) = names.iter().find(|n| !present.contains(n.as_str())) {
+                return Err(anyhow!("Sequence '{}' not found in collection {}", n, digest_str));
             }
         }
         for rec in records {
             let m = rec.metadata();
-            if names.is_some_and(|ns| !ns.contains(&m.name)) {
+            if wanted.as_ref().is_some_and(|w| !w.contains(m.name.as_str())) {
                 continue;
             }
             let seq_key = m.sha512t24u.to_key();
