@@ -1,0 +1,76 @@
+[package]
+name = "gtars-rgblast"
+version = "0.1.0"
+edition = "2024"
+description = "BLAST nucleotide databases built straight from a RefgetStore (rgmakeblastdb)"
+license = "BSD-2-Clause AND OLDAP-2.8"
+repository = "https://github.com/databio/gtars"
+# Not on crates.io yet. Lift this (and give the crate a crates.io version) before
+# a gtars release ships gtars-rgblast through gtars-cli: a published gtars-cli
+# cannot depend on an unpublished crate.
+publish = false
+
+[features]
+default = []
+reference-fasta = []                  # plan -> FASTA that makeblastdb turns into the same database
+blastplus = ["reference-fasta"]       # tests that run BLAST+ (PATH or docker)
+golden = ["blastplus"]                # byte-identity canary pinned to BLAST+ 2.17.0
+
+[dependencies]
+gtars-refget = { path = "../gtars-refget", version = "0.11.1", default-features = false, features = ["filesystem", "http"] }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+zstd = "0.13"
+md-5 = "0.10.5"
+sha2 = "0.10.7"
+clap = { version = "4.4.7", features = ["derive"] }
+libc = "0.2"
+memmap2 = "0.9"
+tempfile = "3.8.1"
+
+[dev-dependencies]
+tempfile = "3.8.1"
+flate2 = { workspace = true }
+
+[[bin]]
+name = "rgmakeblastdb"
+path = "src/bin/rgmakeblastdb.rs"
+
+[[bin]]
+name = "rgblast"
+path = "src/bin/rgblast.rs"
+
+[[bin]]
+name = "rgblastn"
+path = "src/bin/rgblastn.rs"
+
+[[test]]
+name = "blastplus"
+required-features = ["blastplus"]
+
+[[test]]
+name = "golden"
+required-features = ["golden"]
+
+[[test]]
+name = "blastplus_taxonomy"
+required-features = ["blastplus"]
+
+[[test]]
+name = "golden_taxonomy"
+required-features = ["golden"]
+
+[[test]]
+name = "golden_origin"
+required-features = ["golden"]
+
+[[test]]
+name = "golden_search"
+required-features = ["golden"]
+
+[[test]]
+name = "golden_search_blastn"
+required-features = ["golden"]
+

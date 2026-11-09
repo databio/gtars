@@ -1,0 +1,12 @@
+#kind	namespace	alias	collection	name
+collection	insdc	GCA_TEST.1	human_b	
+collection	name	human_a	human_a	
+collection	name	human_b	human_b	
+collection	name	human_masked	human_masked	
+collection	name	mouse_a	mouse_a	
+collection	name	nofhr	nofhr	
+collection	refseq	GCF_000002.1	mouse_a	
+collection	refseq	dup	mouse_a	
+collection	ucsc	hg_test	human_a	
+collection	ucsc	dup	human_a	
+sequence	refseq	NC_TEST1.1	human_a	chr1

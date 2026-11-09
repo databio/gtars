@@ -82,13 +82,20 @@ impl RefgetStore {
         })
     }
 
-    /// Open a remote RefgetStore with local caching.
+    /// Open a remote RefgetStore.
+    ///
+    /// `cache_root` is the shared download cache (see
+    /// [`default_cache_root`](super::default_cache_root)): every remote store
+    /// opened with the same root shares its downloaded sequences. `fetch`
+    /// sets parallelism, retries and verification.
+    #[cfg(feature = "http")]
     pub fn open_remote<P: AsRef<Path>, S: AsRef<str>>(
-        cache_path: P,
+        cache_root: P,
         remote_url: S,
+        fetch: &super::FetchConfig,
     ) -> Result<Self> {
         Ok(Self {
-            inner: ReadonlyRefgetStore::open_remote(cache_path, remote_url)?,
+            inner: ReadonlyRefgetStore::open_remote(cache_root.as_ref(), remote_url.as_ref(), fetch)?,
         })
     }
 
@@ -105,6 +112,32 @@ impl RefgetStore {
     /// Servers should call this during startup to preload the index.
     pub fn load_sequence_index(&mut self) -> Result<()> {
         self.inner.load_sequence_index()
+    }
+
+    /// Load several collections; a remote store downloads the missing
+    /// collection files in parallel.
+    pub fn load_collections(&mut self, digests: &[String]) -> Result<()> {
+        self.inner.load_collections(digests)
+    }
+
+    /// Fetch the stored bytes of many sequences in parallel. Loads the
+    /// sequence index first. See [`ReadonlyRefgetStore::prefetch`].
+    #[cfg(feature = "filesystem")]
+    pub fn prefetch(&mut self, digests: &[String], opts: super::PrefetchOptions) -> Result<super::Prefetch> {
+        self.inner.ensure_sequence_index_loaded()?;
+        self.inner.prefetch(digests, opts)
+    }
+
+    /// Download sequences into the shared cache (in parallel), dropping the
+    /// bytes. Loads the sequence index first. Returns the counters.
+    #[cfg(feature = "filesystem")]
+    pub fn cache_sequences(
+        &mut self,
+        digests: &[String],
+        opts: super::PrefetchOptions,
+    ) -> Result<super::FetchCounters> {
+        self.inner.ensure_sequence_index_loaded()?;
+        self.inner.cache_sequences(digests, opts)
     }
 
     /// Preload all collections (delegates to inner).
@@ -328,9 +361,8 @@ impl RefgetStore {
         self.inner.ensure_sequence_index_loaded()?;
         match selection {
             ExportSelection::Collections { digests, .. } => {
-                for d in digests {
-                    self.inner.ensure_collection_loaded(&d.to_key())?;
-                }
+                let keys: Vec<_> = digests.iter().map(|d| d.to_key()).collect();
+                self.inner.ensure_collections_loaded(&keys)?;
             }
             ExportSelection::All if label.needs_collection() => self.inner.load_all_collections()?,
             _ => {}
@@ -340,24 +372,24 @@ impl RefgetStore {
         if self.inner.remote_source.is_some() {
             let loaded_seq = self.inner.list_sequence_alias_namespaces();
             let loaded_col = self.inner.list_collection_alias_namespaces();
-            let mut to_pull: Vec<String> = Vec::new();
-            for ns in label.namespaces(LabelObject::Seq) {
-                if !loaded_seq.contains(&ns)
-                    && self.inner.available_sequence_alias_namespaces.contains(&ns)
-                {
-                    to_pull.push(ns);
-                }
-            }
-            for ns in label.namespaces(LabelObject::Col) {
-                if !loaded_col.contains(&ns)
-                    && self.inner.available_collection_alias_namespaces.contains(&ns)
-                    && !to_pull.contains(&ns)
-                {
-                    to_pull.push(ns);
-                }
-            }
-            for ns in to_pull {
-                self.pull_aliases(Some(&ns), SyncStrategy::KeepOurs)?;
+            let seq_pull: Vec<String> = label
+                .namespaces(LabelObject::Seq)
+                .into_iter()
+                .filter(|ns| {
+                    !loaded_seq.contains(ns)
+                        && self.inner.available_sequence_alias_namespaces.contains(ns)
+                })
+                .collect();
+            let col_pull: Vec<String> = label
+                .namespaces(LabelObject::Col)
+                .into_iter()
+                .filter(|ns| {
+                    !loaded_col.contains(ns)
+                        && self.inner.available_collection_alias_namespaces.contains(ns)
+                })
+                .collect();
+            if !seq_pull.is_empty() || !col_pull.is_empty() {
+                self.pull_alias_namespaces(&seq_pull, &col_pull, SyncStrategy::KeepOurs)?;
             }
         }
         Ok(())

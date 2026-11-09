@@ -3,6 +3,8 @@
 use super::*;
 use super::alias::AliasManager;
 use super::lock::{LockOptions, StoreLock};
+#[cfg(feature = "filesystem")]
+use super::prefetch::{PrefetchOptions, PrefetchOrder, DEFAULT_MEMORY_BUDGET};
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
@@ -12,7 +14,7 @@ use indexmap::IndexMap;
 
 use anyhow::{anyhow, Context, Result};
 
-use crate::collection::{read_rgsi_file, SequenceMetadataExt, SequenceRecordExt};
+use crate::collection::{SequenceMetadataExt, SequenceRecordExt};
 use crate::digest::lookup_alphabet;
 use crate::digest::{
     SequenceCollectionMetadata, SequenceCollectionRecord, SequenceMetadata,
@@ -103,6 +105,7 @@ fn is_missing_seq_file(err: &anyhow::Error) -> bool {
 /// single cached download wins; below the threshold, fetching only the touched
 /// bytes is cheaper than pulling a whole chromosome. Heuristic, count-based:
 /// small/ad-hoc reads stay lean, bulk reads promote.
+#[cfg(feature = "filesystem")]
 const REMOTE_BULK_FETCH_THRESHOLD: usize = 16;
 
 /// Convert decoded sequence bytes into a `String` without re-validating UTF-8.
@@ -230,83 +233,18 @@ impl Read for ArcSliceReader {
     }
 }
 
-/// Open a bounded HTTP byte range against a remote refget store and return
-/// a `Read` yielding exactly `byte_end - byte_start` bytes.
-#[cfg(feature = "http")]
-fn open_remote_range(
-    remote: &str,
-    relpath: &Path,
-    byte_start: u64,
-    byte_end: u64,
-) -> Result<Box<dyn Read + Send>> {
-    let relpath_str = relpath
-        .to_str()
-        .ok_or_else(|| anyhow!("Non-UTF8 sequence path"))?;
-    let url = if remote.ends_with('/') {
-        format!("{}{}", remote, relpath_str)
-    } else {
-        format!("{}/{}", remote, relpath_str)
-    };
-
-    let byte_len = byte_end - byte_start;
-    let last_byte = byte_end.saturating_sub(1);
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_connect(Some(std::time::Duration::from_secs(30)))
-        .timeout_recv_response(Some(std::time::Duration::from_secs(60)))
-        .build()
-        .into();
-    let response = agent
-        .get(&url)
-        .header("Range", &format!("bytes={}-{}", byte_start, last_byte))
-        .call()
-        .map_err(|e| anyhow!("Failed to open remote byte range: {}", e))?;
-
-    // Guard against servers that ignore the Range header and return the full
-    // body with HTTP 200 instead of a 206 Partial Content slice. Wrapping the
-    // full body here would silently produce wrong bases, so refuse outright.
-    let status = response.status();
-    if status.as_u16() != 206 {
-        return Err(anyhow!(
-            "Remote server did not honor Range header (got HTTP {}); \
-             refusing to stream to avoid silent data corruption. URL: {}",
-            status,
-            url
-        ));
-    }
-
-    Ok(Box::new(BufReader::with_capacity(
-        64 * 1024,
-        response.into_body().into_reader().take(byte_len),
-    )))
-}
+/// Stand-in for the fetcher when the `http` feature is off; never constructed.
+#[cfg(not(feature = "http"))]
+struct NoFetcher;
 
 #[cfg(not(feature = "http"))]
-fn open_remote_range(
-    _remote: &str,
-    _relpath: &Path,
-    _byte_start: u64,
-    _byte_end: u64,
-) -> Result<Box<dyn Read + Send>> {
-    Err(anyhow!(
-        "Remote streaming requires the 'http' feature to be enabled"
-    ))
-}
+impl NoFetcher {
+    fn get_range(&self, _rel: &str, _start: u64, _end: u64) -> Result<Vec<u8>> {
+        Err(anyhow!("Remote access requires the 'http' feature to be enabled"))
+    }
 
-/// The stored bytes of one sequence, from wherever they live. See
-/// [`ReadonlyRefgetStore::sequence_bytes`].
-pub(crate) enum SeqBytes<'a> {
-    Borrowed(&'a [u8]),
-    Shared(Arc<Vec<u8>>),
-    Owned(Vec<u8>),
-}
-
-impl SeqBytes<'_> {
-    pub(crate) fn as_slice(&self) -> &[u8] {
-        match self {
-            SeqBytes::Borrowed(b) => b,
-            SeqBytes::Shared(a) => a.as_slice(),
-            SeqBytes::Owned(v) => v.as_slice(),
-        }
+    fn open_range(&self, _rel: &str, _start: u64, _end: u64) -> Result<Box<dyn Read + Send>> {
+        Err(anyhow!("Remote access requires the 'http' feature to be enabled"))
     }
 }
 
@@ -371,7 +309,7 @@ pub struct ReadonlyRefgetStore {
     /// is mode-agnostic and only the sliced span is ever decoded. `RwLock` so many
     /// readers proceed concurrently; the `Arc` is cloned out under a brief read
     /// lock and decoded after the lock is dropped, so decodes never serialize.
-    resident: RwLock<HashMap<DigestKey, Arc<Vec<u8>>>>,
+    pub(crate) resident: RwLock<HashMap<DigestKey, Arc<Vec<u8>>>>,
     /// Whether the sequence index (sequences.rgsi) has been loaded.
     /// For remote stores, this starts as `false` and is lazily loaded on first
     /// sequence access, avoiding the costly download when only browsing collections.
@@ -396,6 +334,13 @@ pub struct ReadonlyRefgetStore {
     /// conflict, not a merge detail. Never overrides a clash within one load
     /// (one TSV, or one FASTA's header tags).
     pub(crate) force_alias: bool,
+    /// Downloads files from the remote store (remote stores only).
+    #[cfg(feature = "http")]
+    pub(crate) fetcher: Option<Arc<super::fetch::Fetcher>>,
+    /// The shared download cache that holds this remote store's `.seq` files
+    /// (remote stores only). Metadata lives in `local_path`, the remote's
+    /// origin folder inside the same cache.
+    pub(crate) seq_cache: Option<super::cache::SeqCache>,
 }
 
 /// What this handle has actually created, modified, or deleted since its last
@@ -588,7 +533,41 @@ impl ReadonlyRefgetStore {
             commit_lock: None,
             lock_options: LockOptions::default(),
             force_alias: false,
+            #[cfg(feature = "http")]
+            fetcher: None,
+            seq_cache: None,
         }
+    }
+
+    /// Network and cache counters of this store since it opened. Zeros for a
+    /// local store.
+    pub fn fetch_stats(&self) -> super::fetch::FetchCounters {
+        #[cfg(feature = "http")]
+        if let Some(f) = &self.fetcher {
+            return f.counters();
+        }
+        super::fetch::FetchCounters::default()
+    }
+
+    /// Resolve a sha512t24u or md5 digest, with or without `SQ.`.
+    pub(crate) fn resolve_sequence_key(&self, digest: &str) -> Option<DigestKey> {
+        let key = crate::digest::strip_sq_prefix(digest).to_key();
+        if self.sequence_store.contains_key(&key) {
+            return Some(key);
+        }
+        self.md5_lookup.get(&key).copied().filter(|k| self.sequence_store.contains_key(k))
+    }
+
+    /// Where a sequence's `.seq` file lives on this machine: the local store's
+    /// own file, or (remote stores) its file in the shared cache. `None` when
+    /// the store has no files.
+    pub(crate) fn local_seq_path(&self, meta: &SequenceMetadata) -> Option<PathBuf> {
+        if let Some(cache) = &self.seq_cache {
+            return Some(cache.seq_path(self.mode, meta.alphabet, &meta.sha512t24u));
+        }
+        let local_path = self.local_path.as_ref()?;
+        let template = self.seqdata_path_template.as_ref()?;
+        Some(local_path.join(Self::expand_template(&meta.sha512t24u, template)))
     }
 
     // =========================================================================
@@ -1786,13 +1765,18 @@ impl ReadonlyRefgetStore {
                 if let Some(parent) = dst_seq_path.parent() {
                     create_dir_all(parent)?;
                 }
-                fs::copy(&src_seq_path, &dst_seq_path).with_context(|| {
-                    format!(
-                        "Failed to copy sequence {} -> {}",
-                        src_seq_path.display(),
-                        dst_seq_path.display(),
-                    )
-                })?;
+                // Cache and store files are never modified in place, so a hard
+                // link is safe and keeps a pull from doubling disk use. Fall
+                // back to a copy (for example across devices).
+                if fs::hard_link(&src_seq_path, &dst_seq_path).is_err() {
+                    fs::copy(&src_seq_path, &dst_seq_path).with_context(|| {
+                        format!(
+                            "Failed to copy sequence {} -> {}",
+                            src_seq_path.display(),
+                            dst_seq_path.display(),
+                        )
+                    })?;
+                }
             }
         }
 
@@ -1976,17 +1960,14 @@ impl ReadonlyRefgetStore {
         let seq_index_path = self.sequence_index_path.clone()
             .ok_or_else(|| anyhow!("No sequence_index_path set for deferred loading"))?;
 
-        if !self.quiet {
+        let cached = self.local_path.as_ref().is_some_and(|p| p.join(&seq_index_path).exists());
+        if !self.quiet && !cached {
             eprintln!("Downloading sequence index {}...", seq_index_path);
         }
-
-        let data = Self::fetch_file(
-            &self.local_path,
-            &self.remote_source,
-            &seq_index_path,
-            true,
-            false,
-        )?;
+        let expected = self.manifest_digest(|m| m.sequences_digest.clone());
+        let data = self
+            .fetch_meta_checked(&seq_index_path, expected.as_deref())?
+            .ok_or_else(|| anyhow!("Sequence index {} not found", seq_index_path))?;
         let data_str = String::from_utf8(data)
             .context("sequence index contains invalid UTF-8")?;
 
@@ -2001,20 +1982,58 @@ impl ReadonlyRefgetStore {
         self.ensure_sequence_index_loaded()
     }
 
-    /// Eagerly load all Stub collections to Full.
+    /// Eagerly load all Stub collections to Full. A remote store downloads
+    /// the missing collection files in parallel.
     pub fn load_all_collections(&mut self) -> Result<()> {
         let keys: Vec<DigestKey> = self.collections.keys().cloned().collect();
-        for key in keys {
-            self.ensure_collection_loaded(&key)?;
-        }
-        Ok(())
+        self.ensure_collections_loaded(&keys)
     }
 
-    /// Eagerly load all Stub sequences to Full.
+    /// Load several collections by digest. A remote store downloads the
+    /// missing collection files in parallel.
+    pub fn load_collections(&mut self, digests: &[String]) -> Result<()> {
+        let keys: Vec<DigestKey> = digests.iter().map(|d| d.to_key()).collect();
+        self.ensure_collections_loaded(&keys)
+    }
+
+    /// Eagerly load all Stub sequences to Full. A remote store downloads them
+    /// in parallel and writes them to the shared cache.
+    #[cfg(not(feature = "filesystem"))]
     pub fn load_all_sequences(&mut self) -> Result<()> {
         let keys: Vec<DigestKey> = self.sequence_store.keys().cloned().collect();
         for key in keys {
             self.ensure_sequence_loaded(&key)?;
+        }
+        Ok(())
+    }
+
+    /// Eagerly load all Stub sequences to Full. A remote store downloads them
+    /// in parallel and writes them to the shared cache.
+    #[cfg(feature = "filesystem")]
+    pub fn load_all_sequences(&mut self) -> Result<()> {
+        let keys: Vec<DigestKey> = self
+            .sequence_store
+            .iter()
+            .filter(|(_, r)| !r.is_loaded())
+            .map(|(k, _)| *k)
+            .collect();
+        if keys.is_empty() {
+            return Ok(());
+        }
+        let opts = PrefetchOptions {
+            order: PrefetchOrder::Any,
+            write_cache: true,
+            progress: false,
+        };
+        // Everything stays in RAM anyway: no budget.
+        let mut run = self.prefetch_keys(&keys, opts, u64::MAX)?;
+        for item in run.by_ref() {
+            let item = item?;
+            let key = item.digest.to_key();
+            let data = item.into_vec();
+            if let Some(r) = self.sequence_store.get_mut(&key) {
+                r.load_data(data);
+            }
         }
         Ok(())
     }
@@ -2055,12 +2074,8 @@ impl ReadonlyRefgetStore {
     /// Returns the number of bytes newly loaded into the overlay by this call
     /// (already-resident/`Full` skips contribute 0), for RAM-budget accounting.
     pub fn load_resident(&self, digests: &[String]) -> Result<u64> {
-        let template = self.seqdata_path_template.as_ref().ok_or_else(|| {
-            anyhow!("Resident load requires a sequence data path template")
-        })?;
-
         // Plan: resolve to canonical keys, skip Full / already-resident, dedupe.
-        let mut plan: Vec<(DigestKey, String, String)> = Vec::new();
+        let mut plan: Vec<DigestKey> = Vec::new();
         let mut seen: HashSet<DigestKey> = HashSet::new();
         {
             let resident = self
@@ -2070,21 +2085,12 @@ impl ReadonlyRefgetStore {
             for d in digests {
                 let dk = d.to_key();
                 let key = self.md5_lookup.get(&dk).copied().unwrap_or(dk);
-                if !seen.insert(key) {
-                    continue; // duplicate in this request
-                }
-                if resident.contains_key(&key) {
-                    continue; // already resident
+                if !seen.insert(key) || resident.contains_key(&key) {
+                    continue;
                 }
                 match self.sequence_store.get(&key) {
                     Some(rec) if rec.is_loaded() => continue, // already Full in the store
-                    Some(rec) => {
-                        let digest_str = rec.metadata().sha512t24u.clone();
-                        let relpath = Self::expand_template(&digest_str, template)
-                            .to_string_lossy()
-                            .into_owned();
-                        plan.push((key, digest_str, relpath));
-                    }
+                    Some(_) => plan.push(key),
                     None => {
                         return Err(anyhow!(
                             "Cannot load resident: sequence not found: {}",
@@ -2094,56 +2100,36 @@ impl ReadonlyRefgetStore {
                 }
             }
         }
+        if plan.is_empty() {
+            return Ok(0);
+        }
 
-        // Ordered, coalesced whole-file reads: sort by on-disk path so the
-        // directory is walked in order, not in hash order.
-        plan.sort_by(|a, b| a.2.cmp(&b.2));
-
+        // One prefetch: parallel reads (local files, cache) or downloads.
+        // Downloads go into the cache, as `load_sequence` does (Decision 4).
+        #[cfg(not(feature = "filesystem"))]
+        let fetched: Vec<Result<(DigestKey, Arc<Vec<u8>>)>> = plan
+            .iter()
+            .map(|key| {
+                let meta = self.sequence_store[key].metadata();
+                Ok((*key, Arc::new(self.read_local_seq(meta)?)))
+            })
+            .collect();
+        #[cfg(feature = "filesystem")]
+        let opts = PrefetchOptions {
+            order: PrefetchOrder::Any,
+            write_cache: true,
+            progress: false,
+        };
+        #[cfg(feature = "filesystem")]
+        let fetched = self.prefetch_keys(&plan, opts, u64::MAX)?.map(|item| {
+            item.map(|item| (item.digest.to_key(), item.into_shared()))
+        });
         let mut loaded: Vec<(DigestKey, Arc<Vec<u8>>)> = Vec::with_capacity(plan.len());
         let mut total: u64 = 0;
-        for (key, _digest_str, relpath) in plan {
-            // Prefer a direct local read (one open + sequential read_to_end);
-            // fall back to the remote fetch only when the local file is absent.
-            let data: Vec<u8> = if let Some(lp) = self.local_path.as_ref() {
-                let full = lp.join(&relpath);
-                match File::open(&full) {
-                    Ok(f) => {
-                        let mut buf = Vec::new();
-                        BufReader::new(f).read_to_end(&mut buf).with_context(|| {
-                            format!("Failed to read seq file {}", full.display())
-                        })?;
-                        buf
-                    }
-                    Err(e) if e.kind() == std::io::ErrorKind::NotFound
-                        && self.remote_source.is_some() =>
-                    {
-                        Self::fetch_file(
-                            &self.local_path,
-                            &self.remote_source,
-                            &relpath,
-                            self.persist_to_disk,
-                            false,
-                        )?
-                    }
-                    Err(e) => {
-                        return Err(anyhow!(
-                            "Failed to open seq file {}: {}",
-                            full.display(),
-                            e
-                        ));
-                    }
-                }
-            } else {
-                Self::fetch_file(
-                    &self.local_path,
-                    &self.remote_source,
-                    &relpath,
-                    self.persist_to_disk,
-                    false,
-                )?
-            };
+        for item in fetched {
+            let (key, data) = item?;
             total += data.len() as u64;
-            loaded.push((key, Arc::new(data)));
+            loaded.push((key, data));
         }
 
         // Publish into the overlay under a single write lock.
@@ -2606,40 +2592,27 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
                 // between the on-disk and (possibly bulk-downloaded) remote
                 // path below. This stat is paid once per batch call for this
                 // sequence, not once per range.
-                let local_seq_exists = has_local_path
-                    && self
-                        .sequence_file_path(&meta.sha512t24u)
-                        .map(|p| p.exists())
-                        .unwrap_or(false);
+                #[allow(unused_mut)]
+                let mut local_seq_exists = self
+                    .local_seq_path(meta)
+                    .map(|p| p.exists())
+                    .unwrap_or(false);
 
                 // Bulk remote extraction: one HTTP round-trip per range is slow
-                // for large batches. Past REMOTE_BULK_FETCH_THRESHOLD, download and
-                // cache the whole `.seq` once (needs a local cache dir + path
-                // template to write into), then read every range from the local
-                // file. Single / small-batch reads fall through to pure byte-range.
+                // for large batches. Past REMOTE_BULK_FETCH_THRESHOLD, download the
+                // whole `.seq` once into the shared cache (in parallel ranges,
+                // digest-checked), then read every range from the cached file.
+                // Single / small-batch reads fall through to pure byte-range.
+                #[cfg(feature = "filesystem")]
                 if !local_seq_exists
-                    && self.local_path.is_some()
-                    && self.seqdata_path_template.is_some()
+                    && self.seq_cache.is_some()
                     && ranges.len() >= REMOTE_BULK_FETCH_THRESHOLD
                 {
-                    let relpath = self.resolve_seq_file_relpath(&meta.sha512t24u)?;
-                    let relpath_str = relpath
-                        .to_str()
-                        .ok_or_else(|| anyhow!("Non-UTF8 sequence path"))?;
-                    // persist_to_disk=true caches the file for this and future
-                    // reads; force_refresh=false reuses it if already present.
-                    Self::fetch_file(&self.local_path, &self.remote_source, relpath_str, true, false)?;
-                    let mut out = Vec::with_capacity(ranges.len());
-                    for &(start, end) in ranges {
-                        // Zero-length range -> "" (see get_substring). Short-circuit
-                        // before the partial-read path, which rejects start == end.
-                        if start == end {
-                            out.push(Vec::new());
-                        } else {
-                            out.push(self.get_substring_from_disk(meta, start, end)?);
-                        }
+                    let opts = PrefetchOptions { write_cache: true, ..PrefetchOptions::default() };
+                    for item in self.prefetch_keys(&[actual_key], opts, DEFAULT_MEMORY_BUDGET)? {
+                        item?;
                     }
-                    return Ok(out);
+                    local_seq_exists = true;
                 }
 
                 let mut out = Vec::with_capacity(ranges.len());
@@ -2688,7 +2661,7 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
         // section is kept tiny: lock -> get-or-open -> clone Arc -> unlock. The
         // actual positioned read happens OUTSIDE the lock, so concurrent reads
         // are never serialized by the cache.
-        let file = self.get_cached_seq_file(&metadata.sha512t24u)?;
+        let file = self.get_cached_seq_file(metadata)?;
 
         // Zstd: there is no base->byte mapping into a compressed frame, so read
         // the whole `.seq` (a small CDC chunk), decompress once, and slice the
@@ -2730,8 +2703,8 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
     /// Return a shared handle to the `.seq` file for `digest`, opening and
     /// caching it on a miss. Bounded LRU; the LRU handle is evicted (closed)
     /// when the cache is full.
-    fn get_cached_seq_file(&self, digest: &str) -> Result<Arc<File>> {
-        let key = digest.to_key();
+    fn get_cached_seq_file(&self, meta: &SequenceMetadata) -> Result<Arc<File>> {
+        let key = meta.sha512t24u.to_key();
 
         // Fast path: hit. Hold the lock only for the tiny map op.
         {
@@ -2746,15 +2719,9 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
 
         // Miss: build the path and open OUTSIDE the lock (the open syscall must
         // not serialize other readers).
-        let local_path = self
-            .local_path
-            .as_ref()
+        let full_path = self
+            .local_seq_path(meta)
             .ok_or_else(|| anyhow!("Partial read requires a local disk-backed store"))?;
-        let template = self
-            .seqdata_path_template
-            .as_ref()
-            .ok_or_else(|| anyhow!("No sequence data path template configured"))?;
-        let full_path = local_path.join(Self::expand_template(digest, template));
         let file = Arc::new(
             File::open(&full_path)
                 .with_context(|| format!("Failed to open seq file {}", full_path.display()))?,
@@ -2784,8 +2751,8 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
     /// [`get_substrings`](Self::get_substrings) fall through to here instead of
     /// erroring. It mirrors
     /// [`get_substring_from_disk`](Self::get_substring_from_disk) but fetches the
-    /// covering byte window over HTTP `Range:` (reusing [`open_remote_range`], the
-    /// same machinery as [`stream_sequence`](Self::stream_sequence)) rather than
+    /// covering byte window over HTTP `Range:` (the store's pooled,
+    /// retrying [`Fetcher`](super::fetch::Fetcher), as [`stream_sequence`](Self::stream_sequence) uses) rather than
     /// reading from a local file. Decoded with
     /// [`decode_substring_from_bytes_at_offset`].
     ///
@@ -2818,12 +2785,8 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
             ));
         }
 
-        let remote = self
-            .remote_source
-            .as_ref()
-            .ok_or_else(|| anyhow!("Remote partial read requires a remote source"))?;
-
-        let relpath = self.resolve_seq_file_relpath(&metadata.sha512t24u)?;
+        let relpath = self.sequence_relative_path(&metadata.sha512t24u)?;
+        let relpath_str = relpath.to_str().ok_or_else(|| anyhow!("Non-UTF8 sequence path"))?;
 
         // Compute the covering byte window. `.seq` files are headerless raw byte
         // arrays, so byte offsets map directly to base positions.
@@ -2836,12 +2799,7 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
             StorageMode::Zstd => unreachable!("guarded above"),
         };
 
-        let mut reader =
-            open_remote_range(remote, &relpath, byte_start as u64, byte_end as u64)?;
-        let mut buf = Vec::with_capacity(byte_end - byte_start);
-        reader
-            .read_to_end(&mut buf)
-            .context("Failed to read remote byte range")?;
+        let buf = self.remote_fetcher()?.get_range(relpath_str, byte_start as u64, byte_end as u64)?;
 
         let decoded: Vec<u8> = match self.mode {
             StorageMode::Encoded => {
@@ -2867,8 +2825,13 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
     // Streaming retrieval
     // =========================================================================
 
-    /// Resolve the relative on-disk/remote path for a sequence's encoded bytes.
-    fn resolve_seq_file_relpath(&self, digest: &str) -> Result<PathBuf> {
+    /// The path of a sequence's stored `.seq` record relative to the store root
+    /// (local directory or remote URL prefix), from the manifest's path template.
+    ///
+    /// The template is expanded with the digest and the result is checked for
+    /// absolute paths and directory traversal, so it is safe to join onto a
+    /// local root or a remote base URL.
+    pub fn sequence_relative_path(&self, digest: &str) -> Result<PathBuf> {
         let template = self
             .seqdata_path_template
             .as_deref()
@@ -2936,11 +2899,9 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
                 SequenceRecord::Full { sequence, .. } => zstd::decode_all(&sequence[..])
                     .context("zstd decompression of resident record failed")?,
                 SequenceRecord::Stub(meta) => {
-                    let relpath = self.resolve_seq_file_relpath(&meta.sha512t24u)?;
-                    let local = self.local_path.as_ref().ok_or_else(|| {
+                    let full = self.local_seq_path(meta).ok_or_else(|| {
                         anyhow!("streaming a Zstd stub requires a local disk-backed store")
                     })?;
-                    let full = local.join(&relpath);
                     let compressed = std::fs::read(&full)
                         .with_context(|| format!("failed to read zstd seq file: {}", full.display()))?;
                     zstd::decode_all(&compressed[..])
@@ -3002,11 +2963,8 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
             };
         }
 
-        let relpath = self.resolve_seq_file_relpath(&sha)?;
-
-        let source: Box<dyn Read + Send> = if let Some(local) = self.local_path.as_ref() {
-            let full = local.join(&relpath);
-            if full.exists() {
+        let source: Box<dyn Read + Send> = match self.local_seq_path(metadata) {
+            Some(full) if full.exists() => {
                 let mut file = File::open(&full)
                     .with_context(|| format!("Failed to open local seq file: {}", full.display()))?;
                 file.seek(SeekFrom::Start(byte_start))
@@ -3023,18 +2981,21 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
                     ));
                 }
                 Box::new(BufReader::new(file).take(byte_len))
-            } else if let Some(remote) = self.remote_source.as_ref() {
-                open_remote_range(remote, &relpath, byte_start, byte_end)?
-            } else {
-                return Err(anyhow!(
-                    "Sequence file missing locally and no remote source: {}",
-                    full.display()
-                ));
             }
-        } else if let Some(remote) = self.remote_source.as_ref() {
-            open_remote_range(remote, &relpath, byte_start, byte_end)?
-        } else {
-            return Err(anyhow!("No backing source configured for sequence {}", sha));
+            local => {
+                if self.remote_source.is_some() {
+                    let relpath = self.sequence_relative_path(&sha)?;
+                    let rel = relpath.to_str().ok_or_else(|| anyhow!("Non-UTF8 sequence path"))?;
+                    self.remote_fetcher()?.open_range(rel, byte_start, byte_end)?
+                } else if let Some(full) = local {
+                    return Err(anyhow!(
+                        "Sequence file missing locally and no remote source: {}",
+                        full.display()
+                    ));
+                } else {
+                    return Err(anyhow!("No backing source configured for sequence {}", sha));
+                }
+            }
         };
 
         // 7. Dispatch on mode.
@@ -3073,11 +3034,18 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
 
     /// Return the full filesystem path to a sequence `.seq` file for the given digest.
     ///
-    /// Returns `None` if the store has no local path or no seqdata path template.
+    /// For a remote store this is the file's place in the shared cache, which
+    /// depends on the sequence's alphabet, so the digest must be known (`None`
+    /// otherwise). For a local store it is the store's own file. Returns `None`
+    /// if the store has no local path or no seqdata path template.
     pub fn sequence_file_path(&self, seq_digest: &str) -> Option<PathBuf> {
+        if self.seq_cache.is_some() {
+            let key = self.resolve_sequence_key(seq_digest)?;
+            return self.local_seq_path(self.sequence_store.get(&key)?.metadata());
+        }
         let local_path = self.local_path.as_ref()?;
-        let template = self.seqdata_path_template.as_ref()?;
-        Some(local_path.join(Self::expand_template(seq_digest, template)))
+        self.seqdata_path_template.as_ref()?;
+        Some(local_path.join(self.sequence_relative_path(seq_digest).ok()?))
     }
 
     /// Return the full filesystem path to a collection RGSI file for the given digest.
@@ -3102,183 +3070,239 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
         Ok(())
     }
 
-    /// Helper function to fetch a file from local path or remote source
-    pub(crate) fn fetch_file(
-        local_path: &Option<PathBuf>,
-        remote_source: &Option<String>,
-        relative_path: &str,
-        persist_to_disk: bool,
-        force_refresh: bool,
-    ) -> Result<Vec<u8>> {
-        Self::sanitize_relative_path(relative_path)?;
-
-        if persist_to_disk && !force_refresh {
-            if let Some(local_path) = local_path {
-                let full_local_path = local_path.join(relative_path);
-                if full_local_path.exists() {
-                    return fs::read(&full_local_path).context(format!(
-                        "Failed to read local file: {}",
-                        full_local_path.display()
-                    ));
-                }
-            }
-        }
-
-        #[cfg(feature = "http")]
-        if let Some(remote_url) = remote_source {
-            let data = Self::fetch_remote(remote_url, relative_path)?;
-
-            if persist_to_disk {
-                if let Some(local_path) = local_path {
-                    let full_local_path = local_path.join(relative_path);
-
-                    if let Some(parent) = full_local_path.parent() {
-                        create_dir_all(parent)?;
-                    }
-
-                    fs::write(&full_local_path, &data).context(format!(
-                        "Failed to cache file to: {}",
-                        full_local_path.display()
-                    ))?;
-                }
-            }
-
-            return Ok(data);
-        }
-
-        let _ = remote_source;
-        Err(anyhow!(
-            "File not found locally and no remote source configured: {}",
-            relative_path
-        ))
-    }
-
-    /// GET one file from a remote store into memory. Writes nothing to disk.
+    /// The remote store's fetcher, or an error for a local store.
     #[cfg(feature = "http")]
-    pub(crate) fn fetch_remote(remote_url: &str, relative_path: &str) -> Result<Vec<u8>> {
-        Self::sanitize_relative_path(relative_path)?;
-        let full_remote_url = if remote_url.ends_with('/') {
-            format!("{}{}", remote_url, relative_path)
-        } else {
-            format!("{}/{}", remote_url, relative_path)
-        };
-
-        let response = ureq::get(&full_remote_url)
-            .call()
-            .map_err(|e| anyhow!("Failed to fetch from remote: {}", e))?;
-
-        let mut data = Vec::new();
-        response
-            .into_body()
-            .into_reader()
-            .read_to_end(&mut data)
-            .context("Failed to read response body")?;
-        Ok(data)
+    pub(crate) fn remote_fetcher(&self) -> Result<&Arc<super::fetch::Fetcher>> {
+        self.fetcher
+            .as_ref()
+            .ok_or_else(|| anyhow!("No remote source configured"))
     }
 
-    /// Stored bytes (packed, raw or zstd, as on disk) of one sequence, for a
-    /// single streaming pass. Never inserts into `sequence_store`, and never
-    /// writes a downloaded file to the local cache.
-    ///
-    /// Lookup order: a `Full` record, the resident overlay, a local `.seq`
-    /// file, then the remote store.
-    pub(crate) fn sequence_bytes(&self, key: &DigestKey) -> Result<SeqBytes<'_>> {
-        let record = self
-            .sequence_store
-            .get(key)
-            .ok_or_else(|| anyhow!("Sequence not found: {}", key_to_digest_string(key)))?;
-        if let SequenceRecord::Full { sequence, .. } = record {
-            return Ok(SeqBytes::Borrowed(sequence.as_slice()));
-        }
-        if let Some(arc) = self
-            .resident
-            .read()
-            .map_err(|_| anyhow!("resident overlay lock poisoned"))?
-            .get(key)
-        {
-            return Ok(SeqBytes::Shared(Arc::clone(arc)));
-        }
+    #[cfg(not(feature = "http"))]
+    fn remote_fetcher(&self) -> Result<&NoFetcher> {
+        Err(anyhow!("Remote access requires the 'http' feature to be enabled"))
+    }
 
-        let digest_str = &record.metadata().sha512t24u;
-        let template = self
-            .seqdata_path_template
-            .as_ref()
-            .ok_or_else(|| anyhow!("No sequence data path template configured"))?;
-        let relative_path = Self::expand_template(digest_str, template)
-            .to_string_lossy()
-            .into_owned();
+    /// Several metadata files straight from the remote, in parallel, writing
+    /// nothing. `None` for a file the remote doesn't have (or a local store).
+    pub(crate) fn fetch_meta_remote(&self, rels: &[String]) -> Result<Vec<Option<Vec<u8>>>> {
+        for rel in rels {
+            Self::sanitize_relative_path(rel)?;
+        }
+        #[cfg(feature = "http")]
+        if let Some(f) = &self.fetcher {
+            return Ok(f
+                .get_many(rels)?
+                .into_iter()
+                .map(|g| match g {
+                    super::fetch::Got::Found(d) => Some(d),
+                    super::fetch::Got::Missing { .. } => None,
+                })
+                .collect());
+        }
+        Ok(vec![None; rels.len()])
+    }
 
-        if let Some(local_path) = &self.local_path {
-            let full = local_path.join(&relative_path);
-            match fs::read(&full) {
-                Ok(data) => return Ok(SeqBytes::Owned(data)),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => {
-                    return Err(anyhow!("Failed to read seq file {}: {}", full.display(), e))
-                }
+    /// Several metadata files: cached ones from disk (unless `refresh`), the
+    /// rest from the remote in one parallel batch, which are then cached.
+    pub(crate) fn fetch_meta_many(&self, rels: &[String], refresh: bool) -> Result<Vec<Option<Vec<u8>>>> {
+        let mut out: Vec<Option<Vec<u8>>> = Vec::with_capacity(rels.len());
+        let mut missing: Vec<usize> = Vec::new();
+        for (i, rel) in rels.iter().enumerate() {
+            Self::sanitize_relative_path(rel)?;
+            let cached = if refresh { None } else { self.read_cached_meta(rel)? };
+            if cached.is_none() {
+                missing.push(i);
+            }
+            out.push(cached);
+        }
+        if missing.is_empty() {
+            return Ok(out);
+        }
+        let wanted: Vec<String> = missing.iter().map(|&i| rels[i].clone()).collect();
+        for (i, data) in missing.into_iter().zip(self.fetch_meta_remote(&wanted)?) {
+            if let Some(data) = data {
+                self.write_cached_meta(&rels[i], &data)?;
+                out[i] = Some(data);
             }
         }
+        Ok(out)
+    }
 
-        #[cfg(feature = "http")]
-        if let Some(remote_url) = &self.remote_source {
-            return Ok(SeqBytes::Owned(Self::fetch_remote(remote_url, &relative_path)?));
+    /// A metadata file that must match a sha256 from the manifest. A cached
+    /// copy was checked when it was downloaded. A download that doesn't match
+    /// is fetched once more (the store may have been republished between the
+    /// two GETs); a second mismatch is an error.
+    pub(crate) fn fetch_meta_checked(&self, rel: &str, expected_sha256: Option<&str>) -> Result<Option<Vec<u8>>> {
+        Self::sanitize_relative_path(rel)?;
+        if let Some(data) = self.read_cached_meta(rel)? {
+            return Ok(Some(data));
         }
+        for attempt in 0..2 {
+            let Some(data) = self.fetch_meta_remote(&[rel.to_string()])?.pop().flatten() else {
+                return Ok(None);
+            };
+            let matches = expected_sha256.is_none_or(|want| {
+                use sha2::{Digest, Sha256};
+                format!("{:x}", Sha256::digest(&data)) == want
+            });
+            if matches {
+                self.write_cached_meta(rel, &data)?;
+                return Ok(Some(data));
+            }
+            if attempt == 1 {
+                return Err(anyhow!(
+                    "{} does not match rgstore.json; the store may be in the middle of an update",
+                    rel
+                ));
+            }
+        }
+        unreachable!("the loop returns on its second pass")
+    }
 
-        Err(anyhow!(
-            "Sequence data for {} not found locally and no remote source configured",
-            digest_str
-        ))
+    /// Pull sidecar files (alias TSVs, FHR JSON) under `strategy`, in one
+    /// parallel batch. Only a file the remote doesn't have counts as
+    /// `not_found`; network errors propagate. Returns the bytes of each file
+    /// that is now local (`KeepOurs`, `KeepTheirs`).
+    pub(crate) fn sync_sidecars(
+        &self,
+        rels: &[String],
+        strategy: &SyncStrategy,
+    ) -> Result<(PullResult, Vec<Option<Vec<u8>>>)> {
+        let mut result = PullResult::default();
+        let local_exists: Vec<bool> = rels
+            .iter()
+            .map(|r| self.local_path.as_ref().is_some_and(|p| p.join(r).exists()))
+            .collect();
+        match strategy {
+            SyncStrategy::KeepOurs | SyncStrategy::KeepTheirs => {
+                let refresh = matches!(strategy, SyncStrategy::KeepTheirs);
+                let datas = self.fetch_meta_many(rels, refresh)?;
+                for (data, was_local) in datas.iter().zip(&local_exists) {
+                    match data {
+                        Some(_) if *was_local && !refresh => result.skipped += 1,
+                        Some(_) => result.pulled += 1,
+                        None => result.not_found += 1,
+                    }
+                }
+                Ok((result, datas))
+            }
+            SyncStrategy::Notify => {
+                let remote = self.fetch_meta_remote(rels)?;
+                for ((rel, data), exists) in rels.iter().zip(remote).zip(local_exists) {
+                    match data {
+                        Some(remote_data) if exists => {
+                            let local = self.local_path.as_ref().expect("exists implies a local path").join(rel);
+                            if fs::read(&local)? != remote_data {
+                                result.conflicts.push(rel.clone());
+                            } else {
+                                result.skipped += 1;
+                            }
+                        }
+                        Some(_) => result.conflicts.push(rel.clone()),
+                        None => result.not_found += 1,
+                    }
+                }
+                Ok((result, vec![None; rels.len()]))
+            }
+        }
+    }
+
+    fn read_cached_meta(&self, rel: &str) -> Result<Option<Vec<u8>>> {
+        let Some(lp) = &self.local_path else { return Ok(None) };
+        let full = lp.join(rel);
+        match fs::read(&full) {
+            Ok(d) => Ok(Some(d)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(anyhow!("Failed to read local file {}: {}", full.display(), e)),
+        }
+    }
+
+    fn write_cached_meta(&self, rel: &str, data: &[u8]) -> Result<()> {
+        if let Some(lp) = &self.local_path {
+            let full = lp.join(rel);
+            super::atomic::atomic_write_bytes(&full, data)
+                .with_context(|| format!("Failed to cache file to: {}", full.display()))?;
+        }
+        Ok(())
+    }
+
+    /// A manifest field of this store's cached `rgstore.json`.
+    pub(crate) fn manifest_digest<F: Fn(&StoreMetadata) -> Option<String>>(&self, f: F) -> Option<String> {
+        let lp = self.local_path.as_ref()?;
+        super::persistence::read_manifest(lp).ok().flatten().and_then(|m| f(&m))
+    }
+
+    /// One sequence's stored bytes from its local file (no network).
+    fn read_local_seq(&self, meta: &SequenceMetadata) -> Result<Vec<u8>> {
+        let path = self
+            .local_seq_path(meta)
+            .ok_or_else(|| anyhow!("No sequence data path template configured"))?;
+        fs::read(&path).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound && self.remote_source.is_none() {
+                anyhow!(
+                    "Sequence data for {} not found locally and no remote source configured",
+                    meta.sha512t24u
+                )
+            } else {
+                anyhow!("Failed to read seq file {}: {}", path.display(), e)
+            }
+        })
     }
 
     /// Ensure a collection is loaded into the store
     pub(crate) fn ensure_collection_loaded(&mut self, collection_digest: &DigestKey) -> Result<()> {
-        if self.name_lookup.contains_key(collection_digest) {
+        self.ensure_collections_loaded(std::slice::from_ref(collection_digest))
+    }
+
+    /// Ensure several collections are loaded. Missing `collections/<d>.rgsi`
+    /// files come down in one parallel batch and are parsed from memory.
+    pub(crate) fn ensure_collections_loaded(&mut self, keys: &[DigestKey]) -> Result<()> {
+        let mut need: Vec<(DigestKey, String)> = Vec::new();
+        let mut seen: HashSet<DigestKey> = HashSet::new();
+        for key in keys {
+            if self.name_lookup.contains_key(key) || !seen.insert(*key) {
+                continue;
+            }
+            match self.collections.get(key) {
+                Some(SequenceCollectionRecord::Full { .. }) => self.register_full_collection(key),
+                Some(SequenceCollectionRecord::Stub(meta)) => need.push((*key, meta.digest.clone())),
+                None => need.push((*key, key_to_digest_string(key))),
+            }
+        }
+        if need.is_empty() {
             return Ok(());
         }
 
-        let needs_fetch = match self.collections.get(collection_digest) {
-            Some(SequenceCollectionRecord::Stub(_)) => true,
-            Some(SequenceCollectionRecord::Full { .. }) => false,
-            None => true,
-        };
-
-        if needs_fetch {
-            let digest_str = if let Some(SequenceCollectionRecord::Stub(meta)) =
-                self.collections.get(collection_digest)
-            {
-                meta.digest.clone()
-            } else {
-                key_to_digest_string(collection_digest)
-            };
-
-            let relative_path = format!("collections/{}.rgsi", digest_str);
-
-            if !self.quiet {
-                let cached = self
-                    .local_path
-                    .as_ref()
-                    .map(|p| p.join(&relative_path).exists())
-                    .unwrap_or(false);
-                let verb = if cached { "Loading" } else { "Downloading" };
-                eprintln!("{} collection metadata {}...", verb, digest_str);
+        let rels: Vec<String> = need.iter().map(|(_, d)| format!("collections/{}.rgsi", d)).collect();
+        if !self.quiet {
+            let to_download = rels
+                .iter()
+                .filter(|r| !self.local_path.as_ref().is_some_and(|p| p.join(r).exists()))
+                .count();
+            if to_download > 0 && self.remote_source.is_some() {
+                if to_download == 1 {
+                    eprintln!("Downloading collection metadata {}...", need[0].1);
+                } else {
+                    eprintln!("Downloading {} collection metadata files...", to_download);
+                }
             }
-            let _collection_data =
-                Self::fetch_file(&self.local_path, &self.remote_source, &relative_path, true, false)?;
+        }
+        let datas = self.fetch_meta_many(&rels, false)?;
 
-            let local_path = self
-                .local_path
-                .as_ref()
-                .ok_or_else(|| anyhow!("No local path configured"))?;
-
-            let collection_file_path = local_path.join(&relative_path);
-
-            let collection = read_rgsi_file(&collection_file_path)?;
+        for ((key, digest_str), (rel, data)) in need.into_iter().zip(rels.iter().zip(datas)) {
+            let data = data.ok_or_else(|| {
+                anyhow!("File not found locally and no remote source configured: {}", rel)
+            })?;
+            let file_path = self.local_path.as_ref().map(|p| p.join(rel));
+            let collection = crate::collection::read_rgsi_reader(&data[..], file_path)
+                .with_context(|| format!("Failed to parse collection {}", digest_str))?;
 
             let loaded_digest = collection.metadata.digest.to_key();
-            if loaded_digest != *collection_digest {
+            if loaded_digest != key {
                 return Err(anyhow!(
                     "Collection digest mismatch: expected {}, got {}",
-                    key_to_digest_string(collection_digest),
+                    key_to_digest_string(&key),
                     key_to_digest_string(&loaded_digest)
                 ));
             }
@@ -3289,52 +3313,52 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
                 let sha512_key = metadata.sha512t24u.to_key();
                 name_map.insert(metadata.name.clone(), sha512_key);
 
-                if !self.sequence_store.contains_key(&sha512_key) {
-                    self.sequence_store
-                        .insert(sha512_key, SequenceRecord::Stub(metadata.clone()));
-                    let md5_key = metadata.md5.to_key();
-                    self.md5_lookup.insert(md5_key, sha512_key);
+                if let std::collections::hash_map::Entry::Vacant(e) = self.sequence_store.entry(sha512_key) {
+                    e.insert(SequenceRecord::Stub(metadata.clone()));
+                    self.md5_lookup.insert(metadata.md5.to_key(), sha512_key);
                 }
             }
-            self.name_lookup.insert(*collection_digest, name_map);
+            self.name_lookup.insert(key, name_map);
 
             let record = SequenceCollectionRecord::from(collection);
-            self.collections.insert(*collection_digest, record);
-        } else {
-            let sequences_data: Vec<(SequenceMetadata, DigestKey, DigestKey)> =
-                if let Some(SequenceCollectionRecord::Full { sequences, .. }) =
-                    self.collections.get(collection_digest)
-                {
-                    sequences
-                        .iter()
-                        .map(|seq| {
-                            let metadata = seq.metadata().clone();
-                            let sha512_key = metadata.sha512t24u.to_key();
-                            let md5_key = metadata.md5.to_key();
-                            (metadata, sha512_key, md5_key)
-                        })
-                        .collect()
-                } else {
-                    Vec::new()
-                };
-
-            let mut name_map = IndexMap::new();
-            for (metadata, sha512_key, md5_key) in sequences_data {
-                name_map.insert(metadata.name.clone(), sha512_key);
-
-                if !self.sequence_store.contains_key(&sha512_key) {
-                    self.sequence_store
-                        .insert(sha512_key, SequenceRecord::Stub(metadata));
-                    self.md5_lookup.insert(md5_key, sha512_key);
-                }
-            }
-            self.name_lookup.insert(*collection_digest, name_map);
+            self.collections.insert(key, record);
         }
-
         Ok(())
     }
 
-    /// Ensure a sequence is loaded into memory
+    /// Build `name_lookup` (and stub sequences) for a collection already Full in memory.
+    fn register_full_collection(&mut self, collection_digest: &DigestKey) {
+        let sequences_data: Vec<(SequenceMetadata, DigestKey, DigestKey)> =
+            if let Some(SequenceCollectionRecord::Full { sequences, .. }) =
+                self.collections.get(collection_digest)
+            {
+                sequences
+                    .iter()
+                    .map(|seq| {
+                        let metadata = seq.metadata().clone();
+                        let sha512_key = metadata.sha512t24u.to_key();
+                        let md5_key = metadata.md5.to_key();
+                        (metadata, sha512_key, md5_key)
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
+
+        let mut name_map = IndexMap::new();
+        for (metadata, sha512_key, md5_key) in sequences_data {
+            name_map.insert(metadata.name.clone(), sha512_key);
+
+            if let std::collections::hash_map::Entry::Vacant(e) = self.sequence_store.entry(sha512_key) {
+                e.insert(SequenceRecord::Stub(metadata));
+                self.md5_lookup.insert(md5_key, sha512_key);
+            }
+        }
+        self.name_lookup.insert(*collection_digest, name_map);
+    }
+
+    /// Ensure a sequence is loaded into memory. A remote store downloads it
+    /// (in parallel ranges, digest-checked) into the shared cache.
     pub(crate) fn ensure_sequence_loaded(&mut self, digest: &DigestKey) -> Result<()> {
         let record = self
             .sequence_store
@@ -3345,33 +3369,31 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
         if record.is_loaded() {
             return Ok(());
         }
-
-        let digest_str = &record.metadata().sha512t24u;
-        let template = self
-            .seqdata_path_template
-            .as_ref()
-            .ok_or_else(|| anyhow!("No sequence data path template configured"))?;
-
-        let relative_path = Self::expand_template(digest_str, template)
-            .to_string_lossy()
-            .into_owned();
-
-        if !self.quiet {
-            let cached = self
-                .local_path
-                .as_ref()
-                .map(|p| p.join(&relative_path).exists())
-                .unwrap_or(false);
-            let verb = if cached { "Loading" } else { "Downloading" };
-            eprintln!("{} sequence {}...", verb, digest_str);
+        let meta = record.metadata().clone();
+        if self.local_seq_path(&meta).is_none() && self.remote_source.is_none() {
+            return Err(anyhow!("No sequence data path template configured"));
         }
-        let data = Self::fetch_file(
-            &self.local_path,
-            &self.remote_source,
-            &relative_path,
-            self.persist_to_disk,
-            false,
-        )?;
+
+        let data = if self.remote_source.is_some() {
+            let cached = self.local_seq_path(&meta).is_some_and(|p| p.exists());
+            if !self.quiet && !cached {
+                eprintln!("Downloading sequence {}...", meta.sha512t24u);
+            }
+            #[cfg(feature = "filesystem")]
+            {
+                let opts = PrefetchOptions { write_cache: true, ..PrefetchOptions::default() };
+                self.prefetch_keys(&[*digest], opts, DEFAULT_MEMORY_BUDGET)?
+                    .next()
+                    .ok_or_else(|| anyhow!("Sequence data for {} was not delivered", meta.sha512t24u))??
+                    .into_vec()
+            }
+            #[cfg(not(feature = "filesystem"))]
+            {
+                self.read_local_seq(&meta)?
+            }
+        } else {
+            self.read_local_seq(&meta)?
+        };
 
         self.sequence_store.entry(*digest).and_modify(|r| {
             r.load_data(data);
@@ -3574,323 +3596,3 @@ impl Display for ReadonlyRefgetStore {
 
 // Extension traits used by collection.rs
 use crate::collection::SequenceCollectionRecordExt;
-
-#[cfg(all(test, feature = "http"))]
-mod open_remote_range_tests {
-    use super::*;
-    use std::net::TcpListener;
-    use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
-
-    /// Spin up an HTTP server that DELIBERATELY IGNORES the Range header,
-    /// responding 200 OK with the full body. Models a misbehaving CDN/origin.
-    /// Returns (base_url, shutdown_fn).
-    fn start_range_ignoring_server(body: Vec<u8>) -> (String, impl FnOnce()) {
-        use std::io::{Read as _, Write as _};
-
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
-        let port = listener.local_addr().unwrap().port();
-        let base_url = format!("http://127.0.0.1:{}", port);
-        let stop = Arc::new(AtomicBool::new(false));
-        let stop_clone = Arc::clone(&stop);
-
-        std::thread::spawn(move || {
-            listener.set_nonblocking(false).ok();
-            while !stop_clone.load(Ordering::Relaxed) {
-                match listener.accept() {
-                    Ok((mut stream, _)) => {
-                        let mut buf = [0u8; 4096];
-                        let _ = stream.read(&mut buf).unwrap_or(0);
-                        // Respond 200 OK with the full body, ignoring the Range header.
-                        let header = format!(
-                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                            body.len()
-                        );
-                        let _ = stream.write_all(header.as_bytes());
-                        let _ = stream.write_all(&body);
-                    }
-                    Err(_) => break,
-                }
-            }
-        });
-
-        let shutdown = move || {
-            stop.store(true, Ordering::Relaxed);
-            let _ = std::net::TcpStream::connect(format!("127.0.0.1:{}", port));
-        };
-
-        (base_url, shutdown)
-    }
-
-    /// When a remote server ignores the Range header and returns 200 + full body,
-    /// `open_remote_range` MUST return an error rather than silently wrapping the
-    /// wrong bytes in a StreamingDecoder. Otherwise callers get silent corruption.
-    #[test]
-    fn test_open_remote_range_rejects_non_206_response() {
-        let full_body: Vec<u8> = (0u8..=255).collect();
-        let (base_url, shutdown) = start_range_ignoring_server(full_body.clone());
-
-        // Request only a middle slice: bytes 10..20.
-        let result = open_remote_range(
-            &base_url,
-            std::path::Path::new("seq.dat"),
-            10,
-            20,
-        );
-
-        shutdown();
-
-        match result {
-            Err(e) => {
-                let msg = format!("{}", e);
-                assert!(
-                    msg.contains("Range") || msg.contains("206") || msg.contains("status"),
-                    "expected a Range/206/status error, got: {}",
-                    msg
-                );
-            }
-            Ok(mut reader) => {
-                use std::io::Read as _;
-                let mut got = Vec::new();
-                reader.read_to_end(&mut got).unwrap();
-                // If we got here, the bug is live: the reader yielded bytes
-                // that are NOT the requested 10..20 slice. The `.take(byte_len)`
-                // in the buggy code returns the FIRST `byte_len` bytes of the
-                // full body, i.e. 0..10, instead of the requested 10..20.
-                assert_eq!(
-                    got,
-                    full_body[10..20],
-                    "BUG: open_remote_range silently returned wrong bytes \
-                     when server ignored the Range header. Got {:?}, expected {:?}. \
-                     The function should have returned an error instead.",
-                    got,
-                    &full_body[10..20]
-                );
-            }
-        }
-    }
-}
-
-/// Tests for the flow-1 remote byte-range fallback: a cold `get_substring` /
-/// `get_substrings` against a remote-only `Stub` must fetch just the covering
-/// bytes over HTTP `Range:`, decode correctly, and persist nothing.
-#[cfg(all(test, feature = "http"))]
-mod remote_partial_read_tests {
-    use super::*;
-    use crate::digest::digest_sequence;
-    use std::io::{Read as _, Write as _};
-    use std::net::TcpListener;
-    use std::sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    };
-
-    /// Spin up an HTTP server that HONORS the `Range` header, replying 206 with
-    /// the requested byte slice (and 200 + full body if no Range is sent). The
-    /// same `body` is served for every path. Returns (base_url, shutdown_fn).
-    fn start_range_honoring_server(body: Vec<u8>) -> (String, impl FnOnce()) {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
-        let port = listener.local_addr().unwrap().port();
-        let base_url = format!("http://127.0.0.1:{}", port);
-        let stop = Arc::new(AtomicBool::new(false));
-        let stop_clone = Arc::clone(&stop);
-
-        std::thread::spawn(move || {
-            while !stop_clone.load(Ordering::Relaxed) {
-                match listener.accept() {
-                    Ok((mut stream, _)) => {
-                        let mut buf = [0u8; 4096];
-                        let n = stream.read(&mut buf).unwrap_or(0);
-                        let req = String::from_utf8_lossy(&buf[..n]);
-                        // Parse "Range: bytes=START-END" (inclusive END).
-                        let range = req.lines().find_map(|l| {
-                            let l = l.trim();
-                            if !l.to_ascii_lowercase().starts_with("range:") {
-                                return None;
-                            }
-                            let v = l.split('=').nth(1)?.trim();
-                            let mut parts = v.split('-');
-                            let s: usize = parts.next()?.trim().parse().ok()?;
-                            let e: usize = parts.next()?.trim().parse().ok()?;
-                            Some((s, e))
-                        });
-                        if let Some((s, e)) = range {
-                            let s = s.min(body.len());
-                            let end_excl = (e + 1).min(body.len());
-                            let slice = &body[s..end_excl];
-                            let header = format!(
-                                "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes {}-{}/{}\r\n\
-                                 Content-Length: {}\r\nConnection: close\r\n\r\n",
-                                s,
-                                end_excl.saturating_sub(1),
-                                body.len(),
-                                slice.len()
-                            );
-                            let _ = stream.write_all(header.as_bytes());
-                            let _ = stream.write_all(slice);
-                        } else {
-                            let header = format!(
-                                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-                                body.len()
-                            );
-                            let _ = stream.write_all(header.as_bytes());
-                            let _ = stream.write_all(&body);
-                        }
-                    }
-                    Err(_) => break,
-                }
-            }
-        });
-
-        let shutdown = move || {
-            stop.store(true, Ordering::Relaxed);
-            let _ = std::net::TcpStream::connect(format!("127.0.0.1:{}", port));
-        };
-
-        (base_url, shutdown)
-    }
-
-    /// A remote-only store: a `Stub` whose encoded bytes live solely on the
-    /// remote server. No `local_path`, so nothing can be (or is) persisted.
-    fn remote_only_store(remote: &str, record: &SequenceRecord) -> ReadonlyRefgetStore {
-        let mut store = ReadonlyRefgetStore::new(StorageMode::Encoded);
-        store.remote_source = Some(remote.to_string());
-        store.seqdata_path_template = Some(DEFAULT_SEQDATA_PATH_TEMPLATE.to_string());
-        let meta = record.metadata().clone();
-        store
-            .sequence_store
-            .insert(meta.sha512t24u.to_key(), SequenceRecord::Stub(meta));
-        store
-    }
-
-    #[test]
-    fn test_get_substring_cold_remote_byte_range_and_no_persist() {
-        // Mixed ACGT + IUPAC (N) bases exercise the variable-bit decode path.
-        let bases = b"ACGTACGTACGTTTGGCCAANNNNACGTACGTACGTACGTACGT";
-        let record = digest_sequence("chrTest", bases);
-        let meta = record.metadata().clone();
-        let alphabet = lookup_alphabet(&meta.alphabet);
-        let encoded = encode_sequence(&bases[..], alphabet).unwrap();
-
-        let (base_url, shutdown) = start_range_honoring_server(encoded.clone());
-        let store = remote_only_store(&base_url, &record);
-
-        // Cold read of an interior sub-range: must fetch via byte-range + decode.
-        let got = store
-            .get_substring(meta.sha512t24u.as_bytes(), 4, 12)
-            .expect("cold remote get_substring should succeed");
-        let expected = String::from_utf8(bases[4..12].to_vec()).unwrap();
-        assert_eq!(got, expected, "remote byte-range decode mismatch");
-
-        // Zero-length range on the REMOTE path returns "" (no HTTP request),
-        // matching the resident/disk paths and the wasm/JS contract; an
-        // inverted range (start > end) still errors.
-        assert_eq!(
-            store.get_substring(meta.sha512t24u.as_bytes(), 5, 5).unwrap(),
-            "",
-            "remote: zero-length range should return empty string"
-        );
-        assert!(
-            store.get_substring(meta.sha512t24u.as_bytes(), 8, 4).is_err(),
-            "remote: inverted range (start > end) must error"
-        );
-        let mixed = store
-            .get_substrings(meta.sha512t24u.as_bytes(), &[(2, 2), (4, 8)])
-            .expect("remote get_substrings with empty range should succeed");
-        assert_eq!(mixed[0], "", "remote batch: empty range -> empty string");
-        assert_eq!(mixed[1], String::from_utf8(bases[4..8].to_vec()).unwrap());
-
-        // Batch read of several disjoint ranges via the same remote fallback.
-        let batch = store
-            .get_substrings(meta.sha512t24u.as_bytes(), &[(0, 4), (20, 24), (40, 44)])
-            .expect("cold remote get_substrings should succeed");
-        shutdown();
-        assert_eq!(batch[0], String::from_utf8(bases[0..4].to_vec()).unwrap());
-        assert_eq!(batch[1], String::from_utf8(bases[20..24].to_vec()).unwrap());
-        assert_eq!(batch[2], String::from_utf8(bases[40..44].to_vec()).unwrap());
-
-        // Persists nothing: no local path, and the record stays a Stub (never
-        // promoted to a resident Full by the partial-read path).
-        assert!(store.local_path.is_none());
-        assert!(
-            matches!(
-                store.sequence_store.get(&meta.sha512t24u.to_key()).unwrap(),
-                SequenceRecord::Stub(_)
-            ),
-            "remote partial read must not promote the record to Full (no caching)"
-        );
-    }
-
-    #[test]
-    fn test_get_substrings_bulk_remote_promotes_to_whole_download() {
-        // 64-base sequence so we can request many disjoint ranges.
-        let bases: &[u8] =
-            b"ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT";
-        let record = digest_sequence("chrBulk", bases);
-        let meta = record.metadata().clone();
-        let alphabet = lookup_alphabet(&meta.alphabet);
-        let encoded = encode_sequence(bases, alphabet).unwrap();
-
-        let (base_url, shutdown) = start_range_honoring_server(encoded.clone());
-
-        // Remote store WITH a local cache dir, so the bulk path can promote into it.
-        let cache_dir =
-            std::env::temp_dir().join(format!("gtars_bulk_fetch_test_{}", meta.sha512t24u));
-        let _ = std::fs::remove_dir_all(&cache_dir);
-        std::fs::create_dir_all(&cache_dir).expect("create cache dir");
-
-        let mut store = ReadonlyRefgetStore::new(StorageMode::Encoded);
-        store.remote_source = Some(base_url);
-        store.seqdata_path_template = Some(DEFAULT_SEQDATA_PATH_TEMPLATE.to_string());
-        store.local_path = Some(cache_dir.clone());
-        store
-            .sequence_store
-            .insert(meta.sha512t24u.to_key(), SequenceRecord::Stub(meta.clone()));
-
-        let cached_path = cache_dir.join(ReadonlyRefgetStore::expand_template(
-            &meta.sha512t24u,
-            DEFAULT_SEQDATA_PATH_TEMPLATE,
-        ));
-
-        // Sub-threshold batch: served per-range by byte-range; nothing cached.
-        let small: Vec<(usize, usize)> = vec![(0, 3), (8, 11), (60, 63)];
-        let small_out = store
-            .get_substrings(meta.sha512t24u.as_bytes(), &small)
-            .expect("small remote get_substrings should succeed");
-        for (i, &(s, e)) in small.iter().enumerate() {
-            assert_eq!(small_out[i], String::from_utf8(bases[s..e].to_vec()).unwrap());
-        }
-        assert!(
-            !cached_path.exists(),
-            "a sub-threshold batch must not download/cache the whole .seq"
-        );
-
-        // Bulk batch (>= REMOTE_BULK_FETCH_THRESHOLD): promote to one whole
-        // download, cache it, and serve every range from the local file.
-        let bulk: Vec<(usize, usize)> = (0..REMOTE_BULK_FETCH_THRESHOLD)
-            .map(|i| (i * 4, i * 4 + 3))
-            .collect();
-        assert_eq!(bulk.len(), REMOTE_BULK_FETCH_THRESHOLD);
-        let bulk_out = store
-            .get_substrings(meta.sha512t24u.as_bytes(), &bulk)
-            .expect("bulk remote get_substrings should succeed");
-        shutdown();
-        for (i, &(s, e)) in bulk.iter().enumerate() {
-            assert_eq!(
-                bulk_out[i],
-                String::from_utf8(bases[s..e].to_vec()).unwrap(),
-                "bulk range {} decode mismatch",
-                i
-            );
-        }
-
-        // The promotion cached the WHOLE encoded `.seq` (not a partial window).
-        assert!(
-            cached_path.exists(),
-            "bulk batch must cache the whole .seq locally"
-        );
-        let on_disk = std::fs::read(&cached_path).expect("read cached .seq");
-        assert_eq!(on_disk, encoded, "cached file must be the full encoded sequence");
-
-        let _ = std::fs::remove_dir_all(&cache_dir);
-    }
-}

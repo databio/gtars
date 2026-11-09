@@ -17,6 +17,7 @@ nav:
     - gtars-genomicdist: genomicdist.md
     - gtars-lola: lola.md
     - gtars-refget: refget.md
+    - gtars-rgblast: blast.md
     - gtars-bbcache: bbcache.md
   - Bindings:
     - Python:
@@ -28,6 +29,8 @@ nav:
       - RefgetStore Tutorial: python/refgetstore.ipynb
       - RefgetStore Python Reference: python/refget-store.md
       - Refget API Reference: python/refget-api.md
+      - BLAST Tutorial: python/blast.md
+      - BLAST API Reference: python/blast-api.md
     - Wasm:
       - Overview: wasm.md
       - Overlappers: wasm/overlappers.md
@@ -43,6 +46,7 @@ nav:
       - LOLA: r/lola.md
       - IGD: r/igd.md
       - RefgetStore: r/refgetstore.md
+      - BLAST: r/blast.md
   - Reference:
     - Changelog: changelog.md
     - Rust source API docs: https://docs.rs/gtars/latest/gtars/
@@ -55,5 +59,5 @@ renderers:
   - hub-python-api:
       package_root: ../gtars-python/py_src
       packages: [gtars]
-      include: [python/refget-api.md]
+      include: [python/refget-api.md, python/blast-api.md]
       docstring_style: google

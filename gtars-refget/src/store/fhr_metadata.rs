@@ -372,8 +372,6 @@ impl RefgetStore {
         digest: Option<&str>,
         strategy: SyncStrategy,
     ) -> Result<PullResult> {
-        let mut result = PullResult::default();
-
         let digests: Vec<String> = match digest {
             Some(d) => vec![d.to_string()],
             None => self
@@ -383,115 +381,17 @@ impl RefgetStore {
                 .map(|r| r.metadata().digest.to_string())
                 .collect(),
         };
-
-        for digest_str in &digests {
-            let relative_path = format!("fhr/{}.fhr.json", digest_str);
-
-            match strategy {
-                SyncStrategy::KeepOurs => {
-                    let was_local = self
-                        .inner
-                        .local_path
-                        .as_ref()
-                        .map(|p| p.join(&relative_path).exists())
-                        .unwrap_or(false);
-                    match ReadonlyRefgetStore::fetch_file(
-                        &self.inner.local_path,
-                        &self.inner.remote_source,
-                        &relative_path,
-                        self.inner.persist_to_disk,
-                        false,
-                    ) {
-                        Ok(data) => {
-                            if was_local {
-                                result.skipped += 1;
-                            } else {
-                                if let Ok(fhr) = serde_json::from_slice::<FhrMetadata>(&data) {
-                                    let key = digest_str.to_key();
-                                    self.inner.fhr_metadata.insert(key, fhr);
-                                }
-                                result.pulled += 1;
-                            }
-                        }
-                        Err(_) => {
-                            result.not_found += 1;
-                        }
-                    }
-                }
-                SyncStrategy::KeepTheirs => {
-                    match ReadonlyRefgetStore::fetch_file(
-                        &self.inner.local_path,
-                        &self.inner.remote_source,
-                        &relative_path,
-                        self.inner.persist_to_disk,
-                        true,
-                    ) {
-                        Ok(data) => {
-                            if let Ok(fhr) = serde_json::from_slice::<FhrMetadata>(&data) {
-                                let key = digest_str.to_key();
-                                self.inner.fhr_metadata.insert(key, fhr);
-                            }
-                            result.pulled += 1;
-                        }
-                        Err(_) => {
-                            result.not_found += 1;
-                        }
-                    }
-                }
-                SyncStrategy::Notify => {
-                    let local_exists = self
-                        .inner
-                        .local_path
-                        .as_ref()
-                        .map(|p| p.join(&relative_path).exists())
-                        .unwrap_or(false);
-
-                    if local_exists {
-                        match ReadonlyRefgetStore::fetch_file(
-                            &None,
-                            &self.inner.remote_source,
-                            &relative_path,
-                            false,
-                            false,
-                        ) {
-                            Ok(remote_data) => {
-                                let local_path = self
-                                    .inner
-                                    .local_path
-                                    .as_ref()
-                                    .unwrap()
-                                    .join(&relative_path);
-                                let local_data = fs::read(&local_path)?;
-                                if local_data != remote_data {
-                                    result.conflicts.push(relative_path);
-                                } else {
-                                    result.skipped += 1;
-                                }
-                            }
-                            Err(_) => {
-                                result.not_found += 1;
-                            }
-                        }
-                    } else {
-                        match ReadonlyRefgetStore::fetch_file(
-                            &None,
-                            &self.inner.remote_source,
-                            &relative_path,
-                            false,
-                            false,
-                        ) {
-                            Ok(_) => {
-                                result.conflicts.push(relative_path);
-                            }
-                            Err(_) => {
-                                result.not_found += 1;
-                            }
-                        }
-                    }
-                }
+        let rels: Vec<String> = digests.iter().map(|d| format!("fhr/{}.fhr.json", d)).collect();
+        let (result, datas) = self.inner.sync_sidecars(&rels, &strategy)?;
+        // Load every sidecar that is now local, including ones already
+        // cached (KeepOurs), so `get_fhr_metadata` sees them.
+        for (digest_str, data) in digests.iter().zip(datas) {
+            if let Some(data) = data
+                && let Ok(fhr) = serde_json::from_slice::<FhrMetadata>(&data)
+            {
+                self.inner.fhr_metadata.insert(digest_str.to_key(), fhr);
             }
         }
-
         Ok(result)
     }
 }
@@ -989,6 +889,9 @@ mod tests {
         let local_store_path = local_dir.path().join("store");
 
         let mut store = RefgetStore::on_disk(&local_store_path).unwrap();
+        store.inner.fetcher = Some(std::sync::Arc::new(
+            super::fetch::Fetcher::new(&base_url, super::FetchConfig::default()).unwrap(),
+        ));
         store.inner.remote_source = Some(base_url);
 
         // Inject a minimal stub collection so pull_fhr iterates over it.

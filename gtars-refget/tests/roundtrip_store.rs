@@ -560,6 +560,7 @@ fn export_fasta_is_lossless() {
                     label: LabelTemplate::parse("{name}").unwrap(),
                     molecule: None,
                     line_width: Some(7),
+                    ..Default::default()
                 },
             )
             .expect("export_fasta");

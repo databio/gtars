@@ -54,7 +54,7 @@ fn coll_sel<K: AsRef<[u8]>>(digest: K, names: Option<&[&str]>) -> ExportSelectio
 
 /// Export options that label records by name.
 fn name_opts(line_width: Option<usize>) -> ExportOptions {
-    ExportOptions { label: LabelTemplate::parse("name").unwrap(), molecule: None, line_width }
+    ExportOptions { label: LabelTemplate::parse("name").unwrap(), molecule: None, line_width, ..Default::default() }
 }
 
 fn setup_export_test_store(temp_path: &std::path::Path) -> (RefgetStore, DigestKey) {
@@ -4127,31 +4127,45 @@ fn test_export_fasta_duplicate_named_sequences() {
     assert_eq!(store.get_substring(digest, 0, 4).unwrap(), bases);
 }
 
-#[test]
-fn test_open_remote_uses_cached_manifest_when_offline() {
-    // Port 1 refuses connections, so the manifest refresh always fails.
-    let remote_url = "http://127.0.0.1:1/store";
-    let dir = tempdir().unwrap();
-    let cache_path = dir.path().join("cache");
-    let fasta_path = dir.path().join("test.fa");
+use super::http_fixture;
+
+/// Build a one-sequence store under `dir/remote` and serve it.
+fn served_store(dir: &std::path::Path) -> (http_fixture::Fixture, String) {
+    let store_path = dir.join("remote");
+    let fasta_path = dir.join("test.fa");
     fs::write(&fasta_path, ">chr1\nATGCATGC\n").unwrap();
-
-    // With nothing cached, an unreachable remote is still an error.
-    assert!(RefgetStore::open_remote(dir.path().join("empty"), remote_url).is_err());
-
-    // Simulate a cache left by an earlier online open of this remote.
-    let mut writer = RefgetStore::on_disk(&cache_path).unwrap();
+    let mut writer = RefgetStore::on_disk(&store_path).unwrap();
     let (collection, _) = writer
         .add_sequence_collection_from_fasta(&fasta_path, FastaImportOptions::new())
         .unwrap();
     drop(writer);
-    fs::write(cache_path.join(".origin"), format!("{}\n", remote_url)).unwrap();
+    (http_fixture::Fixture::serve(&store_path, &["store"]), collection.digest)
+}
 
-    let mut store = RefgetStore::open_remote(&cache_path, remote_url)
+fn quick_fetch() -> FetchConfig {
+    FetchConfig { retries: 1, ..FetchConfig::default() }
+}
+
+#[test]
+fn test_open_remote_uses_cached_manifest_when_offline() {
+    let dir = tempdir().unwrap();
+    let cache = dir.path().join("cache");
+
+    // With nothing cached, an unreachable remote is still an error.
+    assert!(RefgetStore::open_remote(dir.path().join("empty"), "http://127.0.0.1:1/store", &quick_fetch()).is_err());
+
+    // An earlier online open caches the metadata and the sequence.
+    let (fx, digest) = served_store(dir.path());
+    let url = fx.url("store");
+    {
+        let mut store = RefgetStore::open_remote(&cache, &url, &quick_fetch()).unwrap();
+        assert!(store.get_sequence_by_name(&digest, "chr1").unwrap().is_loaded());
+    }
+    drop(fx);
+
+    let mut store = RefgetStore::open_remote(&cache, &url, &quick_fetch())
         .expect("a cached remote store should open offline");
-    let seq = store
-        .get_sequence_by_name(&collection.digest, "chr1")
-        .unwrap();
+    let seq = store.get_sequence_by_name(&digest, "chr1").unwrap();
     assert!(seq.is_loaded());
 }
 
@@ -4159,23 +4173,20 @@ fn test_open_remote_uses_cached_manifest_when_offline() {
 /// lookups exercise the deferred-index path. Each call gets a fresh open.
 #[test]
 fn test_remote_lookups_accept_prefixed_and_md5_digests() {
-    let remote_url = "http://127.0.0.1:1/store";
     let dir = tempdir().unwrap();
-    let cache_path = dir.path().join("cache");
-    let fasta_path = dir.path().join("test.fa");
-    fs::write(&fasta_path, ">chr1\nATGCATGC\n").unwrap();
-
-    let mut writer = RefgetStore::on_disk(&cache_path).unwrap();
-    writer
-        .add_sequence_collection_from_fasta(&fasta_path, FastaImportOptions::new())
-        .unwrap();
-    drop(writer);
-    fs::write(cache_path.join(".origin"), format!("{}\n", remote_url)).unwrap();
+    let cache = dir.path().join("cache");
+    let (fx, _digest) = served_store(dir.path());
+    let url = fx.url("store");
+    {
+        let mut store = RefgetStore::open_remote(&cache, &url, &quick_fetch()).unwrap();
+        store.load_all_sequences().unwrap();
+    }
+    drop(fx);
 
     let (sha_digest, md5_digest) = calculate_test_digests(b"ATGCATGC");
     let sq_digest = format!("SQ.{}", sha_digest);
     let fresh = || {
-        let store = RefgetStore::open_remote(&cache_path, remote_url).unwrap();
+        let store = RefgetStore::open_remote(&cache, &url, &quick_fetch()).unwrap();
         assert!(!store.inner.sequence_index_loaded);
         store
     };
@@ -6293,7 +6304,7 @@ fn test_export_leaves_no_sequence_loaded() {
 }
 
 #[test]
-fn test_sequence_bytes_does_not_create_local_file() {
+fn test_prefetch_does_not_create_local_file() {
     let dir = tempdir().unwrap();
     let store_path = dir.path().join("store");
     let fasta = dir.path().join("t.fa");
@@ -6306,8 +6317,9 @@ fn test_sequence_bytes_does_not_create_local_file() {
     let meta = store.list_sequences().unwrap().remove(0);
     let path = store.sequence_file_path(&meta.sha512t24u).unwrap();
     fs::remove_file(&path).unwrap();
-    assert!(store.inner.sequence_bytes(&meta.sha512t24u.to_key()).is_err());
-    assert!(!path.exists(), "sequence_bytes must not create the .seq file");
+    let mut run = store.prefetch(&[meta.sha512t24u.clone()], PrefetchOptions::default()).unwrap();
+    assert!(run.next().unwrap().is_err());
+    assert!(!path.exists(), "a prefetch must not create the .seq file");
 }
 
 /// Label-rule fixture:
@@ -6365,7 +6377,7 @@ fn label_fixture() -> LabelFixture {
 fn export_headers(store: &mut RefgetStore, sel: &ExportSelection, label: &str) -> anyhow::Result<(Vec<String>, ExportSummary)> {
     let dir = tempdir().unwrap();
     let out = dir.path().join("o.fa");
-    let opts = ExportOptions { label: LabelTemplate::parse(label)?, molecule: None, line_width: None };
+    let opts = ExportOptions { label: LabelTemplate::parse(label)?, molecule: None, line_width: None, ..Default::default() };
     let summary = store.export_fasta(sel, &out, &opts)?;
     let headers = fs::read_to_string(&out)
         .unwrap()
@@ -6488,7 +6500,7 @@ fn test_molecule_filter() {
         (Some(Molecule::Dna), vec!["dna"]),
         (Some(Molecule::Protein), vec!["prot"]),
     ] {
-        let opts = ExportOptions { label: LabelTemplate::parse("name").unwrap(), molecule, line_width: None };
+        let opts = ExportOptions { label: LabelTemplate::parse("name").unwrap(), molecule, line_width: None, ..Default::default() };
         store.export_fasta(&coll_sel(&digest, None), &out, &opts).unwrap();
         let headers: Vec<String> = fs::read_to_string(&out)
             .unwrap()

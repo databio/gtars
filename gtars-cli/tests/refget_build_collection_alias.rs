@@ -19,7 +19,12 @@ impl Scratch {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        p.push(format!("gtars_collalias_{}_{}_{}", tag, std::process::id(), nanos));
+        p.push(format!(
+            "gtars_collalias_{}_{}_{}",
+            tag,
+            std::process::id(),
+            nanos
+        ));
         std::fs::create_dir_all(&p).unwrap();
         Scratch { path: p }
     }
@@ -69,7 +74,11 @@ fn build_with_collection_alias_writes_alias_tsv() {
     );
 
     let tsv = out_dir.join("aliases").join("collections").join("ucsc.tsv");
-    assert!(tsv.exists(), "collection alias TSV should exist at {:?}", tsv);
+    assert!(
+        tsv.exists(),
+        "collection alias TSV should exist at {:?}",
+        tsv
+    );
     let contents = std::fs::read_to_string(&tsv).unwrap();
     assert!(
         contents.contains("hg38\t"),
@@ -118,7 +127,10 @@ fn build_rejects_collection_alias_with_multiple_fastas() {
         "--collection-alias",
         "ucsc:hg38",
     ]);
-    assert!(!output.status.success(), "multi-file alias must be rejected");
+    assert!(
+        !output.status.success(),
+        "multi-file alias must be rejected"
+    );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("add_collection_alias"),

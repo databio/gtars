@@ -93,6 +93,28 @@ cat(sprintf("Store successfully loaded from: %s\n", temp_saved_store_path))
 print(store_load)
 ```
 
-A saved store can also be served over HTTP and opened remotely with
-`refget_store_open_remote(cache_path, remote_url)`. The server must support HTTP
-range requests; see the [Python reference](../python/refget-store.md) for details.
+A saved store can also be served over HTTP and opened remotely:
+
+```r
+remote <- refget_store_open_remote(refget_default_cache_dir(), "https://example.com/store",
+                                   fetch_jobs = 32L)
+
+# Download many sequences into the shared cache at once, without loading them
+digests <- vapply(list_sequences(remote), function(m) m@sha512t24u, character(1))
+counters <- cache_sequences(remote, digests, progress = TRUE)
+
+fetch_stats(remote)                       # requests, retries, bytes, cache hits
+export_fasta(remote, "all.fa", all = TRUE, write_cache = TRUE)
+refget_cache_info(refget_default_cache_dir())
+refget_clear_cache(refget_default_cache_dir())   # deletes everything in the cache
+```
+
+`cache_path` is a cache root shared by every remote store: downloaded
+sequences live in `sequences/` (named by digest, so remotes share them) and each
+remote's metadata in `remotes/<key>/`. `refget_default_cache_dir()` is
+`REFGET_CACHE_DIR`, else `$XDG_CACHE_HOME/refget`, else `~/.cache/refget`.
+Remote stores need a server with HTTP range support: sequence files over 8 MiB
+download as parallel 8 MiB ranges, and partial reads (`get_substring`) read only
+the bytes they need. Running the same download again fetches only the sequences
+still missing. See the [Python reference](../python/refget-store.md) for the
+cache layout and download behavior.

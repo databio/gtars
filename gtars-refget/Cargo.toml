@@ -11,7 +11,7 @@ default = ["filesystem", "http"]
 # File-based operations (not WASM-compatible). Also pulls in the native transcript
 # mmap backend (`memmap2`), used only when `transcripts` is also on.
 filesystem = ["gtars-core", "crossbeam-channel", "glob", "memmap2", "tempfile"]
-http = ["ureq"]  # HTTP client for remote fetching (not WASM-compatible)
+http = ["ureq", "filesystem"]  # HTTP client for remote fetching (not WASM-compatible); remote stores cache to disk
 # WASM-SAFE CORE: in-memory transcript store + HGVS coordinate mapper. No mmap,
 # no std::fs on the read path. Enabling `transcripts` alone (the WASM config)
 # compiles the core; `transcripts` + `filesystem` (native) additionally compiles
@@ -63,6 +63,11 @@ required-features = ["filesystem"]
 [[test]]
 name = "audit_stream_sequence_truncation"
 required-features = ["filesystem"]
+
+# Remote stores over a local HTTP fixture: parallel fetch, cache, resume.
+[[test]]
+name = "remote_fetch"
+required-features = ["filesystem", "http"]
 
 # Spawns real processes writing one store directory concurrently; needs the
 # FASTA import path. `harness = false` so the binary can become a writer child

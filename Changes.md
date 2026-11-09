@@ -2,11 +2,28 @@
 
 ## Unreleased
 
+- CI (untested): install ncbi-blast+ for BLAST tests; add a `blast` test job and feature checks.
+
 ### Breaking
 
 - `gtars-refget`: `ComparisonDigests.a` is now `Option<String>` (was
   `String`), matching `b`. A side compared from a level-2 body has no known
   digest, so either digest can be `None` (JSON `null`).
+- `gtars-refget`: remote stores share one download cache. `open_remote(cache_root,
+  url, &FetchConfig)` takes a cache root (default `default_cache_root()`:
+  `REFGET_CACHE_DIR`, else `$XDG_CACHE_HOME/refget`, else `~/.cache/refget`)
+  instead of a per-remote folder, and a `FetchConfig`. Sequences live in
+  `sequences/<tag>/<d0d1>/<digest>.seq`, shared by every remote; metadata in
+  `remotes/<first 16 hex of sha256(url)>/`. Old per-origin caches are not read.
+  Python and R keep their positional `(cache_path, remote_url)` arguments; the
+  folder is now a cache root.
+- `gtars-refget`: a cached metadata file is refetched whenever the manifest
+  field that covers it is missing or changed (`collections/*.rgsi` follow both
+  `collections_digest` and `sequences_digest`). `sequences.rgsi` and
+  `collections.rgci` are checked against the manifest's sha256.
+- `gtars-refget`: `ExportSummary` gains `fetch` (and is no longer `Eq`);
+  `ExportOptions` gains `write_cache`. The `http` feature
+  now implies `filesystem`.
 - `gtars-refget`: FASTA export is one method with two independent choices.
   `export_fasta(selection, output, opts)` replaces `export_fasta` and
   `export_fasta_by_digests`. `ExportSelection` picks the records (one or more
@@ -25,6 +42,52 @@
 - `gtars-refget`: new `compare_level2_json` compares two level-2 sequence
   collection bodies given as JSON, with no store or digest needed. Exposed as
   `compare_seqcols` in Python (`gtars.refget`) and `compareSeqcols` in WASM.
+- `gtars-rgblast`: `BlastCommand`, one clap enum for every verb (`build`, `verify`,
+  `view`, `nstats`, `search`, `report`, `origin`, `reps`) with
+  `run_code(prog)`, and `cli::run_json(argv, progress)`, which runs a verb from an
+  argument list and returns its result as JSON. The `rgmakeblastdb` and `rgblast`
+  binaries mount `BlastCommand` and the bindings call `run_json`, so `gtars blast`,
+  the binaries, Python and R share flags, conversions and exit codes (a closed
+  pipe now exits 0).
+- `gtars blast <verb>` in the `gtars` CLI (feature `blast`, on by default).
+- Python `gtars.blast`: `build`, `verify`, `view`, `nstats`, `search`, `report`,
+  `origin` and `reps`, with the verbs' long flags as keywords, results as dicts, a
+  `progress` callback (called on the calling thread, Ctrl-C cancels),
+  `REPORT_FIELDS`, and exceptions tagged with a `kind` (`FileNotFoundError`,
+  `ValueError` and other built-ins, plus `EngineNotFoundError` and `EngineError`).
+- R `blast_build()`, `blast_verify()`, `blast_view()`, `blast_nstats()`,
+  `blast_search()`, `blast_report()`, `blast_origin()`,
+  `blast_reps()` and `blast_report_fields()`, with errors as classed conditions
+  (`gtars_rgblast_*`, including `_engine_not_found` and `_engine_failed`).
+- `search` and `origin` run rgblastn in process on the store by default (no
+  BLAST+ install); `--engine blastn --db BASE` runs BLAST+ `blastn` on a database
+  you built.
+- `gtars-rgblast`: `report::rank::SUMMARY_COLUMNS`, the TSV summary's column order,
+  so bindings return rows in the same order.
+- Docs: `blast.md`, the Python and R BLAST tutorials and the BLAST API reference.
+
+- `gtars-refget`: parallel remote fetch. Remote stores download over a pool of
+  keep-alive connections (`FetchConfig::jobs`, default 32), download sequence
+  files over 8 MiB as parallel 8 MiB ranges (the server must support HTTP Range
+  requests), retry transient failures with jittered backoff and `Retry-After`,
+  treat 403 as "not found or access denied" (S3 answers 403 for a missing key),
+  and hash every downloaded sequence against its digest before use. Metadata
+  (collection files, alias tables, FHR sidecars) downloads in parallel batches.
+- `gtars-refget`: `prefetch(digests, PrefetchOptions)` streams the stored bytes
+  of many sequences in parallel, in input or any order; `cache_sequences` fills
+  the cache. A sequence is published to the cache only when complete, so a rerun
+  downloads only the sequences still missing. `load_collections`, `fetch_stats`,
+  `cache_info`, `clear_cache(root)` (deletes everything in the cache) and
+  `normalize_remote_url` are new; `RemoteMissing` lets callers tell a missing
+  remote file from other errors.
+- `gtars refget export --remote URL` with `--cache-dir`, `--resume` and
+  `--fetch-jobs`. Exports read ahead in parallel and print a `network:` summary
+  for remote stores.
+- Python and R: `open_remote(..., fetch_jobs)`, `cache_sequences(digests,
+  progress)`, `fetch_stats`, `load_collections`, `export_fasta(...,
+  write_cache)`, and cache helpers (`default_cache_dir`, `cache_info`,
+  `clear_cache(root)`; `refget_*` in R). The Python binding releases the GIL
+  during downloads.
 - `gtars-refget`: label templates with the fields `{seq}`, `{seq:NS}`,
   `{col}`, `{col:NS}` and `{name}`, for example `{col:ucsc}/{name}`. A missing
   alias falls back to the digest. A label repeated for the same sequence is
@@ -35,12 +98,23 @@
 - Exports write to stdout when the output path is `-`. `gtars refget export`
   defaults to stdout, takes `--collection` more than once, and exits quietly
   when the reader closes the pipe. Python raises `BrokenPipeError` in that case.
+- New crate `gtars-rgblast` with three binaries: `rgmakeblastdb` (`build`, `verify`,
+  `view`, `nstats`) writes BLAST databases straight from a store;
+  `rgblastn` searches a store in process (tasks `megablast`, `blastn` and
+  `blastn-short`, `-outfmt 6`); `rgblast` (`search`, `report`, `origin`, `reps`)
+  says which species and genomes a query comes from. Remote stores are pulled
+  into the shared cache first (`--cache-dir`, `--resume`, `--fetch-jobs`).
+- `gtars-refget`: `ReadonlyRefgetStore::sequence_relative_path` is now public
+  (the store-relative path of a sequence's `.seq` record).
 
 ### Fixed
 
 - `gtars-refget`: the streaming FASTA hasher (`FastaStreamHasher`) now reads
   multi-member gzip, including bgzip (BGZF) and concatenated `.gz` files. It
   used to decode only the first member.
+- `gtars-refget`: `pull_fhr(KeepOurs)` loads sidecars that are already cached
+  into memory. `pull_aliases` and `pull_fhr` count only a missing file as
+  `not_found`; network errors propagate.
 - `gtars-refget`: exports stream one sequence at a time and decode in chunks.
   Peak memory is one sequence's stored bytes plus a 1 MB chunk, instead of
   every exported sequence held in memory and never released. Exports leave

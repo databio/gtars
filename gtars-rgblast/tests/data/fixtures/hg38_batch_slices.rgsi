@@ -1,0 +1,12 @@
+##seqcol_digest=jYGjnrUm2bnHq7Ofe12YE1l9Py7Fhncw
+##names_digest=xw_03BXCOqsZWCYIapK9GwrINjEJfB2u
+##sequences_digest=ijMZIhnd52jBKehY4t5IC3c_Fhby28R3
+##lengths_digest=ZqWcgdLfeO0auepj2c6yj5sBAxRP6uph
+##name_length_pairs_digest=rElETlGirv5hH3gSihr7oueoADz4AGSk
+##sorted_name_length_pairs_digest=1mEWatv2SzE_W0SJSJeEvvX2QOgpE6Mx
+##sorted_sequences_digest=EqekmozIXh2JH696FTo7ZUO4QzKKQPUz
+#name	length	alphabet	sha512t24u	md5	description
+chr1a	10090	dna2bit	vHP30-AADfQ1JK2rVhlvNZFqS8qABCKK	638768feb29204b27969b3ac4eb3e580	hg38 chr1:246394557-246404646 (SQ.2YnepKM7OkBoOrKmvHbGqguVfF9amCST), around a q06 hit lost to query batching
+chr1b	10079	dna2bit	4QPecPp9Znm6_l4pXGUu8heupUI7gT2m	dc5229f7ecaf7b2c71d16d5202377c76	hg38 chr1:36194297-36204375 (SQ.2YnepKM7OkBoOrKmvHbGqguVfF9amCST), around a q06 hit lost to query batching
+chr17a	10085	dna2bit	TjO_JHGRl5_iRdlfBdqTZQpSFwLtueUh	10fe85692a6c627fdd34f26503cb52c9	hg38 chr17:67878813-67888897 (SQ.upqChCoU-Gtd_61IidCsln-r8cxUTFeP), around a q06 hit lost to query batching
+chr17b	10064	dna2bit	Z5gnmSwGfRcrPPoXuc-YY1VrWeQpEKdh	26bee359bba35e453fcbe85f810141c9	hg38 chr17:2466385-2476448 (SQ.upqChCoU-Gtd_61IidCsln-r8cxUTFeP), around a q06 hit lost to query batching

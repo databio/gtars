@@ -1,0 +1,6 @@
+{
+  "schema": "https://raw.githubusercontent.com/FAIR-bioHeaders/FHR-Specification/main/fhr.json",
+  "genome": "Homo sapiens",
+  "taxon": {"name": "Homo sapiens", "uri": "https://identifiers.org/taxonomy:9606"},
+  "accessionID": {"name": "GCF_TEST.1"}
+}

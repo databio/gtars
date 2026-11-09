@@ -1,14 +1,17 @@
 //! FASTA export and BED region extraction for RefgetStore.
 //!
-//! Exports stream one sequence at a time: each record's stored bytes are read
-//! once (from RAM, a local `.seq` file, or the remote store) and decoded in
-//! chunks, so peak memory is one sequence's packed bytes plus one chunk. An
-//! export never loads sequences into the store and never writes `.seq` files
-//! into a remote store's cache.
+//! Exports stream records in order: a prefetch reads each record's stored
+//! bytes (from RAM, a local `.seq` file, the shared cache, or the remote store,
+//! many at once) ahead of the writer, within a fixed memory budget (1 GiB),
+//! and the writer decodes them in chunks. An export never loads sequences into the store, and
+//! writes downloaded `.seq` files to the shared cache only with
+//! [`ExportOptions::write_cache`].
 
 use super::*;
 use super::label::{label_err, AliasMaps, LabelObject, LabelTemplate};
 use super::readonly::ReadonlyRefgetStore;
+use super::fetch::FetchCounters;
+use super::prefetch::{PrefetchOptions, PrefetchOrder, DEFAULT_MEMORY_BUDGET};
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
@@ -117,10 +120,13 @@ pub struct ExportOptions {
     pub molecule: Option<Molecule>,
     /// Bases per line: `None` is 80, `Some(0)` writes each sequence on one line.
     pub line_width: Option<usize>,
+    /// Publish sequences downloaded from a remote store to the shared cache,
+    /// so an interrupted export can resume without downloading them again.
+    pub write_cache: bool,
 }
 
 /// Counts reported by an export.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ExportSummary {
     /// Records written.
     pub n_records: usize,
@@ -130,6 +136,8 @@ pub struct ExportSummary {
     pub n_fallbacks: usize,
     /// Records skipped because the same label and sequence were already written.
     pub n_deduplicated: usize,
+    /// What reading the sequences took: network, cache and local reads.
+    pub fetch: FetchCounters,
 }
 
 // ============================================================================
@@ -637,37 +645,61 @@ impl ReadonlyRefgetStore {
         }
         drop(seen);
 
-        // Write: stream each record's bytes.
+        // Write: stream each record's bytes, read ahead in parallel.
+        let remote = self.remote_source.is_some();
         let mut writer = open_output(output_path.as_ref())?;
+        let keys: Vec<DigestKey> = plan.iter().map(|r| r.key).collect();
+        let popts = PrefetchOptions {
+            order: PrefetchOrder::Input,
+            write_cache: opts.write_cache,
+            progress: remote && !self.quiet,
+        };
+        let mut fetch = self.prefetch_keys(&keys, popts, DEFAULT_MEMORY_BUDGET)?;
         let total = plan.len();
         for (i, rec) in plan.iter().enumerate() {
+            let item = fetch
+                .next()
+                .ok_or_else(|| anyhow!("Sequence data for record {} was not delivered", rec.label))??;
+            debug_assert_eq!(item.digest.to_key(), rec.key);
             let meta = self
                 .sequence_store
                 .get(&rec.key)
                 .map(|r| r.metadata())
                 .ok_or_else(|| anyhow!("Sequence record not found: {}", key_to_digest_string(&rec.key)))?;
-            let bytes = self.sequence_bytes(&rec.key)?;
             write_fasta_record(
                 &mut *writer,
                 &rec.label,
                 meta,
-                bytes.as_slice(),
+                item.bytes(),
                 self.mode,
                 line_width,
                 EXPORT_CHUNK_BASES,
             )?;
+            drop(item);
             summary.n_records += 1;
             summary.n_bases += meta.length as u64;
             if !self.quiet && ((i + 1) % PROGRESS_EVERY == 0 || i + 1 == total) {
+                let fetched = if remote {
+                    let c = fetch.counters();
+                    format!(", fetched {:.2} GB at {:.1} MB/s", c.bytes_downloaded as f64 / 1e9, c.rate_mb_s())
+                } else {
+                    String::new()
+                };
                 eprintln!(
-                    "exported {}/{} records ({:.2} GB)",
+                    "exported {}/{} records ({:.2} GB){}",
                     i + 1,
                     total,
-                    summary.n_bases as f64 / 1e9
+                    summary.n_bases as f64 / 1e9,
+                    fetched
                 );
             }
         }
         writer.flush()?;
+        summary.fetch = fetch.counters();
+        drop(fetch);
+        if remote && !self.quiet {
+            eprintln!("{}", summary.fetch.network_line());
+        }
         Ok(summary)
     }
 
@@ -800,6 +832,7 @@ mod tests {
             label: LabelTemplate::parse("name").unwrap(),
             molecule: None,
             line_width: Some(line_width),
+            ..Default::default()
         }
     }
     use tempfile::{NamedTempFile, TempDir};

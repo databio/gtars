@@ -754,3 +754,74 @@ test_that("show methods do not error", {
   coll_meta <- get_collection_metadata(store, result@digest)
   expect_no_error(capture.output(show(coll_meta)))
 })
+
+# =========================================================================
+# Remote stores: parallel fetch and the shared cache
+# =========================================================================
+
+# Serve a small on-disk store with `python3 -m http.server` (no Range support;
+# every file here is below the 8 MiB range size, so each is fetched whole).
+serve_store <- function(store_dir) {
+  py <- Sys.which("python3")
+  skip_if(py == "", "python3 not available")
+  port <- as.integer(stats::runif(1, 20000, 60000))
+  log <- tempfile()
+  pid <- sys::exec_background(py, c("-m", "http.server", as.character(port),
+                                    "--bind", "127.0.0.1", "--directory", store_dir),
+                              std_out = log, std_err = log)
+  url <- sprintf("http://127.0.0.1:%d", port)
+  for (i in 1:100) {
+    ok <- tryCatch({
+      con <- url(paste0(url, "/rgstore.json")); readLines(con, warn = FALSE); close(con); TRUE
+    }, error = function(e) FALSE, warning = function(w) FALSE)
+    if (ok) break
+    Sys.sleep(0.1)
+  }
+  list(url = url, pid = pid)
+}
+
+make_served_store <- function() {
+  skip_if_no_fasta()
+  dir <- file.path(tempfile(), "store")
+  store <- refget_store_on_disk(dir)
+  set_quiet(store, TRUE)
+  import_fasta(store, fasta_path)
+  write_store(store)
+  dir
+}
+
+test_that("remote store: open options, cache_sequences, fetch_stats, export, cache info", {
+  skip_if_not_installed("sys")
+  dir <- make_served_store()
+  srv <- serve_store(dir)
+  on.exit(tools::pskill(srv$pid), add = TRUE)
+  cache <- tempfile()
+
+  remote <- refget_store_open_remote(cache, srv$url, fetch_jobs = 4L)
+  set_quiet(remote, TRUE)
+  digests <- vapply(list_sequences(remote), function(m) m@sha512t24u, character(1))
+  expect_true(length(digests) > 0)
+
+  first <- cache_sequences(remote, digests, progress = FALSE)
+  expect_equal(first$sequences_fetched, length(digests))
+  second <- cache_sequences(remote, digests, progress = FALSE)
+  expect_equal(second$cache_hits, length(digests))
+  expect_equal(second$sequences_fetched, 0)
+
+  stats <- fetch_stats(remote)
+  expect_true(stats$requests >= length(digests))
+
+  out <- tempfile(fileext = ".fa")
+  summary <- export_fasta(remote, out, all = TRUE, write_cache = TRUE)
+  expect_equal(summary$n_records, length(digests))
+  expect_equal(summary$fetch$cache_hits, length(digests))
+
+  info <- refget_cache_info(cache)
+  expect_equal(info$sequence_files, length(digests))
+  expect_equal(info$remotes$url, sub("/+$", "", srv$url))
+  expect_true(refget_clear_cache(cache) > 0)
+  after <- refget_cache_info(cache)
+  expect_equal(after$sequence_files, 0)
+  expect_equal(nrow(after$remotes), 0)
+  expect_true(nchar(refget_default_cache_dir()) > 0)
+})
