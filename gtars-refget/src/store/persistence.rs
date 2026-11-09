@@ -51,21 +51,22 @@ use super::lock::StoreLock;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::OsStr;
 
-use indexmap::IndexMap;
 use std::fs::{self, File, create_dir_all};
 use std::io::BufRead;
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
+
+use super::catalog::{CollRow, NewMember, SeqParts};
 use sha2::{Sha256, Digest};
 
 use crate::collection::{
-    SequenceCollectionRecordExt, SequenceMetadataExt,
+    SequenceMetadataExt,
     read_rgsi_file,
 };
 use crate::digest::{
-    SequenceCollectionMetadata, SequenceCollectionRecord, SequenceMetadata, SequenceRecord,
-    parse_rgci_line, parse_rgsi_line,
+    SequenceCollectionMetadata, SequenceMetadata,
+    SeqColDigestLvl1, parse_rgci_line, parse_rgsi_fields, parse_rgsi_line,
 };
 use crate::hashkeyable::{HashKeyable, key_to_digest_string};
 
@@ -176,17 +177,25 @@ impl ReadonlyRefgetStore {
 
     /// Write a single collection RGSI file to disk.
     /// Used when persist_to_disk=true to persist collections incrementally.
-    pub(crate) fn write_collection_to_disk_single(&self, record: &SequenceCollectionRecord) -> Result<()> {
+    pub(crate) fn write_collection_to_disk_single<I>(
+        &self,
+        metadata: &SequenceCollectionMetadata,
+        members: I,
+    ) -> Result<()>
+    where
+        I: IntoIterator,
+        I::Item: std::borrow::Borrow<SequenceMetadata>,
+    {
         let local_path = self.local_path.as_ref().context("local_path not set")?;
 
-        let coll_file_path = format!("collections/{}.rgsi", record.metadata().digest);
+        let coll_file_path = format!("collections/{}.rgsi", metadata.digest);
         let full_path = local_path.join(&coll_file_path);
 
         if let Some(parent) = full_path.parent() {
             create_dir_all(parent)?;
         }
 
-        record.write_collection_rgsi(&full_path)?;
+        crate::collection::write_collection_rgsi_rows(&full_path, metadata, members)?;
 
         Ok(())
     }
@@ -264,10 +273,8 @@ impl ReadonlyRefgetStore {
         // Under the lock, "row present" implies "file present" (removal drops
         // both, index first, under this same lock), so this check is enough.
         for coll_key in &pending.collections {
-            let Some(name_map) = self.name_lookup.get(coll_key) else {
-                continue;
-            };
-            if let Some(missing) = name_map.values().find(|k| !sequences.contains_key(*k)) {
+            let member_keys = self.loaded_member_seq_keys(&key_to_digest_string(coll_key));
+            if let Some(missing) = member_keys.iter().find(|k| !sequences.contains_key(*k)) {
                 anyhow::bail!(
                     "cannot commit collection {}: its sequence {} is no longer in the                      store index. Another writer removed it while this import was in                      progress. Re-run the import.",
                     key_to_digest_string(coll_key),
@@ -375,9 +382,8 @@ impl ReadonlyRefgetStore {
         pending: &PendingChanges,
     ) {
         for key in &pending.sequences {
-            if let Some(record) = self.sequence_store.get(key) {
-                rows.entry(*key)
-                    .or_insert_with(|| record.metadata().clone());
+            if let Some(view) = self.sequence_view(key_to_digest_string(key)) {
+                rows.entry(*key).or_insert_with(|| view.to_metadata());
             }
         }
         for key in &pending.removed_sequences {
@@ -405,10 +411,9 @@ impl ReadonlyRefgetStore {
                 + m.sorted_sequences_digest.is_some() as u8
         };
         for key in &pending.collections {
-            let Some(record) = self.collections.get(key) else {
+            let Some(mine) = self.get_collection_metadata(key_to_digest_string(key)) else {
                 continue;
             };
-            let mine = record.metadata();
             match rows.get(key) {
                 Some(existing) if ancillary_count(existing) >= ancillary_count(mine) => {}
                 _ => {
@@ -536,9 +541,12 @@ impl ReadonlyRefgetStore {
     /// commit through here, or rows another writer added are lost.
     pub(crate) fn write_collections_rgci<P: AsRef<Path>>(&self, file_path: P) -> Result<()> {
         let rows: HashMap<DigestKey, SequenceCollectionMetadata> = self
-            .collections
-            .iter()
-            .map(|(k, v)| (*k, v.metadata().clone()))
+            .catalog
+            .coll_rows()
+            .map(|c| {
+                let m = self.catalog.coll_meta(c);
+                (m.digest.to_key(), m.clone())
+            })
             .collect();
         write_collections_rgci_rows(file_path.as_ref(), &rows)
     }
@@ -548,9 +556,8 @@ impl ReadonlyRefgetStore {
     /// EXPORT ONLY — see [`Self::write_collections_rgci`].
     pub fn write_sequences_rgsi<P: AsRef<Path>>(&self, file_path: P) -> Result<()> {
         let rows: HashMap<DigestKey, SequenceMetadata> = self
-            .sequence_store
-            .iter()
-            .map(|(k, v)| (*k, v.metadata().clone()))
+            .sequence_views()
+            .map(|v| (v.sha512t24u().to_key(), v.to_metadata()))
             .collect();
         write_sequences_rgsi_rows(file_path.as_ref(), &rows)
     }
@@ -690,13 +697,9 @@ impl ReadonlyRefgetStore {
 
             // Prefer a fully-resident in-memory record; it needs no I/O and is
             // authoritative for collections that were never persisted.
-            if let Some(record) = self.collections.get(key) {
-                if let Some(sequences) = record.sequences() {
-                    for seq in sequences {
-                        live.insert(seq.metadata().sha512t24u.to_key());
-                    }
-                    continue;
-                }
+            if self.is_collection_loaded(&meta.digest) {
+                live.extend(self.loaded_member_seq_keys(&meta.digest));
+                continue;
             }
 
             let rgsi_path = local_path.join(format!("collections/{}.rgsi", meta.digest));
@@ -719,14 +722,8 @@ impl ReadonlyRefgetStore {
     /// The sequence digests belonging to one collection, read from its
     /// `collections/<digest>.rgsi` (falling back to the in-memory record).
     pub(crate) fn collection_sequence_digests(&self, digest: &str) -> Result<Vec<DigestKey>> {
-        let key = digest.to_key();
-        if let Some(record) = self.collections.get(&key) {
-            if let Some(sequences) = record.sequences() {
-                return Ok(sequences
-                    .iter()
-                    .map(|s| s.metadata().sha512t24u.to_key())
-                    .collect());
-            }
+        if self.is_collection_loaded(digest) {
+            return Ok(self.loaded_member_seq_keys(digest));
         }
         if let Some(local_path) = self.local_path.as_ref() {
             let rgsi_path = local_path.join(format!("collections/{}.rgsi", digest));
@@ -739,12 +736,8 @@ impl ReadonlyRefgetStore {
                     .collect());
             }
         }
-        // Last resort: whatever the name map happens to hold.
-        Ok(self
-            .name_lookup
-            .get(&key)
-            .map(|m| m.values().cloned().collect())
-            .unwrap_or_default())
+        // Last resort: nothing is known about this collection's members.
+        Ok(Vec::new())
     }
 
     /// Read the store metadata from rgstore.json, returning state digests and timestamp.
@@ -881,7 +874,7 @@ impl ReadonlyRefgetStore {
             }
         }
 
-        if store.collections.is_empty() {
+        if store.catalog.n_collections() == 0 {
             let collections_dir = root_path.join("collections");
             Self::load_collections_from_directory(&mut store, &collections_dir)?;
         }
@@ -1058,7 +1051,7 @@ impl ReadonlyRefgetStore {
             }
         }
 
-        if store.collections.is_empty() {
+        if store.catalog.n_collections() == 0 {
             let local_collections_dir = cache_path.join("collections");
             create_dir_all(&local_collections_dir)?;
             Self::load_collections_from_directory(&mut store, &local_collections_dir)?;
@@ -1111,45 +1104,42 @@ impl ReadonlyRefgetStore {
     // Loading helpers
     // =========================================================================
 
-    /// Parse RGSI lines from a reader and load as Stub sequence records.
-    pub(crate) fn load_sequences_from_reader<R: BufRead>(store: &mut ReadonlyRefgetStore, reader: R) -> Result<()> {
-        for line in reader.lines() {
-            let line = line?;
-
+    /// Parse RGSI lines from a reader straight into catalog sequence rows.
+    pub(crate) fn load_sequences_from_reader<R: BufRead>(store: &mut ReadonlyRefgetStore, mut reader: R) -> Result<()> {
+        let mut line = String::new();
+        loop {
+            line.clear();
+            if reader.read_line(&mut line)? == 0 {
+                break;
+            }
             if line.starts_with('#') {
                 continue;
             }
-
-            if let Some(seq_metadata) = parse_rgsi_line(&line) {
-                let record = SequenceRecord::Stub(seq_metadata.clone());
-
-                let sha512_key = seq_metadata.sha512t24u.to_key();
+            if let Some(f) = parse_rgsi_fields(&line) {
                 // A deferred index load may run after a sequence was already
-                // fetched into memory; never demote that record to a stub.
-                let already_loaded = store
-                    .sequence_store
-                    .get(&sha512_key)
-                    .is_some_and(|existing| existing.is_loaded());
-                if !already_loaded {
-                    store.sequence_store.insert(sha512_key, record);
-                }
-
-                let md5_key = seq_metadata.md5.to_key();
-                store.md5_lookup.insert(md5_key, sha512_key);
+                // added (and loaded); dedup keeps that row and its bytes.
+                store.catalog.add_sequence_parts(SeqParts {
+                    name: f.name,
+                    description: f.description,
+                    length: f.length,
+                    alphabet: f.alphabet,
+                    sha512t24u: f.sha512t24u,
+                    md5: f.md5,
+                })?;
             }
         }
-
         Ok(())
     }
 
     /// Load sequence metadata from a sequence index file (sequences.rgsi).
     pub(crate) fn load_sequences_from_index(store: &mut ReadonlyRefgetStore, index_path: &Path) -> Result<()> {
         let file = std::fs::File::open(index_path)?;
-        let reader = std::io::BufReader::new(file);
+        let reader = std::io::BufReader::with_capacity(1 << 20, file);
         Self::load_sequences_from_reader(store, reader)
     }
 
-    /// Parse RGCI lines from a reader and load as Stub collection records.
+    /// Parse RGCI lines from a reader and register the collections (members
+    /// not loaded).
     pub(crate) fn load_collection_stubs_from_reader<R: BufRead>(
         store: &mut ReadonlyRefgetStore,
         reader: R,
@@ -1158,10 +1148,7 @@ impl ReadonlyRefgetStore {
             let line = line?;
 
             if let Some(metadata) = parse_rgci_line(&line) {
-                let key = metadata.digest.to_key();
-                store
-                    .collections
-                    .insert(key, SequenceCollectionRecord::Stub(metadata));
+                store.catalog.upsert_collection(metadata)?;
             }
         }
 
@@ -1189,22 +1176,136 @@ impl ReadonlyRefgetStore {
             let path = entry.path();
 
             if path.is_file() && path.extension() == Some(OsStr::new("rgsi")) {
-                let collection = read_rgsi_file(&path)?;
-                let collection_digest = collection.metadata.digest.to_key();
-
-                let mut name_map = IndexMap::new();
-                for sequence_record in &collection.sequences {
-                    let metadata = sequence_record.metadata();
-                    name_map.insert(metadata.name.clone(), metadata.sha512t24u.to_key());
-                }
-                store.name_lookup.insert(collection_digest, name_map);
-
-                let record = SequenceCollectionRecord::from(collection);
-                store.collections.insert(collection_digest, record);
+                store.load_collection_rgsi(&path, None)?;
             }
         }
 
         Ok(())
+    }
+
+    /// Read one `collections/<digest>.rgsi` straight into the catalog: the
+    /// header becomes the collection row, each data line a member (and a
+    /// sequence row, if new). No per-line `SequenceMetadata` is built.
+    ///
+    /// With `expected`, the file's digest must match it. Files without the
+    /// level-1 header (older writers) go through [`read_rgsi_file`], which
+    /// computes the digests from the rows.
+    pub(crate) fn load_collection_rgsi(&mut self, path: &Path, expected: Option<&str>) -> Result<CollRow> {
+        let file = std::fs::File::open(path)
+            .with_context(|| format!("opening {}", path.display()))?;
+        let mut reader = std::io::BufReader::with_capacity(1 << 20, file);
+        let mut line = String::new();
+
+        let mut seqcol_digest = String::new();
+        let mut names_digest = String::new();
+        let mut sequences_digest = String::new();
+        let mut lengths_digest = String::new();
+        let mut name_length_pairs_digest: Option<String> = None;
+        let mut sorted_name_length_pairs_digest: Option<String> = None;
+        let mut sorted_sequences_digest: Option<String> = None;
+        let mut pending_data = false;
+        loop {
+            line.clear();
+            if reader.read_line(&mut line)? == 0 {
+                break;
+            }
+            let l = line.trim_end_matches(['\n', '\r']);
+            if let Some(stripped) = l.strip_prefix("##") {
+                if let Some((key, value)) = stripped.split_once('=') {
+                    match key {
+                        "seqcol_digest" => seqcol_digest = value.to_string(),
+                        "names_digest" => names_digest = value.to_string(),
+                        "sequences_digest" => sequences_digest = value.to_string(),
+                        "lengths_digest" => lengths_digest = value.to_string(),
+                        "name_length_pairs_digest" => name_length_pairs_digest = Some(value.to_string()),
+                        "sorted_name_length_pairs_digest" => sorted_name_length_pairs_digest = Some(value.to_string()),
+                        "sorted_sequences_digest" => sorted_sequences_digest = Some(value.to_string()),
+                        _ => {}
+                    }
+                }
+                continue;
+            }
+            if l.starts_with('#') {
+                continue;
+            }
+            pending_data = true;
+            break;
+        }
+
+        if sequences_digest.is_empty() || names_digest.is_empty() || lengths_digest.is_empty() {
+            let collection = read_rgsi_file(path)?;
+            if let Some(e) = expected {
+                if collection.metadata.digest != e {
+                    return Err(anyhow!(
+                        "Collection digest mismatch: expected {}, got {}",
+                        e,
+                        collection.metadata.digest
+                    ));
+                }
+            }
+            let crate::digest::SequenceCollection { metadata, sequences } = collection;
+            let members: Vec<SequenceMetadata> =
+                sequences.iter().map(|s| s.metadata().clone()).collect();
+            return Ok(self.insert_collection(metadata, &members)?.0);
+        }
+
+        let lvl1 = SeqColDigestLvl1 { sequences_digest, names_digest, lengths_digest };
+        let digest = if seqcol_digest.is_empty() { lvl1.to_digest() } else { seqcol_digest };
+        if let Some(e) = expected {
+            if digest != e {
+                return Err(anyhow!("Collection digest mismatch: expected {}, got {}", e, digest));
+            }
+        }
+        let meta = SequenceCollectionMetadata {
+            digest,
+            n_sequences: 0,
+            names_digest: lvl1.names_digest,
+            sequences_digest: lvl1.sequences_digest,
+            lengths_digest: lvl1.lengths_digest,
+            name_length_pairs_digest,
+            sorted_name_length_pairs_digest,
+            sorted_sequences_digest,
+            file_path: Some(path.to_path_buf()),
+        };
+        let c = self.catalog.upsert_collection(meta)?;
+        self.catalog.start_members(c);
+
+        let mut n = 0usize;
+        let result = (|| -> Result<()> {
+            loop {
+                if !pending_data {
+                    line.clear();
+                    if reader.read_line(&mut line)? == 0 {
+                        break;
+                    }
+                }
+                pending_data = false;
+                if line.starts_with('#') {
+                    continue;
+                }
+                let Some(f) = parse_rgsi_fields(&line) else { continue };
+                let (seq, _) = self.catalog.add_sequence_parts(SeqParts {
+                    name: f.name,
+                    description: f.description,
+                    length: f.length,
+                    alphabet: f.alphabet,
+                    sha512t24u: f.sha512t24u,
+                    md5: f.md5,
+                })?;
+                self.catalog.push_member(
+                    c,
+                    NewMember { seq, name: f.name, description: f.description, fai: None },
+                )?;
+                n += 1;
+            }
+            Ok(())
+        })();
+        if let Err(e) = result {
+            self.catalog.unload_members(c);
+            return Err(e.context(format!("reading {}", path.display())));
+        }
+        self.catalog.set_coll_n_sequences(c, n);
+        Ok(c)
     }
 }
 

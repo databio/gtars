@@ -54,7 +54,7 @@ fn setup_export_test_store(temp_path: &std::path::Path) -> (RefgetStore, DigestK
         .add_sequence_collection_from_fasta(&temp_fasta_path, FastaImportOptions::new())
         .unwrap();
 
-    let collections: Vec<_> = store.collections.keys().cloned().collect();
+    let collections: Vec<_> = store.t_coll_keys().into_iter().collect();
     let collection_digest = collections[0];
 
     (store, collection_digest)
@@ -90,14 +90,14 @@ fn test_mode_switching() {
             .add_sequence_collection_from_fasta(&temp_fasta_path, FastaImportOptions::new())
             .unwrap();
 
-        if let Some(SequenceRecord::Full { sequence, .. }) = store.sequence_store.get(&chr1_key) {
+        if let Some(SequenceRecord::Full { sequence, .. }) = store.t_seq(&chr1_key) {
             assert_eq!(&sequence[..], b"ATGCATGCATGC");
         }
         let seq_before = store.get_sequence(&chr1_sha).unwrap().decode().unwrap();
 
         store.set_encoding_mode(StorageMode::Encoded).unwrap();
 
-        if let Some(SequenceRecord::Full { sequence, .. }) = store.sequence_store.get(&chr1_key) {
+        if let Some(SequenceRecord::Full { sequence, .. }) = store.t_seq(&chr1_key) {
             assert_eq!(sequence.len(), 3);
         }
         let seq_after = store.get_sequence(&chr1_sha).unwrap().decode().unwrap();
@@ -111,14 +111,14 @@ fn test_mode_switching() {
             .add_sequence_collection_from_fasta(&temp_fasta_path, FastaImportOptions::new())
             .unwrap();
 
-        if let Some(SequenceRecord::Full { sequence, .. }) = store.sequence_store.get(&chr1_key) {
+        if let Some(SequenceRecord::Full { sequence, .. }) = store.t_seq(&chr1_key) {
             assert_eq!(sequence.len(), 3);
         }
         let seq_before = store.get_sequence(&chr1_sha).unwrap().decode().unwrap();
 
         store.disable_encoding();
 
-        if let Some(SequenceRecord::Full { sequence, .. }) = store.sequence_store.get(&chr1_key) {
+        if let Some(SequenceRecord::Full { sequence, .. }) = store.t_seq(&chr1_key) {
             assert_eq!(&sequence[..], b"ATGCATGCATGC");
         }
         let seq_after = store.get_sequence(&chr1_sha).unwrap().decode().unwrap();
@@ -331,7 +331,7 @@ fn test_negative_bed_coordinates() {
         .add_sequence_collection_from_fasta(&temp_fasta_path, FastaImportOptions::new())
         .unwrap();
 
-    let collections: Vec<_> = store.collections.keys().cloned().collect();
+    let collections: Vec<_> = store.t_coll_keys().into_iter().collect();
     let collection_digest_ref: &str =
         std::str::from_utf8(&collections[0]).expect("invalid collection digest");
 
@@ -396,7 +396,7 @@ fn test_global_refget_store() {
     let mut store = RefgetStore::in_memory();
     store.add_sequence_collection(collection.clone()).unwrap();
 
-    assert!(!store.sequence_store.is_empty());
+    assert!(store.catalog.n_sequences() > 0);
 
     let retrieved_by_name_str = store.get_sequence_by_name(&collection.metadata.digest, name);
     assert!(retrieved_by_name_str.is_ok());
@@ -711,7 +711,7 @@ fn test_import_fasta() {
     let mut store = RefgetStore::in_memory();
     store.add_sequence_collection_from_fasta(temp_fa, FastaImportOptions::new()).unwrap();
 
-    assert!(!store.sequence_store.is_empty());
+    assert!(store.catalog.n_sequences() > 0);
 
     let seq_template = "sequences/%s2/%s.seq";
     store
@@ -734,14 +734,14 @@ fn test_disk_persistence() {
         .add_sequence_collection_from_fasta(&temp_fasta, FastaImportOptions::new())
         .unwrap();
 
-    let sequence_keys: Vec<DigestKey> = store.sequence_store.keys().cloned().collect();
+    let sequence_keys: Vec<DigestKey> = store.sequence_digests().collect();
     assert_eq!(sequence_keys.len(), 3);
 
     let sha512_key1 = sequence_keys[0];
     let sha512_key2 = sequence_keys[1];
 
-    let original_seq1 = store.sequence_store.get(&sha512_key1).unwrap().clone();
-    let original_seq2 = store.sequence_store.get(&sha512_key2).unwrap().clone();
+    let original_seq1 = store.t_seq(&sha512_key1).unwrap().clone();
+    let original_seq2 = store.t_seq(&sha512_key2).unwrap().clone();
 
     let seq_template = "sequences/%s2/%s.seq";
     store.write_store_to_dir(temp_path, Some(seq_template)).unwrap();
@@ -755,12 +755,12 @@ fn test_disk_persistence() {
 
     let mut loaded_store = RefgetStore::open_local(temp_path).unwrap();
 
-    assert_eq!(loaded_store.sequence_store.len(), 3);
-    assert!(loaded_store.sequence_store.contains_key(&sha512_key1));
-    assert!(loaded_store.sequence_store.contains_key(&sha512_key2));
+    assert_eq!(loaded_store.catalog.n_sequences(), 3);
+    assert!(loaded_store.t_seq(&sha512_key1).is_some());
+    assert!(loaded_store.t_seq(&sha512_key2).is_some());
 
-    let loaded_seq1 = loaded_store.sequence_store.get(&sha512_key1).unwrap();
-    let loaded_seq2 = loaded_store.sequence_store.get(&sha512_key2).unwrap();
+    let loaded_seq1 = loaded_store.t_seq(&sha512_key1).unwrap();
+    let loaded_seq2 = loaded_store.t_seq(&sha512_key2).unwrap();
 
     assert_eq!(original_seq1.metadata().name, loaded_seq1.metadata().name);
     assert_eq!(original_seq1.metadata().length, loaded_seq1.metadata().length);
@@ -775,13 +775,13 @@ fn test_disk_persistence() {
     assert!(!loaded_seq1.is_loaded());
     assert!(!loaded_seq2.is_loaded());
 
-    assert_eq!(loaded_store.md5_lookup.len(), 3);
-    assert_eq!(loaded_store.collections.len(), store.collections.len());
+    assert_eq!(loaded_store.catalog.n_sequences(), 3);
+    assert_eq!(loaded_store.catalog.n_collections(), store.catalog.n_collections());
 
     loaded_store.load_all_collections().unwrap();
     loaded_store.load_all_sequences().unwrap();
 
-    for (digest, original_record) in &store.sequence_store {
+    for (digest, original_record) in &store.t_seq_map() {
         let loaded_record = loaded_store.get_sequence(*digest).unwrap();
         assert_eq!(original_record.metadata().name, loaded_record.metadata().name);
         assert_eq!(original_record.metadata().length, loaded_record.metadata().length);
@@ -849,12 +849,12 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCC
         .unwrap();
 
     let original_digests: Vec<String> = store1
-        .sequence_store
-        .values()
+        .t_seq_map()
+        .into_values()
         .map(|r| r.metadata().sha512t24u.clone())
         .collect();
 
-    let collections: Vec<_> = store1.collections.keys().cloned().collect();
+    let collections: Vec<_> = store1.t_coll_keys().into_iter().collect();
     let collection_digest = collections[0];
     let exported_path = temp_path.join("exported.fa");
     store1.export_fasta(&collection_digest, &exported_path, None, Some(60)).expect("Failed to export FASTA");
@@ -865,8 +865,8 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCC
         .unwrap();
 
     let new_digests: Vec<String> = store2
-        .sequence_store
-        .values()
+        .t_seq_map()
+        .into_values()
         .map(|r| r.metadata().sha512t24u.clone())
         .collect();
 
@@ -882,8 +882,8 @@ fn test_export_fasta_by_digests() {
     let (mut store, _) = setup_export_test_store(temp_dir.path());
 
     let digests: Vec<String> = store
-        .sequence_store
-        .values()
+        .t_seq_map()
+        .into_values()
         .map(|r| r.metadata().sha512t24u.clone())
         .collect();
     let digest_refs: Vec<&str> = digests.iter().map(|s| s.as_str()).collect();
@@ -924,7 +924,7 @@ fn test_export_fasta_after_load_local() {
         store
             .add_sequence_collection_from_fasta(&fasta_path, FastaImportOptions::new())
             .unwrap();
-        let collections: Vec<_> = store.collections.keys().cloned().collect();
+        let collections: Vec<_> = store.t_coll_keys().into_iter().collect();
         assert_eq!(collections.len(), 1);
         collection_digest = collections[0];
     }
@@ -973,12 +973,12 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         .add_sequence_collection_from_fasta(&temp_fasta_path, FastaImportOptions::new())
         .expect("Should parse FASTA headers correctly");
 
-    assert_eq!(store.sequence_store.len(), 2);
+    assert_eq!(store.catalog.n_sequences(), 2);
 
     let name1 = "JAHKSE010000016.1";
     let name2 = "JAHKSE010000012.1";
 
-    let collections: Vec<_> = store.collections.keys().cloned().collect();
+    let collections: Vec<_> = store.t_coll_keys().into_iter().collect();
     assert_eq!(collections.len(), 1);
     let collection_digest = collections[0];
 
@@ -1116,7 +1116,7 @@ fn test_on_disk_smart_constructor() {
         .unwrap();
 
     let store2 = RefgetStore::on_disk(&cache_path).unwrap();
-    assert_eq!(store2.sequence_store.len(), store1.sequence_store.len());
+    assert_eq!(store2.catalog.n_sequences(), store1.catalog.n_sequences());
     assert_eq!(store2.mode, StorageMode::Encoded);
 
     let cache_path_raw = temp_dir.path().join("store_raw");
@@ -1238,7 +1238,7 @@ fn test_get_collection() {
     assert_eq!(stats_after.n_sequences_in_memory, 0);
     assert_eq!(stats_after.n_collections_in_memory, 1);
 
-    for record in loaded_store.sequence_store.values() {
+    for record in loaded_store.t_seq_map().into_values() {
         assert!(!record.is_loaded());
     }
 
@@ -1260,8 +1260,8 @@ fn test_get_sequence() {
         .unwrap();
 
     let seq_digest = store
-        .sequence_store
-        .values()
+        .t_seq_map()
+        .into_values()
         .next()
         .unwrap()
         .metadata()
@@ -1271,7 +1271,7 @@ fn test_get_sequence() {
 
     let mut loaded_store = RefgetStore::open_local(&cache_path).unwrap();
 
-    let seq_before = loaded_store.sequence_store.get(&seq_digest.to_key()).unwrap();
+    let seq_before = loaded_store.t_seq(&seq_digest.to_key()).unwrap();
     assert!(!seq_before.is_loaded());
 
     let loaded_seq = loaded_store.get_sequence(&seq_digest).unwrap();
@@ -1328,7 +1328,7 @@ fn test_stale_rgsi_cache_is_ignored() {
     let result = store.add_sequence_collection_from_fasta(&fasta_path, FastaImportOptions::new());
     assert!(result.is_ok(), "Should handle stale cache: {:?}", result.err());
 
-    assert_eq!(store.sequence_store.len(), 2);
+    assert_eq!(store.catalog.n_sequences(), 2);
 }
 
 #[test]
@@ -1485,7 +1485,7 @@ fn test_iter_collections_partial_results_on_missing_rgsi() {
     fs::remove_file(&rgsi1).unwrap();
 
     let mut loaded = RefgetStore::open_local(&store_path).unwrap();
-    assert_eq!(loaded.collections.len(), 2);
+    assert_eq!(loaded.catalog.n_collections(), 2);
 
     let result = loaded.load_all_collections();
     assert!(result.is_err());
@@ -1510,8 +1510,8 @@ fn test_iter_sequences_returns_stubs_for_unloaded() {
     store.write_store_to_dir(&store_path, None).unwrap();
 
     let seq_digests: Vec<String> = store
-        .sequence_store
-        .values()
+        .t_seq_map()
+        .into_values()
         .map(|r| r.metadata().sha512t24u.clone())
         .collect();
     assert_eq!(seq_digests.len(), 2);
@@ -1526,7 +1526,7 @@ fn test_iter_sequences_returns_stubs_for_unloaded() {
     fs::remove_file(&seq_file).unwrap();
 
     let mut loaded = RefgetStore::open_local(&store_path).unwrap();
-    assert_eq!(loaded.sequence_store.len(), 2);
+    assert_eq!(loaded.catalog.n_sequences(), 2);
 
     let sequences: Vec<_> = loaded.iter_sequences().collect();
     assert_eq!(sequences.len(), 2);
@@ -1620,13 +1620,13 @@ fn test_remove_with_orphan_cleanup_clears_md5_lookup() {
     let (mut store, digest) = store_with_one_collection(">chr1\nACGT\n>chr2\nTTTT\n");
 
     assert_eq!(store.list_sequences().unwrap().len(), 2);
-    assert_eq!(store.md5_lookup.len(), 2);
+    assert_eq!(store.catalog.n_sequences(), 2);
 
     store.remove_collection(&digest, true).unwrap();
 
     assert_eq!(store.list_sequences().unwrap().len(), 0);
     // Regression: md5_lookup must be emptied along with the sequences.
-    assert_eq!(store.md5_lookup.len(), 0);
+    assert_eq!(store.catalog.n_sequences(), 0);
 }
 
 #[test]
@@ -1650,16 +1650,16 @@ fn test_remove_with_orphan_cleanup_md5_lookup_retains_shared_sequences() {
     let md5_orphan = md5(b"TTTT").to_key(); // reclaimed (unique to coll1)
     let md5_other = md5(b"GGGG").to_key(); // retained (unique to coll2)
 
-    assert_eq!(store.md5_lookup.len(), 3);
+    assert_eq!(store.catalog.n_sequences(), 3);
 
     store.remove_collection(&meta1.digest, true).unwrap();
 
     // Reclaimed sequence's md5 entry is gone...
-    assert!(!store.md5_lookup.contains_key(&md5_orphan));
+    assert!(!store.t_has_md5(&md5_orphan));
     // ...but retained sequences' md5 entries survive.
-    assert!(store.md5_lookup.contains_key(&md5_shared));
-    assert!(store.md5_lookup.contains_key(&md5_other));
-    assert_eq!(store.md5_lookup.len(), 2);
+    assert!(store.t_has_md5(&md5_shared));
+    assert!(store.t_has_md5(&md5_other));
+    assert_eq!(store.catalog.n_sequences(), 2);
 
     // And the surviving collection is still fully readable.
     let coll = store.get_collection(&meta2.digest).unwrap();
@@ -1816,22 +1816,24 @@ fn test_clear() {
         .unwrap();
 
     assert_eq!(store.sequence_digests().count(), 2);
-    assert_eq!(store.collections.len(), 1);
-    let name_count = store.name_lookup.len();
+    assert_eq!(store.catalog.n_collections(), 1);
+    let name_count = store.t_n_loaded_colls();
 
     store.clear();
 
-    assert_eq!(store.sequence_digests().count(), 0);
-    assert_eq!(store.collections.len(), 1);
-    assert_eq!(store.name_lookup.len(), name_count);
+    // clear() drops sequence bytes; every sequence's metadata stays.
+    assert_eq!(store.sequence_digests().count(), 2);
+    assert_eq!(store.stats().n_sequences_in_memory, 0);
+    assert_eq!(store.catalog.n_collections(), 1);
+    assert_eq!(store.t_n_loaded_colls(), name_count);
 
     let fasta2 = dir.path().join("test2.fa");
     fs::write(&fasta2, ">seq3\nGGGG\n").unwrap();
     store
         .add_sequence_collection_from_fasta(fasta2.to_str().unwrap(), FastaImportOptions::new())
         .unwrap();
-    assert_eq!(store.sequence_digests().count(), 1);
-    assert_eq!(store.collections.len(), 2);
+    assert_eq!(store.sequence_digests().count(), 3);
+    assert_eq!(store.catalog.n_collections(), 2);
 }
 
 // =========================================================================
@@ -2632,19 +2634,9 @@ fn test_parallel_name_lookup_matches_fasta_order() {
 
     let key = digest.to_key();
     let serial_names: Vec<String> = serial
-        .name_lookup
-        .get(&key)
-        .unwrap()
-        .keys()
-        .cloned()
-        .collect();
+        .t_names(&key);
     let parallel_names: Vec<String> = parallel
-        .name_lookup
-        .get(&key)
-        .unwrap()
-        .keys()
-        .cloned()
-        .collect();
+        .t_names(&key);
 
     assert_eq!(serial_names, fasta_order, "serial name_lookup must follow FASTA order");
     assert_eq!(
@@ -2677,19 +2669,9 @@ fn test_parallel_equals_serial_in_memory() {
 
     // Identical name_lookup order and contents.
     let names_s: Vec<(String, DigestKey)> = serial
-        .name_lookup
-        .get(&key)
-        .unwrap()
-        .iter()
-        .map(|(n, d)| (n.clone(), *d))
-        .collect();
+        .t_name_pairs(&key);
     let names_p: Vec<(String, DigestKey)> = parallel
-        .name_lookup
-        .get(&key)
-        .unwrap()
-        .iter()
-        .map(|(n, d)| (n.clone(), *d))
-        .collect();
+        .t_name_pairs(&key);
     assert_eq!(names_s, names_p, "name_lookup order+contents must match");
 
     // Identical set of digests.
@@ -2768,8 +2750,8 @@ fn test_parallel_cached_metadata_parity() {
     serial.load_all_collections().unwrap();
     parallel.load_all_collections().unwrap();
     let key = digest_serial.to_key();
-    let names_s: Vec<String> = serial.name_lookup.get(&key).unwrap().keys().cloned().collect();
-    let names_p: Vec<String> = parallel.name_lookup.get(&key).unwrap().keys().cloned().collect();
+    let names_s: Vec<String> = serial.t_names(&key);
+    let names_p: Vec<String> = parallel.t_names(&key);
     assert_eq!(names_s, vec!["chrX", "chr1", "chr2", "chrM", "chr10"]);
     assert_eq!(names_s, names_p);
 }
@@ -2799,12 +2781,12 @@ fn test_parallel_duplicate_contig_dedup() {
     assert_eq!(seqs.len(), 2, "duplicate sequence must dedup to 2 .seq files");
 
     let key = meta.digest.to_key();
-    let nl = store.name_lookup.get(&key).unwrap();
-    let names: Vec<String> = nl.keys().cloned().collect();
-    assert_eq!(names, vec!["dupA", "uniq", "dupB"], "name_lookup keeps FASTA order");
+    let names = store.t_names(&key);
+    assert_eq!(names, vec!["dupA", "uniq", "dupB"], "members keep FASTA order");
     // dupA and dupB map to same digest.
-    assert_eq!(nl.get("dupA"), nl.get("dupB"));
-    assert_ne!(nl.get("dupA"), nl.get("uniq"));
+    let sha = |n: &str| store.member_by_name(&meta.digest, n).unwrap().seq().sha512t24u();
+    assert_eq!(sha("dupA"), sha("dupB"));
+    assert_ne!(sha("dupA"), sha("uniq"));
 }
 
 #[test]
@@ -3093,12 +3075,12 @@ fn test_resume_skips_present_collection_before_decoding_fasta() {
 
     // Snapshot store contents to prove the resume changes nothing.
     let collections_before: Vec<DigestKey> = {
-        let mut v: Vec<DigestKey> = store.collections.keys().cloned().collect();
+        let mut v: Vec<DigestKey> = store.t_coll_keys().into_iter().collect();
         v.sort();
         v
     };
     let sequences_before: Vec<DigestKey> = {
-        let mut v: Vec<DigestKey> = store.sequence_store.keys().cloned().collect();
+        let mut v: Vec<DigestKey> = store.sequence_digests().collect();
         v.sort();
         v
     };
@@ -3129,12 +3111,12 @@ fn test_resume_skips_present_collection_before_decoding_fasta() {
 
     // Store must be byte-for-byte unchanged by the resume.
     let collections_after: Vec<DigestKey> = {
-        let mut v: Vec<DigestKey> = store.collections.keys().cloned().collect();
+        let mut v: Vec<DigestKey> = store.t_coll_keys().into_iter().collect();
         v.sort();
         v
     };
     let sequences_after: Vec<DigestKey> = {
-        let mut v: Vec<DigestKey> = store.sequence_store.keys().cloned().collect();
+        let mut v: Vec<DigestKey> = store.sequence_digests().collect();
         v.sort();
         v
     };
@@ -3246,8 +3228,8 @@ fn test_many_tiny_sequences_throughput() {
 
 fn first_seq_digest(store: &RefgetStore) -> String {
     store
-        .sequence_store
-        .values()
+        .t_seq_map()
+        .into_values()
         .next()
         .unwrap()
         .metadata()
@@ -3257,8 +3239,8 @@ fn first_seq_digest(store: &RefgetStore) -> String {
 
 fn first_seq_length(store: &RefgetStore) -> usize {
     store
-        .sequence_store
-        .values()
+        .t_seq_map()
+        .into_values()
         .next()
         .unwrap()
         .metadata()
@@ -3694,7 +3676,7 @@ fn test_stream_sequence_bounded_memory_full_record() {
     {
         use crate::hashkeyable::HashKeyable;
         let key = digest.to_key();
-        let rec = store.sequence_store.get(&key).unwrap();
+        let rec = store.t_seq(&key).unwrap();
         assert!(rec.is_loaded(), "expected Full record for in-memory store");
     }
 
@@ -3794,7 +3776,7 @@ fn test_stream_sequence_bounded_memory_stub_record() {
     // Confirm the record is a Stub going in.
     {
         let key = digest.to_key();
-        let rec = store.inner.sequence_store.get(&key).unwrap();
+        let rec = store.inner.t_seq(&key).unwrap();
         assert!(
             !rec.is_loaded(),
             "expected Stub record after open_local, got Full"
@@ -3854,18 +3836,14 @@ fn test_stream_sequence_no_preload_for_stub_record() {
     let mut store = store;
     {
         let key = digest.to_key();
-        let rec = store.inner.sequence_store.get(&key).unwrap().clone();
-        let meta = rec.metadata().clone();
-        store
-            .inner
-            .sequence_store
-            .insert(key, SequenceRecord::Stub(meta));
+        let row = store.inner.catalog.find_sha(&key).unwrap();
+        store.inner.loaded.remove(&row);
     }
 
     // Confirm the record is a Stub going in.
     {
         let key = digest.to_key();
-        let rec = store.inner.sequence_store.get(&key).unwrap();
+        let rec = store.inner.t_seq(&key).unwrap();
         assert!(!rec.is_loaded(), "expected Stub before stream_sequence");
     }
 
@@ -3878,7 +3856,7 @@ fn test_stream_sequence_no_preload_for_stub_record() {
 
     // And the store should still be a Stub (no pre-loading side effect).
     let key = digest.to_key();
-    let rec = store.inner.sequence_store.get(&key).unwrap();
+    let rec = store.inner.t_seq(&key).unwrap();
     assert!(
         !rec.is_loaded(),
         "stream_sequence must not populate the in-memory Full record"
@@ -3907,8 +3885,7 @@ fn test_list_collections_without_sequence_index() {
     // Re-open and clear the sequence store + mark index as not loaded
     // (simulating what open_remote now does)
     let mut store = RefgetStore::open_local(&store_path).unwrap();
-    store.inner.sequence_store.clear();
-    store.inner.md5_lookup.clear();
+    store.inner.t_clear_sequences();
     store.inner.sequence_index_loaded = false;
     store.inner.sequence_index_path = Some("sequences.rgsi".to_string());
 
@@ -3934,8 +3911,7 @@ fn test_load_all_sequences_triggers_index_load() {
 
     // Simulate deferred state
     let mut store = RefgetStore::open_local(&store_path).unwrap();
-    store.inner.sequence_store.clear();
-    store.inner.md5_lookup.clear();
+    store.inner.t_clear_sequences();
     store.inner.sequence_index_loaded = false;
     store.inner.sequence_index_path = Some("sequences.rgsi".to_string());
 
@@ -3944,7 +3920,7 @@ fn test_load_all_sequences_triggers_index_load() {
     // load_all_sequences should trigger the index load
     store.load_all_sequences().unwrap();
     assert!(store.inner.sequence_index_loaded, "Sequence index should be loaded after load_all_sequences");
-    assert!(!store.inner.sequence_store.is_empty(), "Sequences should be populated");
+    assert!(store.inner.catalog.n_sequences() > 0, "Sequences should be populated");
 }
 
 #[test]
@@ -3972,8 +3948,7 @@ fn test_lazy_sequence_reads_load_only_requested_records() {
 
     // Recreate the deferred remote-index state against a local fixture.
     let mut store = RefgetStore::open_local(&store_path).unwrap();
-    store.inner.sequence_store.clear();
-    store.inner.md5_lookup.clear();
+    store.inner.t_clear_sequences();
     store.inner.sequence_index_loaded = false;
     store.inner.sequence_index_path = Some("sequences.rgsi".to_string());
 
@@ -4031,8 +4006,7 @@ fn test_export_fasta_lazy_loads_only_requested_sequence() {
 
     // Recreate the deferred remote-index state against a local fixture.
     let mut store = RefgetStore::open_local(&store_path).unwrap();
-    store.inner.sequence_store.clear();
-    store.inner.md5_lookup.clear();
+    store.inner.t_clear_sequences();
     store.inner.sequence_index_loaded = false;
     store.inner.sequence_index_path = Some("sequences.rgsi".to_string());
 
@@ -4571,7 +4545,7 @@ fn test_collection_alias_conflict_does_not_leak_collection() {
             FastaImportOptions::new().collection_alias("ucsc", "hg38"),
         )
         .unwrap();
-    assert_eq!(store.collections.len(), 1);
+    assert_eq!(store.catalog.n_collections(), 1);
 
     store
         .add_sequence_collection_from_fasta(
@@ -4582,16 +4556,16 @@ fn test_collection_alias_conflict_does_not_leak_collection() {
 
     // The rejected import must not have been committed.
     assert_eq!(
-        store.collections.len(),
+        store.catalog.n_collections(),
         1,
         "a failed import must not leave its collection in the store"
     );
     assert!(
-        store.collections.contains_key(&meta_a.digest.to_key()),
+        store.t_has_coll(&meta_a.digest.to_key()),
         "the surviving collection should be the one that imported successfully"
     );
     assert!(
-        store.name_lookup.len() <= 1,
+        store.t_n_loaded_colls() <= 1,
         "no name_lookup entry should be installed for the rejected collection"
     );
 }
@@ -4641,12 +4615,12 @@ fn test_collection_alias_conflict_leaves_no_orphan_on_disk() {
         "failed import must not leave an orphaned collection .rgsi on disk"
     );
 
-    assert_eq!(store.collections.len(), 1);
+    assert_eq!(store.catalog.n_collections(), 1);
 
     // The store on disk is still coherent: reopening sees exactly the one
     // collection, still reachable through the alias.
     let mut reopened = RefgetStore::open_local(&store_path).unwrap();
-    assert_eq!(reopened.collections.len(), 1);
+    assert_eq!(reopened.catalog.n_collections(), 1);
     assert_eq!(
         reopened
             .get_collection_metadata_by_alias("ucsc", "hg38")
@@ -4758,7 +4732,7 @@ fn test_failed_import_cleanup_preserves_existing_sequences() {
 
     // A reopened handle: sequences are loaded as stubs, name_lookup is empty.
     let mut reopened = RefgetStore::open_local(&store_path).unwrap();
-    assert!(reopened.name_lookup.is_empty());
+    assert!(reopened.t_n_loaded_colls() == 0);
 
     // Force a failure: a conflicting collection alias is rejected after the
     // import has already staged the new collection's sequences.
@@ -4810,8 +4784,8 @@ fn test_collection_alias_rejected_for_multiple_files() {
     );
 
     // The guard runs before any thread spawns, so the store must be untouched.
-    assert!(store.sequence_store.is_empty(), "no sequences imported");
-    assert!(store.collections.is_empty(), "no collections imported");
+    assert!(store.catalog.n_sequences() == 0, "no sequences imported");
+    assert!(store.catalog.n_collections() == 0, "no collections imported");
     assert!(store.list_collection_alias_namespaces().is_empty());
     assert!(store.list_sequence_alias_namespaces().is_empty());
 }
@@ -5027,7 +5001,7 @@ fn test_orphan_gc_keeps_sequences_shared_with_another_collection() {
     // Reopen fresh: stub load, so name_lookup is empty.
     let mut store = RefgetStore::open_local(&store_dir).unwrap();
     assert!(
-        store.name_lookup.is_empty(),
+        (store.t_n_loaded_colls() == 0),
         "precondition: a fresh open must not populate name_lookup"
     );
 
@@ -5362,8 +5336,8 @@ fn test_import_header_alias_clash_errors() {
     assert!(msg.starts_with("alias conflict"), "got: {}", msg);
     assert!(msg.contains("'chrX'"), "got: {}", msg);
     assert!(msg.contains("1 alias in this file clashes"), "got: {}", msg);
-    assert!(store.collections.is_empty(), "the rejected collection must not be in the store");
-    assert!(store.name_lookup.is_empty());
+    assert!(store.catalog.n_collections() == 0, "the rejected collection must not be in the store");
+    assert!(store.t_n_loaded_colls() == 0);
     assert!(store.list_sequence_aliases("ucsc").is_none());
 
     // Same check on disk: no collection file and no alias TSV left behind.
@@ -5372,7 +5346,7 @@ fn test_import_header_alias_clash_errors() {
     store
         .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new().namespaces(&["ucsc"]))
         .unwrap_err();
-    assert!(store.collections.is_empty());
+    assert!(store.catalog.n_collections() == 0);
     let orphan_rgsi = fs::read_dir(store_path.join("collections"))
         .map(|rd| rd.filter_map(|e| e.ok()).any(|e| e.file_name().to_string_lossy().ends_with(".rgsi")))
         .unwrap_or(false);

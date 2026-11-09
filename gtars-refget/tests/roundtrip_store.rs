@@ -279,7 +279,7 @@ fn read_paths(
 /// Run `read_paths` for every sequence in `store`.
 fn run_all(store: &ReadonlyRefgetStore, label: &str, failures: &mut Vec<String>) {
     let expected_map = expected_sequences();
-    let metas: Vec<SequenceMetadata> = store.sequence_metadata().cloned().collect();
+    let metas: Vec<SequenceMetadata> = store.sequence_metadata().collect();
     assert_eq!(
         metas.len(),
         fixture_records().len(),
@@ -441,7 +441,7 @@ fn check_on_disk_reopen(store_dir: &Path, mode: StorageMode, label: &str, failur
     );
 
     let expected_map = expected_sequences();
-    let metas: Vec<SequenceMetadata> = ro.sequence_metadata().cloned().collect();
+    let metas: Vec<SequenceMetadata> = ro.sequence_metadata().collect();
     for meta in &metas {
         assert!(
             !ro.is_sequence_loaded(&meta.sha512t24u),
@@ -571,10 +571,9 @@ fn export_fasta_is_lossless() {
             ));
         }
 
-        let orig_metas: Vec<SequenceMetadata> = store.sequence_metadata().cloned().collect();
+        let orig_metas: Vec<SequenceMetadata> = store.sequence_metadata().collect();
         let new_metas: HashMap<String, SequenceMetadata> = reimported
             .sequence_metadata()
-            .cloned()
             .map(|m| (m.name.clone(), m))
             .collect();
         for m in &orig_metas {

@@ -90,6 +90,7 @@ mod readonly;
 mod core;
 mod alias;
 pub(crate) mod atomic;
+mod catalog;
 mod packidx;
 mod packcache;
 mod fhr_metadata;

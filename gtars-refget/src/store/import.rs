@@ -49,12 +49,11 @@ use std::time::Instant;
 
 use anyhow::{anyhow, Context, Result};
 use crossbeam_channel::{bounded, Receiver, Sender};
-use indexmap::IndexMap;
 
 use crate::collection::SequenceCollectionExt;
 use crate::digest::{
     SequenceCollection, SequenceCollectionMetadata,
-    SequenceCollectionRecord, SequenceEncoder, SequenceMetadata, SequenceRecord,
+    SequenceEncoder, SequenceMetadata, SequenceRecord,
 };
 use crate::hashkeyable::{DigestKey, HashKeyable};
 
@@ -839,8 +838,6 @@ fn count_rgsi_rows(path: &Path) -> Result<usize> {
 /// (those are written to disk as each `Seq` arrives, then dropped). At most
 /// `jobs` of these are live at once.
 struct InFlight {
-    /// Ordered (name -> sha512 digest key) in FASTA order; becomes name_lookup.
-    name_to_digest: IndexMap<String, DigestKey>,
     /// (namespace, alias_value, sha512t24u) alias triples in FASTA order.
     aliases: Vec<(String, String, String)>,
 }
@@ -848,7 +845,6 @@ struct InFlight {
 impl InFlight {
     fn new() -> Self {
         InFlight {
-            name_to_digest: IndexMap::new(),
             aliases: Vec::new(),
         }
     }
@@ -936,7 +932,7 @@ impl ReadonlyRefgetStore {
             && !opts.force
         {
             use crate::utils::PathExtension;
-            let existing = self.sequence_store.len();
+            let existing = self.catalog.n_sequences();
             let limit = opts.standalone_file_limit;
             let mut counted = 0usize;
             for file in files {
@@ -967,7 +963,11 @@ impl ReadonlyRefgetStore {
         // be skipped before opening their FASTAs. New collections added during
         // this run are NOT in the snapshot, so they are never wrongly skipped;
         // duplicates within the same batch are still deduped by the inserter.
-        let present_collections: HashSet<DigestKey> = self.collections.keys().copied().collect();
+        let present_collections: HashSet<DigestKey> = self
+            .catalog
+            .coll_rows()
+            .map(|c| self.catalog.coll_meta(c).digest.to_key())
+            .collect();
 
         let cfg = BuildConfig {
             mode: self.mode,
@@ -1169,14 +1169,11 @@ impl ReadonlyRefgetStore {
                         let ReadySequence { metadata, sequence_data, aliases } = ready;
                         let seq_key = metadata.sha512t24u.to_key();
 
-                        // Record name -> digest in FASTA order for this file's
-                        // name_lookup, and stash alias triples.
+                        // Stash alias triples (members come from the End
+                        // message's stub records, already in FASTA order).
                         let scratch = in_flight
                             .get_mut(&file_idx)
                             .expect("Seq before Begin");
-                        scratch
-                            .name_to_digest
-                            .insert(metadata.name.clone(), seq_key);
                         for (ns, alias_value) in &aliases {
                             scratch.aliases.push((
                                 ns.clone(),
@@ -1228,7 +1225,7 @@ impl ReadonlyRefgetStore {
                         // and the `!writer_disk_backed` short-circuit keeps that
                         // lookup out of the disk path entirely.
                         let mem_is_new =
-                            !writer_disk_backed && !self.sequence_store.contains_key(&seq_key);
+                            !writer_disk_backed && self.catalog.find_sha(&metadata.sha512t24u).is_none();
                         match self.add_sequence_record_deferred_write(
                             SequenceRecord::Full {
                                 metadata,
@@ -1508,7 +1505,7 @@ impl ReadonlyRefgetStore {
         // or with an existing binding, must fail before anything is touched.
         self.check_import_sequence_aliases(&scratch.aliases, source_path)?;
 
-        if !force && self.collections.contains_key(&coll_key) {
+        if !force && self.catalog.find_coll(&metadata.digest).is_some() {
             // Register the name even on the in-run duplicate path: the
             // collection IS in the store and the caller DID ask for it to be
             // named. Skipping here would mean a re-import silently drops the
@@ -1536,19 +1533,19 @@ impl ReadonlyRefgetStore {
             }
         }
 
-        // Register the collection record (stub sequences only).
-        let record = SequenceCollectionRecord::Full {
-            metadata: metadata.clone(),
-            sequences: stub_records,
-        };
+        // Register the collection (members in FASTA order) in one call.
+        let members: Vec<SequenceMetadata> = stub_records
+            .into_iter()
+            .map(|s| match s {
+                SequenceRecord::Stub(m) => m,
+                SequenceRecord::Full { metadata, .. } => metadata,
+            })
+            .collect();
         if self.persist_to_disk && self.local_path.is_some() {
-            self.write_collection_to_disk_single(&record)?;
+            self.write_collection_to_disk_single(&metadata, &members)?;
         }
-        self.collections.insert(coll_key, record);
+        self.insert_collection(metadata.clone(), &members)?;
         self.record(|p| p.add_collection(coll_key));
-
-        // Install the buffered name_lookup in FASTA order.
-        self.name_lookup.insert(coll_key, scratch.name_to_digest);
 
         // Register aliases in FASTA order. Pending only: they are published
         // with the indexes in the final commit, not one TSV rewrite per header.

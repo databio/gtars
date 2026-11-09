@@ -155,19 +155,10 @@ impl ReadonlyRefgetStore {
     /// this is reported as a [`VerifyFailureKind::ReadError`], not an `Err`).
     /// Returns `Err` only when `digest` does not resolve to a known sequence.
     pub fn verify_sequence(&self, digest: &str, check_md5: bool) -> Result<Option<VerifyFailure>> {
-        // Resolve the digest the same way `stream_sequence` does (accept md5
-        // through `md5_lookup`).
-        let digest_key = digest.to_key();
-        let actual_key = self
-            .md5_lookup
-            .get(&digest_key)
-            .copied()
-            .unwrap_or(digest_key);
-        let record = self
-            .sequence_store
-            .get(&actual_key)
+        // Resolve the digest the same way `stream_sequence` does (accept md5).
+        let meta = self
+            .get_sequence_metadata(digest)
             .ok_or_else(|| anyhow!("Sequence not found: {}", digest))?;
-        let meta = record.metadata().clone();
 
         let want_md5 = check_md5 && !meta.md5.is_empty();
 
@@ -290,15 +281,13 @@ impl ReadonlyRefgetStore {
 
         // 1. Build the (deduped, sorted) work list of canonical sequence keys.
         let mut work: Vec<DigestKey> = match digests {
-            None => self.sequence_store.keys().copied().collect(),
+            None => self.sequence_digests().collect(),
             Some(requested) => {
                 let mut keys = Vec::with_capacity(requested.len());
                 let mut unknown = Vec::new();
                 for d in requested {
-                    let key = d.to_key();
-                    let actual = self.md5_lookup.get(&key).copied().unwrap_or(key);
-                    if self.sequence_store.contains_key(&actual) {
-                        keys.push(actual);
+                    if let Some(v) = self.sequence_view(d) {
+                        keys.push(v.sha512t24u().to_key());
                     } else {
                         unknown.push(d.clone());
                     }
@@ -348,10 +337,7 @@ impl ReadonlyRefgetStore {
                            counts: &mut BTreeMap<String, AlphabetVerifyCounts>|
          -> Result<()> {
             let digest_str = key_to_digest_string(key);
-            let alphabet = self
-                .sequence_store
-                .get(key)
-                .map(|r| r.metadata().alphabet);
+            let alphabet = self.sequence_view(&digest_str).map(|v| v.alphabet());
             let outcome = self.verify_sequence(&digest_str, opts.check_md5)?;
             if let Some(alphabet) = alphabet {
                 let entry = counts.entry(alphabet.to_string()).or_default();

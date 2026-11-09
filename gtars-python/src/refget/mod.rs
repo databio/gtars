@@ -3382,8 +3382,8 @@ impl PyRefgetStore {
 
     /// Clear sequence data from the store to free memory.
     ///
-    /// Removes all sequence records and decoded cache while preserving
-    /// metadata (collections, name lookups, aliases).
+    /// Drops all loaded sequence bytes and the decoded cache while preserving
+    /// metadata (sequences, collections, name lookups, aliases).
     ///
     /// Example:
     ///     >>> store = RefgetStore.in_memory()

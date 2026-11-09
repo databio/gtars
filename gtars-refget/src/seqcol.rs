@@ -6,7 +6,6 @@
 
 use crate::digest::{CollectionLevel1, CollectionLevel2, SeqColComparison, SequenceCollectionMetadata};
 use crate::digest::types::{compare_arrays, level2_to_comparison_arrays};
-use crate::hashkeyable::HashKeyable;
 use crate::store::{PagedResult, ReadonlyRefgetStore};
 use anyhow::{anyhow, Result};
 
@@ -121,19 +120,33 @@ impl ReadonlyRefgetStore {
     /// Get collection at level 1 representation (attribute digests with spec field names).
     /// This is a lightweight operation that only reads metadata, no loading needed.
     pub fn get_collection_level1(&self, digest: &str) -> Result<CollectionLevel1> {
-        let key = digest.to_key();
-        let record = self
-            .collections
-            .get(&key)
+        let meta = self
+            .get_collection_metadata(digest)
             .ok_or_else(|| anyhow!("Collection not found: {}", digest))?;
-        Ok(record.metadata().to_level1())
+        Ok(meta.to_level1())
     }
 
     /// Get collection at level 2 representation (full arrays, spec format).
     /// May need to load the collection from disk/remote.
     pub fn get_collection_level2(&self, digest: &str) -> Result<CollectionLevel2> {
-        let collection = self.get_collection(digest)?;
-        Ok(collection.to_level2())
+        // Built straight from the catalog members; no per-member record.
+        let members = self.collection_members(digest).map_err(|_| {
+            anyhow!(
+                "Collection not loaded: {}. Call load_collection() or load_all_collections() first.",
+                digest
+            )
+        })?;
+        let n = members.len();
+        let mut names = Vec::with_capacity(n);
+        let mut lengths = Vec::with_capacity(n);
+        let mut sequences = Vec::with_capacity(n);
+        for m in members {
+            let s = m.seq();
+            names.push(m.name().to_string());
+            lengths.push(s.length());
+            sequences.push(format!("SQ.{}", s.sha512t24u()));
+        }
+        Ok(CollectionLevel2 { names, lengths, sequences })
     }
 
     /// Compare two collections by digest. Both must be preloaded.
@@ -204,7 +217,7 @@ impl ReadonlyRefgetStore {
         attr_name: &str,
         attr_digest: &str,
     ) -> Result<Vec<String>> {
-        let count = self.collections.len();
+        let count = self.catalog.n_collections();
 
         if count > ATTRIBUTE_SEARCH_ERROR_THRESHOLD {
             return Err(anyhow!(
@@ -224,8 +237,8 @@ impl ReadonlyRefgetStore {
         }
 
         let mut results = Vec::new();
-        for record in self.collections.values() {
-            let meta = record.metadata();
+        for c in self.catalog.coll_rows() {
+            let meta = self.catalog.coll_meta(c);
             if metadata_matches_attribute(meta, attr_name, attr_digest)? {
                 results.push(meta.digest.clone());
             }
@@ -330,7 +343,7 @@ impl ReadonlyRefgetStore {
 
     /// Total number of collections in the store.
     pub fn collection_count(&self) -> usize {
-        self.collections.len()
+        self.catalog.n_collections()
     }
 }
 

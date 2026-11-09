@@ -19,21 +19,28 @@ use crate::fasta::digest_fasta;
 use crate::utils::PathExtension;
 
 use crate::digest::types::{
-    SeqColDigestLvl1, SequenceCollection, SequenceCollectionMetadata, SequenceCollectionRecord,
+    SeqColDigestLvl1, SequenceCollection, SequenceCollectionMetadata,
     SequenceMetadata, SequenceRecord, parse_rgsi_line,
 };
 
-/// Shared implementation for writing RGSI (Refget Sequence Index) files.
+/// Write a collection's RGSI (Refget Sequence Index) file: level-1 header
+/// lines, then one row per member.
 ///
 /// Published atomically (temp + `rename(2)`): a `collections/<digest>.rgsi` is a
 /// content-addressed per-item file that concurrent writers may produce
 /// simultaneously, and the orphan-GC live-set computation reads these files, so a
 /// torn one would be read as "this collection references nothing".
-fn write_rgsi_impl<P: AsRef<Path>>(
+pub fn write_collection_rgsi_rows<P, I>(
     file_path: P,
     metadata: &SequenceCollectionMetadata,
-    sequences: Option<&[SequenceRecord]>,
-) -> Result<()> {
+    rows: I,
+) -> Result<()>
+where
+    P: AsRef<Path>,
+    I: IntoIterator,
+    I::Item: std::borrow::Borrow<SequenceMetadata>,
+{
+    use std::borrow::Borrow;
     crate::store::atomic::atomic_write(file_path.as_ref(), |file| {
         // Write collection digest headers
         writeln!(file, "##seqcol_digest={}", metadata.digest)?;
@@ -54,21 +61,18 @@ fn write_rgsi_impl<P: AsRef<Path>>(
             "#name\tlength\talphabet\tsha512t24u\tmd5\tdescription"
         )?;
 
-        // Write sequence metadata if available
-        if let Some(seqs) = sequences {
-            for seq_record in seqs {
-                let seq_meta = seq_record.metadata();
-                writeln!(
-                    file,
-                    "{}\t{}\t{}\t{}\t{}\t{}",
-                    seq_meta.name,
-                    seq_meta.length,
-                    seq_meta.alphabet,
-                    seq_meta.sha512t24u,
-                    seq_meta.md5,
-                    seq_meta.description.as_deref().unwrap_or("")
-                )?;
-            }
+        for row in rows {
+            let seq_meta: &SequenceMetadata = row.borrow();
+            writeln!(
+                file,
+                "{}\t{}\t{}\t{}\t{}\t{}",
+                seq_meta.name,
+                seq_meta.length,
+                seq_meta.alphabet,
+                seq_meta.sha512t24u,
+                seq_meta.md5,
+                seq_meta.description.as_deref().unwrap_or("")
+            )?;
         }
         Ok(())
     })
@@ -137,21 +141,6 @@ impl SequenceRecordExt for SequenceRecord {
 }
 
 // ============================================================================
-// Extensions to SequenceCollectionRecord for filesystem operations
-// ============================================================================
-
-/// Extension trait for SequenceCollectionRecord with filesystem-dependent methods.
-pub trait SequenceCollectionRecordExt {
-    fn write_collection_rgsi<P: AsRef<Path>>(&self, file_path: P) -> Result<()>;
-}
-
-impl SequenceCollectionRecordExt for SequenceCollectionRecord {
-    /// Write the collection to an RGSI file.
-    fn write_collection_rgsi<P: AsRef<Path>>(&self, file_path: P) -> Result<()> {
-        write_rgsi_impl(file_path, self.metadata(), self.sequences())
-    }
-}
-
 // ============================================================================
 // Extensions to SequenceCollection for filesystem operations
 // ============================================================================
@@ -169,7 +158,6 @@ pub trait SequenceCollectionExt {
     ) -> Result<SequenceCollection>;
     fn write_collection_rgsi<P: AsRef<Path>>(&self, file_path: P) -> Result<()>;
     fn write_rgsi(&self) -> Result<()>;
-    fn to_record(&self) -> SequenceCollectionRecord;
     fn write_fasta<P: AsRef<Path>>(&self, file_path: P, line_width: Option<usize>) -> Result<()>;
 }
 
@@ -228,7 +216,7 @@ impl SequenceCollectionExt for SequenceCollection {
 
     /// Write the SequenceCollection to an RGSI file.
     fn write_collection_rgsi<P: AsRef<Path>>(&self, file_path: P) -> Result<()> {
-        write_rgsi_impl(file_path, &self.metadata, Some(&self.sequences))
+        write_collection_rgsi_rows(file_path, &self.metadata, self.sequences.iter().map(|s| s.metadata()))
     }
 
     /// Write the SequenceCollection to an RGSI file using the stored file path.
@@ -241,11 +229,6 @@ impl SequenceCollectionExt for SequenceCollection {
                 "No file path specified for RGSI output. Use `write_collection_rgsi` to specify a file path."
             ))
         }
-    }
-
-    /// Convert to a SequenceCollectionRecord for storage.
-    fn to_record(&self) -> SequenceCollectionRecord {
-        SequenceCollectionRecord::from(self.clone())
     }
 
     /// Write the SequenceCollection to a FASTA file.

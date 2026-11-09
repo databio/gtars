@@ -989,83 +989,6 @@ impl IntoIterator for SequenceCollection {
     }
 }
 
-/// A collection record that may or may not have its sequence list loaded.
-/// Parallel to SequenceRecord.
-#[derive(Clone, Debug)]
-pub enum SequenceCollectionRecord {
-    /// Collection with only metadata, sequence list not loaded
-    Stub(SequenceCollectionMetadata),
-    /// Collection with metadata and the actual sequence list
-    Full {
-        metadata: SequenceCollectionMetadata,
-        sequences: Vec<SequenceRecord>,
-    },
-}
-
-impl SequenceCollectionRecord {
-    /// Get metadata regardless of variant
-    pub fn metadata(&self) -> &SequenceCollectionMetadata {
-        match self {
-            SequenceCollectionRecord::Stub(meta) => meta,
-            SequenceCollectionRecord::Full { metadata, .. } => metadata,
-        }
-    }
-
-    /// Get sequences if loaded
-    pub fn sequences(&self) -> Option<&[SequenceRecord]> {
-        match self {
-            SequenceCollectionRecord::Stub(_) => None,
-            SequenceCollectionRecord::Full { sequences, .. } => Some(sequences),
-        }
-    }
-
-    /// Check if sequences are loaded
-    pub fn has_sequences(&self) -> bool {
-        matches!(self, SequenceCollectionRecord::Full { .. })
-    }
-
-    /// Load sequences into a Stub record, converting to Full
-    pub fn with_sequences(self, sequences: Vec<SequenceRecord>) -> Self {
-        let metadata = match self {
-            SequenceCollectionRecord::Stub(m) => m,
-            SequenceCollectionRecord::Full { metadata, .. } => metadata,
-        };
-        SequenceCollectionRecord::Full {
-            metadata,
-            sequences,
-        }
-    }
-
-    /// Convert to a SequenceCollection (requires Full variant or empty collection for Stub)
-    pub fn to_collection(&self) -> SequenceCollection {
-        match self {
-            SequenceCollectionRecord::Stub(meta) => {
-                // Create empty collection with metadata
-                SequenceCollection {
-                    metadata: meta.clone(),
-                    sequences: Vec::new(),
-                }
-            }
-            SequenceCollectionRecord::Full {
-                metadata,
-                sequences,
-            } => SequenceCollection {
-                metadata: metadata.clone(),
-                sequences: sequences.clone(),
-            },
-        }
-    }
-}
-
-impl From<SequenceCollection> for SequenceCollectionRecord {
-    fn from(collection: SequenceCollection) -> Self {
-        SequenceCollectionRecord::Full {
-            metadata: collection.metadata,
-            sequences: collection.sequences,
-        }
-    }
-}
-
 // ============================================================================
 // Pure computation functions
 // ============================================================================
@@ -1145,40 +1068,58 @@ pub fn digest_sequence_with_description(
 ///
 /// Returns None if the line is a comment, empty, or has wrong column count.
 pub fn parse_rgsi_line(line: &str) -> Option<SequenceMetadata> {
-    // Skip empty lines
+    let f = parse_rgsi_fields(line)?;
+    Some(SequenceMetadata {
+        name: f.name.to_string(),
+        description: f.description.map(str::to_string),
+        length: f.length,
+        alphabet: f.alphabet,
+        sha512t24u: f.sha512t24u.to_string(),
+        md5: f.md5.to_string(),
+        fai: None,
+    })
+}
+
+/// The columns of one RGSI line, borrowed from the line (no allocation).
+pub struct RgsiFields<'a> {
+    pub name: &'a str,
+    pub description: Option<&'a str>,
+    pub length: usize,
+    pub alphabet: AlphabetType,
+    pub sha512t24u: &'a str,
+    pub md5: &'a str,
+}
+
+/// Parse one RGSI line into borrowed fields. Same rules as
+/// [`parse_rgsi_line`]: 5 or 6 tab-separated columns, empty lines skipped.
+pub fn parse_rgsi_fields(line: &str) -> Option<RgsiFields<'_>> {
+    let line = line.strip_suffix('\n').unwrap_or(line);
+    let line = line.strip_suffix('\r').unwrap_or(line);
     if line.trim().is_empty() {
         return None;
     }
-
-    let parts: Vec<&str> = line.split('\t').collect();
-
-    match parts.len() {
-        // 5-column format: no description
-        5 => Some(SequenceMetadata {
-            name: parts[0].to_string(),
-            description: None,
-            length: parts[1].parse().ok()?,
-            alphabet: parts[2].parse().unwrap_or(AlphabetType::Unknown),
-            sha512t24u: parts[3].to_string(),
-            md5: parts[4].to_string(),
-            fai: None,
-        }),
-        // 6-column format: description at end
-        6 => Some(SequenceMetadata {
-            name: parts[0].to_string(),
-            description: if parts[5].is_empty() {
-                None
-            } else {
-                Some(parts[5].to_string())
-            },
-            length: parts[1].parse().ok()?,
-            alphabet: parts[2].parse().unwrap_or(AlphabetType::Unknown),
-            sha512t24u: parts[3].to_string(),
-            md5: parts[4].to_string(),
-            fai: None,
-        }),
-        _ => None,
+    let mut it = line.split('\t');
+    let name = it.next()?;
+    let length = it.next()?;
+    let alphabet = it.next()?;
+    let sha512t24u = it.next()?;
+    let md5 = it.next()?;
+    let description = match it.next() {
+        None => None,
+        Some("") => None,
+        Some(d) => Some(d),
+    };
+    if it.next().is_some() {
+        return None;
     }
+    Some(RgsiFields {
+        name,
+        description,
+        length: length.parse().ok()?,
+        alphabet: alphabet.parse().unwrap_or(AlphabetType::Unknown),
+        sha512t24u,
+        md5,
+    })
 }
 
 /// Parse a single line from an RGCI (collection index) file.

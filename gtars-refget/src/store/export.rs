@@ -5,7 +5,6 @@ use super::readonly::ReadonlyRefgetStore;
 
 use std::ffi::OsStr;
 
-use indexmap::IndexMap;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
@@ -17,10 +16,9 @@ use flate2::read::MultiGzDecoder;
 use gtars_core::utils::get_file_info;
 
 use crate::digest::{
-    SequenceMetadata, SequenceRecord,
+    SequenceMetadata,
     decode_substring_from_bytes, lookup_alphabet,
 };
-use crate::hashkeyable::HashKeyable;
 
 
 // ============================================================================
@@ -360,27 +358,28 @@ impl ReadonlyRefgetStore {
     ) -> Result<()> {
         let line_width = line_width.unwrap_or(80);
         let output_path = output_path.as_ref();
-        let collection_key = collection_digest.as_ref().to_key();
-
-        // Headers come from the collection's own per-sequence records so a
-        // sequence shared across collections is exported under this collection's
-        // name and description, not the label of whichever import came first.
-        let records = self.collection_sequence_metadata(&collection_key).map_err(|e| {
+        // Headers come from the collection's own members so a sequence shared
+        // across collections is exported under this collection's name and
+        // description, not the label of whichever import came first.
+        let coll = self.loaded_coll_row(collection_digest.as_ref()).map_err(|e| {
             anyhow!(
                 "Collection not found: {:?}: {}",
                 String::from_utf8_lossy(collection_digest.as_ref()),
                 e
             )
         })?;
-        let name_to_meta: IndexMap<&str, &SequenceMetadata> = records
-            .iter()
-            .map(|r| (r.metadata().name.as_str(), r.metadata()))
-            .collect();
 
         let names_to_export: Vec<&str> = if let Some(names) = sequence_names {
             names
         } else {
-            name_to_meta.keys().copied().collect()
+            // Unique names, first-occurrence order (a duplicated name exports
+            // once, as its last member).
+            let mut seen = std::collections::HashSet::new();
+            self.catalog
+                .members(coll)
+                .map(|m| m.name())
+                .filter(|n| seen.insert(*n))
+                .collect()
         };
 
         let file = File::create(output_path).context(format!(
@@ -395,26 +394,18 @@ impl ReadonlyRefgetStore {
         };
 
         for seq_name in names_to_export {
-            let meta = *name_to_meta
-                .get(seq_name)
+            let member = self
+                .catalog
+                .member_by_name(coll, seq_name)
                 .ok_or_else(|| anyhow!("Sequence '{}' not found in collection", seq_name))?;
-            let seq_digest = meta.sha512t24u.to_key();
+            let meta = member.to_metadata();
 
-            let record = self
-                .sequence_store
-                .get(&seq_digest)
-                .ok_or_else(|| anyhow!("Sequence record not found for digest: {}", meta.sha512t24u))?;
+            // Only the bytes come from the sequence row.
+            let sequence = self.seq_bytes(member.seq_row()).ok_or_else(|| {
+                anyhow!("Sequence data not loaded for '{}'. Call load_sequence() or load_all_sequences() first.", seq_name)
+            })?;
 
-            // Only the bytes come from the global record. `alphabet` and `length`
-            // are content-derived and identical in the per-collection stub.
-            let sequence_data: &[u8] = match record {
-                SequenceRecord::Stub(_) => {
-                    return Err(anyhow!("Sequence data not loaded for '{}'. Call load_sequence() or load_all_sequences() first.", seq_name));
-                }
-                SequenceRecord::Full { sequence, .. } => sequence.as_slice(),
-            };
-
-            write_fasta_record(&mut *writer, meta, sequence_data, self.mode, line_width)?;
+            write_fasta_record(&mut *writer, &meta, &sequence, self.mode, line_width)?;
         }
 
         writer.flush()?;
@@ -452,24 +443,16 @@ impl ReadonlyRefgetStore {
         };
 
         for digest_str in seq_digests {
-            let digest_key = digest_str.as_bytes().to_key();
-
-            let record = self
-                .sequence_store
-                .get(&digest_key)
+            let row = self
+                .catalog
+                .find_sha(digest_str)
                 .ok_or_else(|| anyhow!("Sequence record not found for digest: {}", digest_str))?;
+            let sequence = self.seq_bytes(row).ok_or_else(|| {
+                anyhow!("Sequence data not loaded for digest: {}", digest_str)
+            })?;
+            let metadata = self.catalog.seq(row).to_metadata();
 
-            let (metadata, sequence_data): (&SequenceMetadata, &[u8]) = match record {
-                SequenceRecord::Stub(_) => {
-                    return Err(anyhow!(
-                        "Sequence data not loaded for digest: {}",
-                        digest_str
-                    ));
-                }
-                SequenceRecord::Full { metadata, sequence } => (metadata, sequence.as_slice()),
-            };
-
-            write_fasta_record(&mut *writer, metadata, sequence_data, self.mode, line_width)?;
+            write_fasta_record(&mut *writer, &metadata, &sequence, self.mode, line_width)?;
         }
 
         writer.flush()?;

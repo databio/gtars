@@ -147,6 +147,34 @@ pub(crate) fn read_pack_idx_rows(bytes: &[u8]) -> Result<BTreeMap<String, PackRo
     Ok(out)
 }
 
+/// Visit every sidecar row as borrowed fields `(digest, pack, offset, len)`,
+/// without allocating per row.
+pub(crate) fn for_each_row(
+    bytes: &[u8],
+    mut f: impl FnMut(&str, &str, u64, u64) -> Result<()>,
+) -> Result<()> {
+    if bytes.is_empty() {
+        return Ok(());
+    }
+    if bytes.len() < HEADER_BYTES {
+        return Err(anyhow!("pack index too small: {} bytes", bytes.len()));
+    }
+    let body = &bytes[HEADER_BYTES..];
+    if !body.len().is_multiple_of(ROW_BYTES) {
+        return Err(anyhow!(
+            "pack index body {} bytes is not a multiple of row width {}",
+            body.len(),
+            ROW_BYTES
+        ));
+    }
+    for row in body.chunks_exact(ROW_BYTES) {
+        let digest = std::str::from_utf8(&row[0..DIGEST_LEN]).context("pack index row digest not UTF-8")?;
+        let pack = std::str::from_utf8(&row[33..65]).context("pack name not UTF-8")?;
+        f(digest, pack, parse_hex(&row[66..82])?, parse_hex(&row[83..99])?)?;
+    }
+    Ok(())
+}
+
 /// A backend-agnostic sorted, fixed-width row store. One binary search serves
 /// every backend (in-memory today; a ranged-HTTP backend is trivial to add).
 pub(crate) trait RowSource: Send + Sync {

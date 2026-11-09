@@ -231,7 +231,7 @@ impl RefgetStore {
         if !self.inner.is_sequence_loaded(&canonical_digest) {
             self.inner.load_sequence(&canonical_digest)?;
         }
-        Ok(self.inner.get_sequence(&canonical_digest)?.clone())
+        self.inner.get_sequence(&canonical_digest)
     }
 
     /// Retrieve a named sequence from a collection, loading only that
@@ -310,16 +310,12 @@ impl RefgetStore {
         collection_digest: &str,
         opts: &VerifyOptions,
     ) -> Result<VerifyReport> {
-        use crate::hashkeyable::HashKeyable;
-
         self.inner.ensure_sequence_index_loaded()?;
-        let collection_key = collection_digest.to_key();
-        self.inner.ensure_collection_loaded(&collection_key)?;
+        self.inner.ensure_collection_loaded(collection_digest)?;
         let mut digests: Vec<String> = self
             .inner
-            .collection_sequence_metadata(&collection_key)?
-            .iter()
-            .map(|record| record.metadata().sha512t24u.clone())
+            .collection_members(collection_digest)?
+            .map(|m| m.seq().sha512t24u().to_string())
             .collect();
         digests.sort();
         digests.dedup();
@@ -338,19 +334,15 @@ impl RefgetStore {
         sequence_names: Option<Vec<&str>>,
         line_width: Option<usize>,
     ) -> Result<()> {
-        use crate::hashkeyable::HashKeyable;
-
-        let collection_key = collection_digest.as_ref().to_key();
-        self.inner.ensure_collection_loaded(&collection_key)?;
+        let collection_str = String::from_utf8_lossy(collection_digest.as_ref()).into_owned();
+        self.inner.ensure_collection_loaded(&collection_str)?;
         let wanted: Option<std::collections::HashSet<&str>> =
             sequence_names.as_ref().map(|names| names.iter().copied().collect());
         let to_load: Vec<String> = self
             .inner
-            .collection_sequence_metadata(&collection_key)?
-            .iter()
-            .map(|record| record.metadata())
-            .filter(|meta| wanted.as_ref().is_none_or(|w| w.contains(meta.name.as_str())))
-            .map(|meta| meta.sha512t24u.clone())
+            .collection_members(&collection_str)?
+            .filter(|m| wanted.as_ref().is_none_or(|w| w.contains(m.name())))
+            .map(|m| m.seq().sha512t24u().to_string())
             .collect();
         for digest in &to_load {
             self.inner.load_sequence(digest)?;
@@ -429,16 +421,6 @@ impl RefgetStore {
     /// Disable disk persistence for this store.
     pub fn disable_persistence(&mut self) {
         self.inner.disable_persistence();
-    }
-
-    /// Add a sequence to the store.
-    pub fn add_sequence<T: Into<Option<DigestKey>>>(
-        &mut self,
-        sequence_record: SequenceRecord,
-        collection_digest: T,
-        force: bool,
-    ) -> Result<()> {
-        self.inner.add_sequence(sequence_record, collection_digest, force)
     }
 
     /// Digest and insert raw sequence bytes without a collection association.
