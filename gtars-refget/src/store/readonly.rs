@@ -2255,10 +2255,24 @@ impl ReadonlyRefgetStore {
 
         let mut loaded: Vec<(DigestKey, Arc<Vec<u8>>)> = Vec::with_capacity(plan.len());
         let mut total: u64 = 0;
-        for (key, _digest_str, relpath) in plan {
+        for (key, digest_str, relpath) in plan {
+            // Packed layout: the record is a span inside a pack, not a `.seq`.
+            // A remote packed store still prefers its standalone local cache.
+            let local_cached = self
+                .local_path
+                .as_ref()
+                .map(|lp| lp.join(&relpath).exists())
+                .unwrap_or(false);
+            let packed_bytes = if self.layout == Layout::Packed || !local_cached {
+                self.read_packed_record_bytes(&digest_str)?
+            } else {
+                None
+            };
             // Prefer a direct local read (one open + sequential read_to_end);
             // fall back to the remote fetch only when the local file is absent.
-            let data: Vec<u8> = if let Some(lp) = self.local_path.as_ref() {
+            let data: Vec<u8> = if let Some(bytes) = packed_bytes {
+                bytes
+            } else if let Some(lp) = self.local_path.as_ref() {
                 let full = lp.join(&relpath);
                 match File::open(&full) {
                     Ok(f) => {
@@ -2900,6 +2914,37 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
         };
 
         Ok(decoded)
+    }
+
+    /// Whole stored bytes of one sequence when it lives in a pack, read from the
+    /// local packs (packed local store) or a byte range of the remote pack
+    /// (remote packed store). Returns `None` for a standalone layout, so the
+    /// caller falls back to its `.seq` file path. Bytes are in the store's
+    /// native form (2-bit, ASCII, or a zstd frame).
+    fn read_packed_record_bytes(&self, sha: &str) -> Result<Option<Vec<u8>>> {
+        if self.layout == Layout::Packed {
+            return match self.resolve_location(sha, StoreSide::Local)? {
+                Location::Packed { pack, offset, len } => {
+                    Ok(Some(self.read_pack_bytes_local(&pack, offset, offset + len)?))
+                }
+                Location::Standalone { .. } => Ok(None),
+            };
+        }
+        if self.remote_layout == Layout::Packed && self.remote_source.is_some() {
+            if let Location::Packed { pack, offset, len } =
+                self.resolve_location(sha, StoreSide::Remote)?
+            {
+                let remote = self.remote_source.as_ref().unwrap();
+                let relpath = PathBuf::from(format!("packs/{}.pack", pack));
+                let mut reader = open_remote_range(remote, &relpath, offset, offset + len)?;
+                let mut buf = Vec::with_capacity(len as usize);
+                reader
+                    .read_to_end(&mut buf)
+                    .context("Failed to read remote pack byte range")?;
+                return Ok(Some(buf));
+            }
+        }
+        Ok(None)
     }
 
     /// Return a shared handle to the `.seq` file for `digest`, opening and
@@ -3578,6 +3623,13 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
             let ascii: Vec<u8> = match record {
                 SequenceRecord::Full { sequence, .. } => zstd::decode_all(&sequence[..])
                     .context("zstd decompression of resident record failed")?,
+                SequenceRecord::Stub(meta) if self.layout == Layout::Packed => {
+                    let compressed = self
+                        .read_packed_record_bytes(&meta.sha512t24u)?
+                        .ok_or_else(|| anyhow!("packed store resolved a standalone sequence"))?;
+                    zstd::decode_all(&compressed[..])
+                        .context("zstd decompression of packed record failed")?
+                }
                 SequenceRecord::Stub(meta) => {
                     let relpath = self.resolve_seq_file_relpath(&meta.sha512t24u)?;
                     let local = self.local_path.as_ref().ok_or_else(|| {

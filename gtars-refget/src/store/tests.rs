@@ -6643,4 +6643,96 @@ mod packed_layout {
             );
         }
     }
+
+    fn walkdir_seq_count(dir: &std::path::Path) -> usize {
+        let Ok(entries) = std::fs::read_dir(dir) else { return 0 };
+        entries
+            .filter_map(|e| e.ok())
+            .map(|e| {
+                let p = e.path();
+                if p.is_dir() {
+                    walkdir_seq_count(&p)
+                } else {
+                    usize::from(p.extension().is_some_and(|x| x == "seq"))
+                }
+            })
+            .sum()
+    }
+
+    /// Expected ASCII for each sequence of PACKED_FASTA, keyed by digest.
+    fn expected_by_digest(store: &RefgetStore) -> Vec<(String, String)> {
+        let by_name: std::collections::HashMap<&str, &str> = PACKED_FASTA
+            .split('>')
+            .filter(|r| !r.is_empty())
+            .map(|r| {
+                let mut it = r.splitn(2, '\n');
+                (it.next().unwrap(), it.next().unwrap().trim_end())
+            })
+            .collect();
+        let mut v: Vec<(String, String)> = store
+            .sequence_metadata()
+            .map(|m| (m.sha512t24u.clone(), by_name[m.name.as_str()].to_string()))
+            .collect();
+        v.sort();
+        v
+    }
+
+    /// Every packed read path dev added after the packed layout (zstd mode,
+    /// streaming a zstd stub, verify, resident load) must read the pack span,
+    /// not a `.seq` path that does not exist in a packed store.
+    #[test]
+    fn packed_store_serves_every_mode_through_all_read_paths() {
+        for mode in [StorageMode::Raw, StorageMode::Encoded, StorageMode::Zstd] {
+            let dir = tempdir().unwrap();
+            let fasta = dir.path().join("p.fa");
+            fs::write(&fasta, PACKED_FASTA).unwrap();
+            let store_dir = dir.path().join("store");
+            {
+                let mut s = RefgetStore::on_disk_packed(&store_dir).unwrap();
+                s.set_quiet(true);
+                s.set_encoding_mode(mode).unwrap();
+                s.add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new().jobs(2))
+                    .unwrap();
+                s.write().unwrap();
+            }
+            let seq_files = walkdir_seq_count(&store_dir.join("sequences"));
+            assert_eq!(seq_files, 0, "{mode:?}: packed store wrote .seq files");
+
+            let mut reopened = RefgetStore::open_local(&store_dir).unwrap();
+            reopened.set_quiet(true);
+            let expected = expected_by_digest(&reopened);
+            let ro = reopened.into_readonly();
+            for (sha, want) in &expected {
+                let n = want.len();
+                let got = ro.get_substring(sha, 1, n - 1).unwrap();
+                assert_eq!(got.as_str(), &want[1..n - 1], "{mode:?} substring");
+
+                let mut r = ro.stream_sequence(sha, Some(2), Some(n as u64)).unwrap();
+                let mut streamed = String::new();
+                r.read_to_string(&mut streamed).unwrap();
+                assert_eq!(streamed, want[2..], "{mode:?} stream");
+
+                assert!(ro.verify_sequence(sha, true).unwrap().is_none(), "{mode:?} verify");
+            }
+
+            let digests: Vec<String> = expected.iter().map(|(d, _)| d.clone()).collect();
+            assert!(ro.load_resident(&digests).unwrap() > 0, "{mode:?} resident load");
+            for (sha, want) in &expected {
+                let got = ro.get_substring(sha, 0, want.len()).unwrap();
+                assert_eq!(got.as_str(), want.as_str(), "{mode:?} resident read");
+            }
+        }
+    }
+
+    /// A populated packed store refuses a mode switch with an error, and the
+    /// store keeps its mode.
+    #[test]
+    fn packed_store_refuses_mode_switch_once_populated() {
+        let dir = tempdir().unwrap();
+        let fasta = dir.path().join("p.fa");
+        fs::write(&fasta, PACKED_FASTA).unwrap();
+        let mut s = build_packed(&dir.path().join("store"), &fasta, 1, false, None);
+        assert!(s.set_encoding_mode(StorageMode::Raw).is_err());
+        assert_eq!(s.storage_mode(), StorageMode::Encoded);
+    }
 }
