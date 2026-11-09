@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### Breaking
+
+- `gtars-refget`: `ComparisonDigests.a` is now `Option<String>` (was
+  `String`), matching `b`. A side compared from a level-2 body has no known
+  digest, so either digest can be `None` (JSON `null`).
+
+### Added
+
+- `gtars-refget`: new `compare_level2_json` compares two level-2 sequence
+  collection bodies given as JSON, with no store or digest needed. Exposed as
+  `compare_seqcols` in Python (`gtars.refget`) and `compareSeqcols` in WASM.
+
+### Fixed
+
+- `gtars-refget`: the streaming FASTA hasher (`FastaStreamHasher`) now reads
+  multi-member gzip, including bgzip (BGZF) and concatenated `.gz` files. It
+  used to decode only the first member.
+
 ## 0.10.0 - 2026-09-05
 
 A `gtars-refget` store-safety and store-operations release. Component

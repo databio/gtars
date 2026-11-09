@@ -41,6 +41,6 @@ pub use types::{
     ArrayElementComparison, AttributeComparison, CollectionLevel1, CollectionLevel2,
     CollectionNameMatch, ComparisonDigests, FaiMetadata, SeqColComparison, SeqColDigestLvl1,
     SequenceCollection, SequenceCollectionMetadata, SequenceCollectionRecord, SequenceMetadata,
-    SequenceNameMatch, SequenceRecord,
-    digest_sequence, digest_sequence_with_description, parse_rgci_line, parse_rgsi_line,
+    SequenceNameMatch, SequenceRecord, compare_level2_json, digest_sequence,
+    digest_sequence_with_description, parse_rgci_line, parse_rgsi_line,
 };

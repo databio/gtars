@@ -25,9 +25,10 @@
 //! ```
 
 use gtars_refget::digest::{
-    byte_range_for_bases, canonicalize_json, decode_substring_from_bytes_at_offset,
-    digest_fasta_bytes, digest_sequence, lookup_alphabet, md5, sha512t24u, AlphabetType,
-    FastaStreamHasher, SequenceCollection, SequenceMetadata, SequenceRecord,
+    AlphabetType, FastaStreamHasher, SequenceCollection, SequenceMetadata, SequenceRecord,
+    byte_range_for_bases, canonicalize_json, compare_level2_json,
+    decode_substring_from_bytes_at_offset, digest_fasta_bytes, digest_sequence, lookup_alphabet,
+    md5, sha512t24u,
 };
 use gtars_refget::store::{ReadonlyRefgetStore, RefgetStore as CoreRefgetStore};
 use serde::{Deserialize, Serialize};
@@ -215,6 +216,58 @@ pub fn canonicalize_json_string(json_str: &str) -> Result<String, JsError> {
     let value: serde_json::Value = serde_json::from_str(json_str)
         .map_err(|e| JsError::new(&format!("Invalid JSON: {}", e)))?;
     Ok(canonicalize_json(&value))
+}
+
+/// Compare two level-2 sequence collections, following the seqcol spec.
+///
+/// Neither collection needs to be in a store. Every attribute is compared and
+/// must be an array; elements may be strings, numbers, or objects (such as
+/// `name_length_pairs`), and objects compare by content.
+///
+/// # Arguments
+/// * `a`, `b` - Level-2 collections as plain JS objects (attribute name -> array)
+/// * `digest_a`, `digest_b` - Optional digests, copied into the result
+///
+/// # Returns
+/// The spec comparison as a plain JS object:
+/// `{digests: {a, b}, attributes: {a_only, b_only, a_and_b},
+///   array_elements: {a_count, b_count, a_and_b_count, a_and_b_same_order}}`.
+/// Missing digests and undefined orders are `null`.
+///
+/// # Example (JavaScript)
+/// ```javascript
+/// const result = compareSeqcols(level2A, level2B, digestA, digestB);
+/// result.array_elements.a_and_b_same_order.names; // true, false, or null
+/// ```
+#[wasm_bindgen(js_name = "compareSeqcols")]
+pub fn compare_seqcols(
+    a: JsValue,
+    b: JsValue,
+    digest_a: Option<String>,
+    digest_b: Option<String>,
+) -> Result<JsValue, JsError> {
+    // Round-trip through JSON text so numbers stay integers (8, not 8.0).
+    fn to_json(side: &str, value: &JsValue) -> Result<serde_json::Value, JsError> {
+        // stringify returns undefined (not an error) for undefined, functions
+        // and Symbols, so treat a non-string result as not serializable too.
+        let text = js_sys::JSON::stringify(value)
+            .ok()
+            .and_then(|s| s.as_string())
+            .ok_or_else(|| {
+                JsError::new(&format!("collection {} is not JSON-serializable", side))
+            })?;
+        serde_json::from_str(&text)
+            .map_err(|e| JsError::new(&format!("collection {}: {}", side, e)))
+    }
+    let comparison =
+        compare_level2_json(&to_json("a", &a)?, &to_json("b", &b)?, digest_a, digest_b)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+    // Via serde_json::Value for sorted keys; json_compatible gives plain
+    // objects (not Map) and null (not undefined).
+    serde_json::to_value(&comparison)
+        .map_err(|e| JsError::new(&e.to_string()))?
+        .serialize(&serde_wasm_bindgen::Serializer::json_compatible())
+        .map_err(|e| JsError::new(&e.to_string()))
 }
 
 // ============================================================================

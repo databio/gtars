@@ -2072,3 +2072,38 @@ def digest_sequence(
         # Output: Chromosome 1
     """
     ...
+
+def compare_seqcols(
+    a: Dict[str, List[Any]],
+    b: Dict[str, List[Any]],
+    digest_a: Optional[str] = None,
+    digest_b: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Compare two level-2 sequence collections, following the seqcol spec.
+
+    Neither collection needs to be in a store. Every attribute is compared
+    and must be a list; elements may be strings, numbers, or dicts (such as
+    name_length_pairs), and dicts compare by content.
+
+    Args:
+        a: Level-2 collection A (attribute name -> list).
+        b: Level-2 collection B.
+        digest_a: Optional digest of A, copied into the result.
+        digest_b: Optional digest of B, copied into the result.
+
+    Returns:
+        The spec comparison dict with keys digests, attributes and
+        array_elements. a_and_b_same_order is None for an attribute when
+        fewer than 2 elements are shared or duplicates are unbalanced.
+
+    Raises:
+        ValueError: If an attribute value is not a list.
+
+    Example::
+        from gtars.refget import compare_seqcols
+        a = {"names": ["chr1", "chr2"], "lengths": [10, 20]}
+        b = {"names": ["chr2", "chr1"], "lengths": [20, 10]}
+        compare_seqcols(a, b)["array_elements"]["a_and_b_same_order"]
+        # {'lengths': False, 'names': False}
+    """
+    ...
