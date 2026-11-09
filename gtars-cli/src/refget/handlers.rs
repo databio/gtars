@@ -4,10 +4,11 @@ use anyhow::Result;
 use clap::ArgMatches;
 
 use gtars_refget::store::{
-    ExportOptions, ExportSelection, FastaImportOptions, LabelTemplate, LockOptions, Molecule,
-    RefgetStore, StorageMode, VerifyOptions, VerifyReport, force_unlock, lock_status,
+    ExportOptions, ExportSelection, FastaImportOptions, FetchConfig, LabelTemplate, LockOptions,
+    Molecule, RefgetStore, StorageMode, VerifyOptions, VerifyReport, default_cache_root,
+    force_unlock, lock_status,
 };
-use gtars_refget::{expand_fasta_inputs, FastaInputs};
+use gtars_refget::{FastaInputs, expand_fasta_inputs};
 
 pub fn run_refget(matches: &ArgMatches) -> Result<()> {
     match matches.subcommand() {
@@ -20,7 +21,9 @@ pub fn run_refget(matches: &ArgMatches) -> Result<()> {
 }
 
 fn run_lock_status(matches: &ArgMatches) -> Result<()> {
-    let store = matches.get_one::<String>("store").expect("store is required");
+    let store = matches
+        .get_one::<String>("store")
+        .expect("store is required");
     let path = std::path::Path::new(store);
 
     match lock_status(path)? {
@@ -106,7 +109,13 @@ fn run_build(matches: &ArgMatches) -> Result<()> {
     }
 
     let mode = if raw { "Raw" } else { "Encoded" };
-    let fmt_auto = |n: usize| if n == 0 { "auto".to_string() } else { n.to_string() };
+    let fmt_auto = |n: usize| {
+        if n == 0 {
+            "auto".to_string()
+        } else {
+            n.to_string()
+        }
+    };
     eprintln!(
         "Building RefgetStore at {} (mode={}, jobs={})",
         output,
@@ -118,9 +127,7 @@ fn run_build(matches: &ArgMatches) -> Result<()> {
     let mut total_seqs: usize = 0;
     let start = Instant::now();
 
-    let mut opts = FastaImportOptions::new()
-        .force(force)
-        .jobs(jobs);
+    let mut opts = FastaImportOptions::new().force(force).jobs(jobs);
     if let Some((ns, alias)) = collection_alias.as_ref() {
         opts = opts.collection_alias(ns, alias);
     }
@@ -191,7 +198,11 @@ fn resolve_collection_arg(store: &RefgetStore, raw: &str) -> Result<String> {
                 anyhow::anyhow!(
                     "Collection alias '{}' not found in store. Known aliases: {}",
                     raw,
-                    if known.is_empty() { "(none)".to_string() } else { known.join(", ") }
+                    if known.is_empty() {
+                        "(none)".to_string()
+                    } else {
+                        known.join(", ")
+                    }
                 )
             });
     }
@@ -228,9 +239,6 @@ fn describe_collection(store: &RefgetStore, digest: &str) -> String {
 }
 
 fn run_export(matches: &ArgMatches) -> Result<()> {
-    let store_path = matches
-        .get_one::<String>("store")
-        .expect("store is required");
     let output = matches
         .get_one::<String>("output")
         .map(String::as_str)
@@ -249,8 +257,29 @@ fn run_export(matches: &ArgMatches) -> Result<()> {
         .transpose()?;
     let line_width = *matches.get_one::<usize>("line_width").unwrap_or(&80);
 
-    let mut store = RefgetStore::open_local(store_path)
-        .map_err(|e| anyhow::anyhow!("Failed to open store at {}: {}", store_path, e))?;
+    let remote = matches.get_one::<String>("remote");
+    let cache_dir = matches.get_one::<String>("cache_dir");
+    let resume = matches.get_flag("resume");
+    let mut store = match remote {
+        Some(url) => {
+            let fetch = FetchConfig {
+                jobs: *matches.get_one::<usize>("fetch_jobs").expect("has default"),
+                ..FetchConfig::default()
+            };
+            let root = cache_dir
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(default_cache_root);
+            RefgetStore::open_remote(&root, url, &fetch)
+                .map_err(|e| anyhow::anyhow!("Failed to open remote store {}: {:#}", url, e))?
+        }
+        None => {
+            let store_path = matches
+                .get_one::<String>("store")
+                .expect("store or remote is required");
+            RefgetStore::open_local(store_path)
+                .map_err(|e| anyhow::anyhow!("Failed to open store at {}: {}", store_path, e))?
+        }
+    };
 
     let selection = if matches.get_flag("all") {
         ExportSelection::All
@@ -274,7 +303,7 @@ fn run_export(matches: &ArgMatches) -> Result<()> {
                     return Err(anyhow::anyhow!(
                         "Store contains multiple collections; specify one with --collection, or use --all. Available: {}",
                         available()
-                    ))
+                    ));
                 }
             }
         } else {
@@ -295,7 +324,12 @@ fn run_export(matches: &ArgMatches) -> Result<()> {
         ExportSelection::Collections { digests, names }
     };
 
-    let opts = ExportOptions { label, molecule, line_width: Some(line_width) };
+    let opts = ExportOptions {
+        label,
+        molecule,
+        line_width: Some(line_width),
+        write_cache: resume || cache_dir.is_some(),
+    };
     let summary = match store.export_fasta(&selection, output, &opts) {
         Ok(s) => s,
         Err(e) if is_broken_pipe(&e) => return Ok(()),
@@ -304,10 +338,16 @@ fn run_export(matches: &ArgMatches) -> Result<()> {
 
     let mut notes = Vec::new();
     if summary.n_fallbacks > 0 {
-        notes.push(format!("{} label(s) fell back to a digest", summary.n_fallbacks));
+        notes.push(format!(
+            "{} label(s) fell back to a digest",
+            summary.n_fallbacks
+        ));
     }
     if summary.n_deduplicated > 0 {
-        notes.push(format!("{} repeated record(s) written once", summary.n_deduplicated));
+        notes.push(format!(
+            "{} repeated record(s) written once",
+            summary.n_deduplicated
+        ));
     }
     let dest = if output == "-" { "stdout" } else { output };
     eprintln!(
@@ -315,7 +355,11 @@ fn run_export(matches: &ArgMatches) -> Result<()> {
         summary.n_records,
         summary.n_bases,
         dest,
-        if notes.is_empty() { String::new() } else { format!(" ({})", notes.join("; ")) }
+        if notes.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", notes.join("; "))
+        }
     );
 
     Ok(())
@@ -359,7 +403,9 @@ fn write_verify_tsv<W: std::io::Write>(mut out: W, report: &VerifyReport) -> Res
 }
 
 fn run_verify(matches: &ArgMatches) -> Result<()> {
-    let store_path = matches.get_one::<String>("store").expect("store is required");
+    let store_path = matches
+        .get_one::<String>("store")
+        .expect("store is required");
     let requested_collection = matches.get_one::<String>("collection");
     let digests: Option<Vec<String>> = matches
         .get_many::<String>("digest")
@@ -377,7 +423,11 @@ fn run_verify(matches: &ArgMatches) -> Result<()> {
     eprintln!(
         "Verifying store at {} (jobs={}, check_md5={})",
         store_path,
-        if jobs == 0 { "auto".to_string() } else { jobs.to_string() },
+        if jobs == 0 {
+            "auto".to_string()
+        } else {
+            jobs.to_string()
+        },
         check_md5,
     );
 

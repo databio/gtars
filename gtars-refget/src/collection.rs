@@ -292,10 +292,16 @@ impl SequenceCollectionExt for SequenceCollection {
 
 /// Read an RGSI file and return a SequenceCollection.
 pub fn read_rgsi_file<T: AsRef<Path>>(file_path: T) -> Result<SequenceCollection> {
-    use std::io::BufRead;
-
     let file = std::fs::File::open(&file_path)?;
-    let reader = std::io::BufReader::new(file);
+    read_rgsi_reader(std::io::BufReader::new(file), Some(file_path.as_ref().to_path_buf()))
+}
+
+/// Parse an RGSI collection from a reader (for example bytes just
+/// downloaded). `file_path` is recorded in the metadata when given.
+pub(crate) fn read_rgsi_reader<R: std::io::BufRead>(
+    reader: R,
+    file_path: Option<std::path::PathBuf>,
+) -> Result<SequenceCollection> {
     let mut results = Vec::new();
 
     // Variables to store header metadata
@@ -345,7 +351,7 @@ pub fn read_rgsi_file<T: AsRef<Path>>(file_path: T) -> Result<SequenceCollection
         || lengths_digest.is_empty()
     {
         // Compute from sequence records
-        SequenceCollectionMetadata::from_sequences(&results, Some(file_path.as_ref().to_path_buf()))
+        SequenceCollectionMetadata::from_sequences(&results, file_path.clone())
     } else {
         // Use digests from file header
         let lvl1 = SeqColDigestLvl1 {
@@ -369,7 +375,7 @@ pub fn read_rgsi_file<T: AsRef<Path>>(file_path: T) -> Result<SequenceCollection
             name_length_pairs_digest,
             sorted_name_length_pairs_digest,
             sorted_sequences_digest,
-            file_path: Some(file_path.as_ref().to_path_buf()),
+            file_path,
         }
     };
 

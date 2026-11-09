@@ -327,22 +327,55 @@ refget_store_open_local <- function(path) {
 
 #' @title Open a remote RefgetStore
 #'
-#' @description Open a remote RefgetStore with local caching.
+#' @description Open a remote RefgetStore. Metadata downloads in parallel at
+#' open; sequences download on demand over parallel requests, each checked
+#' against its digest.
+#' \code{cache_path} is the shared cache root (see
+#' \code{refget_default_cache_dir()}): metadata goes to \code{remotes/<key>/}
+#' and downloaded sequences to \code{sequences/}, shared by every remote store
+#' opened with the same root.
 #'
-#' @param cache_path Local directory for caching downloaded data
+#' @param cache_path Cache root shared by all remote stores
 #' @param remote_url URL of the remote RefgetStore
+#' @param fetch_jobs Parallel HTTP requests
 #'
 #' @return A RefgetStore object
 #'
 #' @examples
 #' \dontrun{
-#' store <- refget_store_open_remote("/local/cache", "https://example.com/store")
+#' store <- refget_store_open_remote(refget_default_cache_dir(), "https://example.com/store")
 #' }
 #'
 #' @export
-refget_store_open_remote <- function(cache_path, remote_url) {
-  result <- .Call(wrap__open_remote_store, cache_path, remote_url)
+refget_store_open_remote <- function(cache_path, remote_url, fetch_jobs = 32L) {
+  result <- .Call(wrap__open_remote_store, cache_path, remote_url, as.integer(fetch_jobs))
   invisible(new('RefgetStore', ptr = result))
+}
+
+#' @title Default cache root for remote stores
+#' @description \code{REFGET_CACHE_DIR}, else \code{$XDG_CACHE_HOME/refget}, else \code{~/.cache/refget}.
+#' @return A path
+#' @export
+refget_default_cache_dir <- function() {
+  .Call(wrap__default_cache_dir_raw)
+}
+
+#' @title Summarize a cache
+#' @param root Cache root
+#' @return A named list: root, sequence_files, sequence_bytes, and remotes
+#'   (a data frame of url and bytes)
+#' @export
+refget_cache_info <- function(root) {
+  .Call(wrap__cache_info_raw, root)
+}
+
+#' @title Delete a cache
+#' @description Delete everything in a cache: sequences and remote metadata.
+#' @param root Cache root
+#' @return Bytes freed
+#' @export
+refget_clear_cache <- function(root) {
+  .Call(wrap__clear_cache_raw, root)
 }
 
 # Keep old function name for backwards compatibility
@@ -505,6 +538,40 @@ setMethod('load_sequence', 'RefgetStore', function(store, digest) {
 setGeneric('load_all_sequences', function(store) standardGeneric('load_all_sequences'))
 setMethod('load_all_sequences', 'RefgetStore', function(store) {
   invisible(.Call(wrap__load_all_sequences_store, store@ptr))
+})
+
+#' Load several collections; a remote store downloads the missing files in parallel.
+#' @param store A RefgetStore.
+#' @param digests Collection digests.
+#' @export
+setGeneric('load_collections', function(store, digests) standardGeneric('load_collections'))
+setMethod('load_collections', 'RefgetStore', function(store, digests) {
+  invisible(.Call(wrap__load_collections_store, store@ptr, as.character(digests)))
+})
+
+#' Download sequences into the shared cache, in parallel, without loading them.
+#'
+#' Already-cached sequences are skipped; each download is checked against its
+#' digest before it is cached.
+#' @param store A RefgetStore.
+#' @param digests Sequence digests.
+#' @param progress TRUE to print a progress line to stderr every 5 s.
+#' @return A named list of counters: requests, retries, bytes_downloaded,
+#'   sequences_fetched, cache_hits, cache_hit_bytes, local_reads,
+#'   local_read_bytes, missing, elapsed_secs.
+#' @export
+setGeneric('cache_sequences', function(store, digests, progress = TRUE) standardGeneric('cache_sequences'))
+setMethod('cache_sequences', 'RefgetStore', function(store, digests, progress = TRUE) {
+  .Call(wrap__cache_sequences_store, store@ptr, as.character(digests), isTRUE(progress))
+})
+
+#' Network and cache counters since the store opened (zeros for a local store).
+#' @param store A RefgetStore.
+#' @return A named list of counters (see \code{cache_sequences}).
+#' @export
+setGeneric('fetch_stats', function(store) standardGeneric('fetch_stats'))
+setMethod('fetch_stats', 'RefgetStore', function(store) {
+  .Call(wrap__fetch_stats_store, store@ptr)
 })
 
 # Keep old function name for backwards compatibility
@@ -713,7 +780,8 @@ setMethod('write_store', 'RefgetStore', function(store) {
 #'
 #' Choose records with exactly one of \code{collections}, \code{seq_digests}
 #' or \code{all}; choose how they are labeled with \code{label}. Exports
-#' stream one sequence at a time and leave the store's loaded state unchanged.
+#' read sequences ahead of the writer in parallel, within a fixed memory
+#' budget, and leave the store's loaded state unchanged.
 #'
 #' Label fields: \code{{seq}} sequence digest (\code{SQ.}...), the default;
 #' \code{{seq:NS}} the sequence's alias in namespace NS; \code{{col}}
@@ -732,11 +800,14 @@ setMethod('write_store', 'RefgetStore', function(store) {
 #' @param label Label template (default "{seq}")
 #' @param molecule NULL, "dna" or "protein"
 #' @param line_width Bases per line (default 80; 0 = one line per sequence)
-#' @return A named list of counts: n_records, n_bases, n_fallbacks, n_deduplicated
+#' @param write_cache Write sequences downloaded from a remote store to the
+#'   shared cache, so a rerun downloads only what is missing
+#' @return A named list of counts: n_records, n_bases, n_fallbacks,
+#'   n_deduplicated, and \code{fetch}, the network and cache counters
 #' @export
-setGeneric('export_fasta', function(store, output_path, collections = NULL, names = NULL, seq_digests = NULL, all = FALSE, label = "{seq}", molecule = NULL, line_width = 80L) standardGeneric('export_fasta'))
-setMethod('export_fasta', 'RefgetStore', function(store, output_path, collections = NULL, names = NULL, seq_digests = NULL, all = FALSE, label = "{seq}", molecule = NULL, line_width = 80L) {
-  invisible(.Call(wrap__export_fasta_store, store@ptr, output_path, collections, names, seq_digests, all, label, molecule, as.integer(line_width)))
+setGeneric('export_fasta', function(store, output_path, collections = NULL, names = NULL, seq_digests = NULL, all = FALSE, label = "{seq}", molecule = NULL, line_width = 80L, write_cache = FALSE) standardGeneric('export_fasta'))
+setMethod('export_fasta', 'RefgetStore', function(store, output_path, collections = NULL, names = NULL, seq_digests = NULL, all = FALSE, label = "{seq}", molecule = NULL, line_width = 80L, write_cache = FALSE) {
+  invisible(.Call(wrap__export_fasta_store, store@ptr, output_path, collections, names, seq_digests, all, label, molecule, as.integer(line_width), as.logical(write_cache)))
 })
 
 #' Export BED regions from a collection as FASTA.

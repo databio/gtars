@@ -92,7 +92,8 @@ impl RefgetStore {
     #[napi(factory)]
     pub fn open_remote(cache_path: String, url: String) -> Result<Self> {
         let store =
-            RustRefgetStore::open_remote(&cache_path, &url).map_err(to_napi_err)?;
+            RustRefgetStore::open_remote(&cache_path, &url, &gtars_refget::store::FetchConfig::default())
+                .map_err(to_napi_err)?;
         Ok(Self {
             inner: Mutex::new(store),
         })

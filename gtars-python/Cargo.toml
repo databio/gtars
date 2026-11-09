@@ -9,8 +9,9 @@ name = "gtars"
 crate-type = ["cdylib"]
 
 [features]
-default = ["refget", "tokenizers", "genomic_distributions", "models", "utils", "lola", "vrs", "reftx"]
+default = ["refget", "blast", "tokenizers", "genomic_distributions", "models", "utils", "lola", "vrs", "reftx"]
 refget = ["dep:gtars-refget"]
+blast = ["dep:gtars-rgblast"]
 tokenizers = ["dep:gtars-tokenizers", "dep:gtars-core"]
 genomic_distributions = ["dep:gtars-genomicdist"]
 models = ["dep:gtars-core", "dep:gtars-genomicdist", "dep:gtars-overlaprs"]
@@ -28,6 +29,7 @@ vrs = ["dep:gtars-vrs", "gtars-vrs?/transcripts", "reftx"]
 [dependencies]
 anyhow = { workspace = true }
 serde_json = { workspace = true }
+serde = { workspace = true }
 pyo3 = { version = "0.29.0", features=["anyhow", "extension-module"] }
 openssl = { version = "0.10", features = ["vendored"] }
 
@@ -41,6 +43,7 @@ gtars-igd = { path = "../gtars-igd", optional = true }
 gtars-lola = { path = "../gtars-lola", optional = true }
 gtars-overlaprs = { path = "../gtars-overlaprs", optional = true }
 gtars-vrs = { path = "../gtars-vrs", optional = true }
+gtars-rgblast = { path = "../gtars-rgblast", optional = true }
 base64-url = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]

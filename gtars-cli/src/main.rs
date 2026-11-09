@@ -28,6 +28,8 @@ mod consensus;
 #[cfg(feature = "genomicdist")]
 mod prep;
 
+#[cfg(feature = "blast")]
+mod blast;
 #[cfg(feature = "refget")]
 mod refget;
 
@@ -80,6 +82,9 @@ fn build_parser() -> Command {
 
     #[cfg(feature = "refget")]
     let cmd = cmd.subcommand(refget::cli::create_refget_cli());
+
+    #[cfg(feature = "blast")]
+    let cmd = cmd.subcommand(blast::cli::create_blast_cli());
 
     cmd
 }
@@ -182,6 +187,14 @@ fn main() -> Result<()> {
         #[cfg(feature = "refget")]
         Some((refget::cli::REFGET_CMD, matches)) => {
             refget::handlers::run_refget(matches)?;
+        }
+
+        //
+        // BLAST over a RefgetStore
+        //
+        #[cfg(feature = "blast")]
+        Some((blast::cli::BLAST_CMD, matches)) => {
+            blast::handlers::run_blast(matches)?;
         }
 
         _ => unreachable!("Subcommand not found"),

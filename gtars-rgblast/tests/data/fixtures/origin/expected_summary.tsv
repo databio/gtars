@@ -1,0 +1,5 @@
+#query	status	taxid	taxon	rank	top_genome	top_seq	pident	qcov	bits	evalue	tied_genomes	tied_taxa	searched	flags
+q_human_chrM_2001	taxon	9606	Homo sapiens	-	GRCh37-igenomes-ensembl	MT	100.000	100.0	1847	0.0	37	1	79/79	-
+q_mouse_chrM_5001	taxon	10090	Mus musculus	-	GRCm38-igenomes-ensembl	MT	100.000	100.0	1847	0.0	27	1	79/79	-
+q_ebv_100001	taxon	9606	Homo sapiens	-	GRCh37.p13-fasta-full-analysis	chrEBV	100.000	100.0	1847	0.0	13	1	79/79	-
+q_random	none	-	-	-	-	-	-	-	-	-	0	0	79/79	-

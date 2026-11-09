@@ -44,7 +44,9 @@
 use super::*;
 use super::readonly::{PendingChanges, ReadonlyRefgetStore};
 use super::alias::AliasKind;
-use super::atomic::{atomic_write, atomic_write_bytes};
+use super::atomic::atomic_write;
+#[cfg(feature = "http")]
+use super::atomic::atomic_write_bytes;
 use super::fhr_metadata;
 use super::lock::StoreLock;
 
@@ -112,6 +114,54 @@ fn validate_remote_manifest_paths(metadata: &StoreMetadata) -> Result<()> {
         ReadonlyRefgetStore::sanitize_relative_path(collection_index)?;
     }
     Ok(())
+}
+
+/// Which cached files of a remote store a new manifest invalidates.
+///
+/// Each file stays valid while the manifest field that covers it is
+/// unchanged. A field missing from the new manifest means "can't tell", so its
+/// files are refetched on every open. A `mode` or path-template change, or no
+/// earlier manifest, invalidates everything.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct StaleSet {
+    pub(crate) everything: bool,
+    /// `sequences.rgsi`
+    pub(crate) sequence_index: bool,
+    /// `collections.rgci`
+    pub(crate) collection_index: bool,
+    /// `collections/*.rgsi` (their rows carry alphabet and md5, so they follow
+    /// both index digests)
+    pub(crate) collections: bool,
+    pub(crate) aliases: bool,
+    pub(crate) fhr: bool,
+}
+
+pub(crate) fn stale_metadata(old: Option<&StoreMetadata>, new: &StoreMetadata) -> StaleSet {
+    let all = StaleSet {
+        everything: true,
+        sequence_index: true,
+        collection_index: true,
+        collections: true,
+        aliases: true,
+        fhr: true,
+    };
+    let Some(old) = old else { return all };
+    if old.mode != new.mode || old.seqdata_path_template != new.seqdata_path_template {
+        return all;
+    }
+    let changed = |o: &Option<String>, n: &Option<String>| n.is_none() || o != n;
+    let sequence_index = changed(&old.sequences_digest, &new.sequences_digest)
+        || old.sequence_index != new.sequence_index;
+    let collection_index = changed(&old.collections_digest, &new.collections_digest)
+        || old.collection_index != new.collection_index;
+    StaleSet {
+        everything: false,
+        sequence_index,
+        collection_index,
+        collections: sequence_index || collection_index,
+        aliases: changed(&old.aliases_digest, &new.aliases_digest),
+        fhr: changed(&old.fhr_digest, &new.fhr_digest),
+    }
 }
 
 // ============================================================================
@@ -856,12 +906,22 @@ impl ReadonlyRefgetStore {
     }
 
     /// Open a remote store (internal). Users should use RefgetStore::open_remote().
-    pub(crate) fn open_remote<P: AsRef<Path>, S: AsRef<str>>(
-        cache_path: P,
-        remote_url: S,
+    ///
+    /// `cache_root` is the shared download cache: this remote's metadata goes
+    /// into `remotes/<origin key>/`, its sequences into `sequences/`.
+    #[cfg(feature = "http")]
+    pub(crate) fn open_remote(
+        cache_root: &Path,
+        remote_url: &str,
+        fetch: &super::fetch::FetchConfig,
     ) -> Result<Self> {
-        let cache_path = cache_path.as_ref();
-        let remote_url = remote_url.as_ref().to_string();
+        use super::fetch::{Fetcher, Got, RemoteMissing};
+        use std::sync::Arc;
+
+        let remote_url = super::cache::normalize_remote_url(remote_url)?;
+        let cache = super::cache::SeqCache::open(cache_root)?;
+        let cache_path = cache.origin_dir(&remote_url);
+        let cache_path = cache_path.as_path();
 
         create_dir_all(cache_path)
             .with_context(|| format!("Failed to create remote cache {}", cache_path.display()))?;
@@ -900,16 +960,21 @@ impl ReadonlyRefgetStore {
             .filter(|metadata| validate_remote_manifest_paths(metadata).is_ok());
 
         // Refresh the manifest on every open. If the remote is unreachable,
-        // fall back to the cached copy so an earlier-opened store works offline.
-        let json = match Self::fetch_file(
-            &Some(cache_path.to_path_buf()),
-            &Some(remote_url.clone()),
-            "rgstore.json",
-            false,
-            true,
-        ) {
-            Ok(bytes) => {
+        // fall back to the cached copy so an earlier-opened store works
+        // offline (one quick attempt when a cached copy exists).
+        let fetcher = Arc::new(Fetcher::new(&remote_url, fetch.clone())?);
+        let manifest = if old_metadata.is_some() {
+            fetcher.get_quick("rgstore.json")
+        } else {
+            fetcher.get("rgstore.json")
+        };
+        let manifest_url = fetcher.url("rgstore.json")?;
+        let json = match manifest {
+            Ok(Got::Found(bytes)) => {
                 String::from_utf8(bytes).context("Store metadata contains invalid UTF-8")?
+            }
+            Ok(Got::Missing { status }) => {
+                return Err(RemoteMissing { url: manifest_url, status }.into());
             }
             Err(error) => match (&old_metadata, cached_json) {
                 (Some(_), Some(json)) => {
@@ -928,44 +993,38 @@ impl ReadonlyRefgetStore {
 
         validate_remote_manifest_paths(&metadata)?;
 
-        let collections_changed = old_metadata
-            .as_ref()
-            .map(|old| old.collections_digest != metadata.collections_digest)
-            .unwrap_or(true);
-        let sequences_changed = old_metadata
-            .as_ref()
-            .map(|old| old.sequences_digest != metadata.sequences_digest)
-            .unwrap_or(true);
-        let aliases_changed = old_metadata
-            .as_ref()
-            .map(|old| old.aliases_digest != metadata.aliases_digest)
-            .unwrap_or(true);
-        let fhr_changed = old_metadata
-            .as_ref()
-            .map(|old| old.fhr_digest != metadata.fhr_digest)
-            .unwrap_or(true);
-
-        if collections_changed {
-            let old_index = old_metadata
-                .as_ref()
-                .and_then(|old| old.collection_index.as_deref())
-                .unwrap_or("collections.rgci");
-            let new_index = metadata.collection_index.as_deref().unwrap_or("collections.rgci");
-            remove_cached_indexes(cache_path, [old_index, new_index])?;
-            remove_cached_artifact(&cache_path.join("collections"))?;
-        }
-        if sequences_changed {
-            let old_index = old_metadata
-                .as_ref()
-                .map(|old| old.sequence_index.as_str())
-                .unwrap_or("sequences.rgsi");
-            remove_cached_indexes(cache_path, [old_index, metadata.sequence_index.as_str()])?;
-        }
-        if aliases_changed {
-            remove_cached_artifact(&cache_path.join("aliases"))?;
-        }
-        if fhr_changed {
-            remove_cached_artifact(&cache_path.join("fhr"))?;
+        let stale = stale_metadata(old_metadata.as_ref(), &metadata);
+        if stale.everything {
+            for entry in fs::read_dir(cache_path)?.flatten() {
+                let name = entry.file_name();
+                // Keep `.origin`, and another opener's in-flight temp files.
+                let transient = name.to_str().is_some_and(super::atomic::is_transient_store_file);
+                if name != ".origin" && !transient {
+                    remove_cached_artifact(&entry.path())?;
+                }
+            }
+        } else {
+            let old = old_metadata.as_ref();
+            if stale.collection_index {
+                let old_index = old
+                    .and_then(|old| old.collection_index.as_deref())
+                    .unwrap_or("collections.rgci");
+                let new_index = metadata.collection_index.as_deref().unwrap_or("collections.rgci");
+                remove_cached_indexes(cache_path, [old_index, new_index])?;
+            }
+            if stale.collections {
+                remove_cached_artifact(&cache_path.join("collections"))?;
+            }
+            if stale.sequence_index {
+                let old_index = old.map(|old| old.sequence_index.as_str()).unwrap_or("sequences.rgsi");
+                remove_cached_indexes(cache_path, [old_index, metadata.sequence_index.as_str()])?;
+            }
+            if stale.aliases {
+                remove_cached_artifact(&cache_path.join("aliases"))?;
+            }
+            if stale.fhr {
+                remove_cached_artifact(&cache_path.join("fhr"))?;
+            }
         }
 
         atomic_write_bytes(&manifest_path, json.as_bytes())
@@ -978,23 +1037,48 @@ impl ReadonlyRefgetStore {
         store.persist_to_disk = true;
         store.ancillary_digests = metadata.ancillary_digests;
         store.attribute_index = metadata.attribute_index;
+        store.fetcher = Some(fetcher);
+        store.seq_cache = Some(cache);
 
         // Defer sequence index loading — it can be 66+ MB and is only needed
         // when accessing individual sequences, not for browsing collections.
         store.sequence_index_loaded = false;
         store.sequence_index_path = Some(metadata.sequence_index.clone());
 
+        // One parallel batch: the collection index and every advertised alias
+        // TSV that isn't cached yet.
+        let mut rels: Vec<String> = Vec::new();
         if let Some(ref collection_index) = metadata.collection_index {
-            if let Ok(collection_index_data) = Self::fetch_file(
-                &Some(cache_path.to_path_buf()),
-                &Some(remote_url.clone()),
-                collection_index,
-                true,
-                false,
-            ) {
+            rels.push(collection_index.clone());
+        }
+        let n_index = rels.len();
+        let alias_rels: Vec<(String, &str, &String)> = metadata
+            .sequence_alias_namespaces
+            .iter()
+            .map(|ns| (format!("aliases/sequences/{}.tsv", ns), "sequence", ns))
+            .chain(
+                metadata
+                    .collection_alias_namespaces
+                    .iter()
+                    .map(|ns| (format!("aliases/collections/{}.tsv", ns), "collection", ns)),
+            )
+            .collect();
+        rels.extend(alias_rels.iter().map(|(r, _, _)| r.clone()));
+        let mut datas = store.fetch_meta_many(&rels, false)?;
+
+        if n_index == 1 {
+            let collection_index = metadata.collection_index.as_deref().expect("counted above");
+            let mut data = datas[0].take();
+            if let (Some(bytes), Some(want)) = (&data, &metadata.collections_digest)
+                && format!("{:x}", Sha256::digest(bytes)) != *want
+            {
+                // Republished between the two GETs, or a bad cached copy.
+                remove_cached_artifact(&cache_path.join(collection_index))?;
+                data = store.fetch_meta_checked(collection_index, Some(want))?;
+            }
+            if let Some(collection_index_data) = data {
                 let collection_index_str = String::from_utf8(collection_index_data)
                     .context("collection index contains invalid UTF-8")?;
-
                 Self::load_collection_stubs_from_reader(
                     &mut store,
                     collection_index_str.as_bytes(),
@@ -1008,37 +1092,13 @@ impl ReadonlyRefgetStore {
             Self::load_collections_from_directory(&mut store, &local_collections_dir)?;
         }
 
-        for namespace in &metadata.sequence_alias_namespaces {
-            let relative_path = format!("aliases/sequences/{}.tsv", namespace);
-            Self::fetch_file(
-                &store.local_path,
-                &store.remote_source,
-                &relative_path,
-                true,
-                false,
-            )
-            .with_context(|| {
-                format!(
-                    "Remote {} advertised sequence alias namespace '{}' but it could not be loaded",
-                    remote_url, namespace
-                )
-            })?;
-        }
-        for namespace in &metadata.collection_alias_namespaces {
-            let relative_path = format!("aliases/collections/{}.tsv", namespace);
-            Self::fetch_file(
-                &store.local_path,
-                &store.remote_source,
-                &relative_path,
-                true,
-                false,
-            )
-            .with_context(|| {
-                format!(
-                    "Remote {} advertised collection alias namespace '{}' but it could not be loaded",
-                    remote_url, namespace
-                )
-            })?;
+        for ((_, kind, namespace), data) in alias_rels.iter().zip(&datas[n_index..]) {
+            if data.is_none() {
+                return Err(anyhow::anyhow!(
+                    "Remote {} advertised {} alias namespace '{}' but it could not be loaded",
+                    remote_url, kind, namespace
+                ));
+            }
         }
         store.aliases.load_namespaces_from_dir(
             &cache_path.join("aliases"),
@@ -1354,5 +1414,60 @@ pub(crate) fn write_alias_namespace(path: &Path, aliases: &HashMap<String, Diges
             }
             Ok(())
         })
+    }
+}
+
+#[cfg(test)]
+mod stale_tests {
+    use super::*;
+
+    fn meta(extra: serde_json::Value) -> StoreMetadata {
+        let mut base = serde_json::json!({
+            "version": 1,
+            "seqdata_path_template": "sequences/%s2/%s.seq",
+            "collections_path_template": "collections/%s.rgsi",
+            "sequence_index": "sequences.rgsi",
+            "collection_index": "collections.rgci",
+            "mode": "Encoded",
+            "created_at": "now",
+            "collections_digest": "c1",
+            "sequences_digest": "s1",
+            "aliases_digest": "a1",
+            "fhr_digest": "f1"
+        });
+        for (k, v) in extra.as_object().unwrap() {
+            base[k] = v.clone();
+        }
+        serde_json::from_value(base).unwrap()
+    }
+
+    #[test]
+    fn each_field_marks_only_its_own_files() {
+        let old = meta(serde_json::json!({}));
+        assert_eq!(stale_metadata(Some(&old), &meta(serde_json::json!({}))), StaleSet::default());
+
+        let s = stale_metadata(Some(&old), &meta(serde_json::json!({"collections_digest": "c2"})));
+        assert_eq!(s, StaleSet { collection_index: true, collections: true, ..StaleSet::default() });
+        let s = stale_metadata(Some(&old), &meta(serde_json::json!({"sequences_digest": "s2"})));
+        assert_eq!(s, StaleSet { sequence_index: true, collections: true, ..StaleSet::default() });
+        let s = stale_metadata(Some(&old), &meta(serde_json::json!({"aliases_digest": "a2"})));
+        assert_eq!(s, StaleSet { aliases: true, ..StaleSet::default() });
+        let s = stale_metadata(Some(&old), &meta(serde_json::json!({"fhr_digest": "f2"})));
+        assert_eq!(s, StaleSet { fhr: true, ..StaleSet::default() });
+    }
+
+    #[test]
+    fn missing_field_marks_its_files_every_time() {
+        let none = meta(serde_json::json!({"fhr_digest": null, "aliases_digest": null}));
+        let s = stale_metadata(Some(&none), &none);
+        assert_eq!(s, StaleSet { aliases: true, fhr: true, ..StaleSet::default() });
+    }
+
+    #[test]
+    fn mode_or_template_change_or_no_old_manifest_marks_everything() {
+        let old = meta(serde_json::json!({}));
+        assert!(stale_metadata(Some(&old), &meta(serde_json::json!({"mode": "Raw"}))).everything);
+        assert!(stale_metadata(Some(&old), &meta(serde_json::json!({"seqdata_path_template": "seq/%s.seq"}))).everything);
+        assert!(stale_metadata(None, &old).everything);
     }
 }

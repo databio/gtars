@@ -13,7 +13,8 @@ export_fasta_store(
   all,
   label,
   molecule,
-  line_width
+  line_width,
+  write_cache
 )
 }
 \arguments{

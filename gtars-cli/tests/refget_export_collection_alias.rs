@@ -19,7 +19,12 @@ impl Scratch {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        p.push(format!("gtars_exportalias_{}_{}_{}", tag, std::process::id(), nanos));
+        p.push(format!(
+            "gtars_exportalias_{}_{}_{}",
+            tag,
+            std::process::id(),
+            nanos
+        ));
         std::fs::create_dir_all(&p).unwrap();
         Scratch { path: p }
     }
@@ -101,8 +106,16 @@ fn export_resolves_collection_alias() {
     );
 
     let contents = std::fs::read_to_string(&out_fa).unwrap();
-    assert!(contents.contains("AAAACCCC"), "output should contain chr1's sequence, got: {}", contents);
-    assert!(contents.contains("GGGGTTTT"), "output should contain chr2's sequence, got: {}", contents);
+    assert!(
+        contents.contains("AAAACCCC"),
+        "output should contain chr1's sequence, got: {}",
+        contents
+    );
+    assert!(
+        contents.contains("GGGGTTTT"),
+        "output should contain chr2's sequence, got: {}",
+        contents
+    );
 }
 
 #[test]
@@ -165,7 +178,12 @@ fn export_bare_digest_still_works() {
     let digest = std::fs::read_dir(store_dir.join("collections"))
         .unwrap()
         .filter_map(|e| e.ok())
-        .filter_map(|e| e.file_name().to_str()?.strip_suffix(".rgsi").map(str::to_string))
+        .filter_map(|e| {
+            e.file_name()
+                .to_str()?
+                .strip_suffix(".rgsi")
+                .map(str::to_string)
+        })
         .next()
         .expect("expected one collection file");
 
@@ -191,8 +209,18 @@ fn export_streams_to_stdout_with_labels() {
     let scratch = Scratch::new("stdout");
     let store_dir = build_aliased_store(&scratch);
 
-    let output = run_export(&["-s", store_dir.to_str().unwrap(), "--all", "-l", "{col:ucsc}/{name}"]);
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let output = run_export(&[
+        "-s",
+        store_dir.to_str().unwrap(),
+        "--all",
+        "-l",
+        "{col:ucsc}/{name}",
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert_eq!(stdout, ">test/chr1\nAAAACCCC\n>test/chr2\nGGGGTTTT\n");
 

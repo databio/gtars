@@ -21,7 +21,7 @@
 //!    for `[start, end)` as a `String`, reading only the bytes that cover the
 //!    region. Source resolution: resident `Full` bytes -> local `.seq`
 //!    (positioned read; the whole sequence never enters RAM) -> remote
-//!    byte-range (HTTP `Range:` via `open_remote_range`). The whole sequence
+//!    byte-range (HTTP `Range:` via the store's fetcher). The whole sequence
 //!    never enters RAM and nothing is persisted, so this is the smart default
 //!    for sparse, random-access extraction regardless of where the data lives.
 //!    A remote-only `Stub` is served by fetching just the covering bytes; it
@@ -32,14 +32,16 @@
 //! 2. **Streaming** — `stream_sequence`. Returns a `Read`er over `[start, end)`
 //!    and decodes on the fly, so peak memory stays O(1) in the region length.
 //!    Source resolution: resident `Full` bytes -> local `.seq` (seek) -> remote
-//!    byte-range (HTTP `Range:` via `open_remote_range`). This is the only flow
+//!    byte-range (HTTP `Range:` via the store's fetcher). This is the only flow
 //!    that pulls a *region* straight from a remote store, fetching just the
 //!    covering bytes; nothing is persisted, so repeated remote reads re-fetch.
 //!
 //! 3. **Load & cache** — `load_sequence` / `load_all_sequences` (via
-//!    `ensure_sequence_loaded`). Downloads the *whole* `.seq` once, persists it
-//!    under the local cache (when `persist_to_disk` is set) and loads it into
-//!    RAM. Subsequent reads are served resident (flow 1's first branch) with no
+//!    `ensure_sequence_loaded`). Downloads the *whole* `.seq` once (parallel
+//!    ranged GETs for a big file, digest-checked), publishes it to the shared
+//!    cache and loads it into RAM. For many sequences at once without loading
+//!    them, use `prefetch` (stream the bytes) or `cache_sequences` (fill the
+//!    cache). Subsequent reads are served resident (flow 1's first branch) with no
 //!    further I/O. Best when the same sequence is read many times; costs a
 //!    full-sequence download + allocation up front (a whole chromosome can be
 //!    tens of MB encoded), so avoid it for one-off region pulls.
@@ -100,6 +102,13 @@ mod persistence;
 mod export;
 mod label;
 mod verify;
+pub(crate) mod cache;
+pub(crate) mod fetch;
+#[cfg(feature = "filesystem")]
+mod prefetch;
+#[cfg(all(test, feature = "http"))]
+#[path = "../../tests/support/http_fixture.rs"]
+pub(crate) mod http_fixture;
 
 // The bulk of the store tests import FASTA via the filesystem-only API.
 #[cfg(all(test, feature = "filesystem"))]
@@ -145,6 +154,34 @@ mod nofs_tests {
     }
 
     #[test]
+    fn test_sequence_relative_path() {
+        let digest = "ABCDEFghijklmnop";
+        let mut store = ReadonlyRefgetStore::new(StorageMode::Encoded);
+        // No template set: the default template applies.
+        assert_eq!(
+            store.sequence_relative_path(digest).unwrap(),
+            std::path::PathBuf::from("sequences/AB/ABCDEFghijklmnop.seq")
+        );
+        assert!(store.sequence_file_path(digest).is_none());
+
+        store.seqdata_path_template = Some("seqs/%s4/%s.seq".to_string());
+        assert_eq!(
+            store.sequence_relative_path(digest).unwrap(),
+            std::path::PathBuf::from("seqs/ABCD/ABCDEFghijklmnop.seq")
+        );
+        store.local_path = Some(std::path::PathBuf::from("/data/store"));
+        assert_eq!(
+            store.sequence_file_path(digest).unwrap(),
+            std::path::PathBuf::from("/data/store/seqs/ABCD/ABCDEFghijklmnop.seq")
+        );
+
+        // Traversal in the template is refused, by both helpers.
+        store.seqdata_path_template = Some("../%s.seq".to_string());
+        assert!(store.sequence_relative_path(digest).is_err());
+        assert!(store.sequence_file_path(digest).is_none());
+    }
+
+    #[test]
     fn test_mode_basics() {
         let mut store = RefgetStore::in_memory();
 
@@ -180,6 +217,10 @@ pub use self::fhr_metadata::{
 pub use self::verify::{
     AlphabetVerifyCounts, VerifyFailure, VerifyFailureKind, VerifyOptions, VerifyReport,
 };
+pub use self::fetch::{FetchConfig, FetchCounters, RemoteMissing};
+pub use self::cache::{cache_info, clear_cache, default_cache_root, normalize_remote_url, CacheInfo};
+#[cfg(feature = "filesystem")]
+pub use self::prefetch::{ItemSource, Prefetch, PrefetchItem, PrefetchOptions, PrefetchOrder};
 
 use serde::{Deserialize, Serialize};
 use std::io::{BufReader, Read};

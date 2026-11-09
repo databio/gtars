@@ -27,6 +27,7 @@ gtars-overlaprs = { path = "../gtars-overlaprs", optional = true, version="0.6.0
 gtars-bbcache = { path = "../gtars-bbcache", optional=true, version="0.5.4" }
 gtars-genomicdist = { path = "../gtars-genomicdist", optional=true, version="0.8.0" }
 gtars-refget = { path = "../gtars-refget", optional=true, version="0.11.1" }
+gtars-rgblast = { path = "../gtars-rgblast", optional = true, version = "0.1.0" }
 gtars-core = { path = "../gtars-core", version="0.5.5", features=["bigbed", "http"] }
 
 # Force SQLite (pulled transitively via gtars-bbcache -> diesel) to compile
@@ -45,7 +46,7 @@ name = "gtars"
 path = "src/main.rs"
 
 [features]
-default = ["scoring", "uniwig", "bbcache", "igd", "fragsplit", "overlaprs", "genomicdist", "refget"]
+default = ["scoring", "uniwig", "bbcache", "igd", "fragsplit", "overlaprs", "genomicdist", "refget", "blast"]
 scoring = ["dep:gtars-scoring"]
 uniwig = ["dep:gtars-uniwig"]
 bbcache = ["dep:gtars-bbcache", "dep:libsqlite3-sys"]
@@ -54,3 +55,7 @@ fragsplit = ["dep:gtars-fragsplit"]
 overlaprs = ["dep:gtars-overlaprs"]
 genomicdist = ["dep:gtars-genomicdist"]
 refget = ["dep:gtars-refget"]
+blast = ["dep:gtars-rgblast"]
+
+[dev-dependencies]
+gtars-rgblast = { path = "../gtars-rgblast", version = "0.1.0" }

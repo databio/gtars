@@ -39,6 +39,10 @@ jobs:
       - name: Set R library path
         run: echo "LD_LIBRARY_PATH=$(R RHOME)/lib" >> "$GITHUB_ENV"
 
+      # --all-features includes `golden`, pinned to BLAST+ 2.17.0 (docker image).
+      - name: Pull BLAST+ image
+        run: docker pull ncbi/blast:2.17.0
+
       - name: Generate code coverage
         run: >
           cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info

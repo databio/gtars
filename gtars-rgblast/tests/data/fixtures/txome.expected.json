@@ -1,0 +1,180 @@
+{
+  "collections": 42,
+  "fastas": {
+    "bins/bin01.fa": {
+      "md5": "6ea589afd1b17f5f6727bf4e181c0b22",
+      "records": 29
+    },
+    "bins/bin02.fa": {
+      "md5": "da4ed9f92cedea12799d50c656f9aaf0",
+      "records": 26
+    },
+    "bins/bin03.fa": {
+      "md5": "89e4d60963a3430c6d60087ae239d58d",
+      "records": 22
+    },
+    "bins/bin04.fa": {
+      "md5": "2cf3509a265c54cccd953ba240e062c0",
+      "records": 27
+    },
+    "bins/bin05.fa": {
+      "md5": "9e1a0bb399e404866a56f545721741cb",
+      "records": 23
+    },
+    "bins/bin06.fa": {
+      "md5": "53f804d8e7afac12da6d156ddc93ba0f",
+      "records": 11
+    },
+    "bins/bin07.fa": {
+      "md5": "39cee8f051153079a3ec0cc74b52153c",
+      "records": 10
+    },
+    "bins/bin08.fa": {
+      "md5": "f0d536a5f271c3438e9b17f1d9981527",
+      "records": 10
+    },
+    "bins/bin09.fa": {
+      "md5": "f70726354199fbecfa699cd8ce7602e5",
+      "records": 18
+    },
+    "bins/bin10.fa": {
+      "md5": "ac43efd72dfc1276671c03cd1188ee09",
+      "records": 25
+    },
+    "bins/bin11.fa": {
+      "md5": "a56858fc94d0ec38dc90b8aa5a028780",
+      "records": 21
+    },
+    "bins/bin12.fa": {
+      "md5": "9eeca7cf42bdcbb51fbbe0d57d4b97f0",
+      "records": 26
+    },
+    "bins/bin13.fa": {
+      "md5": "13aaa41ab8bac617af46dc60de2030da",
+      "records": 27
+    },
+    "bins/bin14.fa": {
+      "md5": "bc933fcb46162f987e4522a466e09aec",
+      "records": 20
+    },
+    "bins/bin15.fa": {
+      "md5": "088eec916bd11cb523d66012ce43254b",
+      "records": 21
+    },
+    "bins/bin16.fa": {
+      "md5": "82b0d06b19650b9cd1dd6ea69f4a0e2a",
+      "records": 17
+    },
+    "bins/bin17.fa": {
+      "md5": "f14dc97af33d5f174ed387727a87c74c",
+      "records": 13
+    },
+    "bins/bin18.fa": {
+      "md5": "c29f09c347ff00f146644750aa6b9307",
+      "records": 19
+    },
+    "bins/bin19.fa": {
+      "md5": "2d66d67e3ddd1c4939e69fc3cdeba4bd",
+      "records": 20
+    },
+    "bins/bin20.fa": {
+      "md5": "1327fe880e46fee15e43112ab379e77e",
+      "records": 30
+    },
+    "bins/bin21.fa": {
+      "md5": "fe0ad49a1696fec99fd16be76efb6403",
+      "records": 17
+    },
+    "bins/bin22.fa": {
+      "md5": "a266739365e9e97c6bada77fab6717a2",
+      "records": 15
+    },
+    "bins/bin23.fa": {
+      "md5": "e834c1a026235afead001cd24e3b49f9",
+      "records": 26
+    },
+    "bins/bin24.fa": {
+      "md5": "c93d78435af5324d1b71f108a15bab76",
+      "records": 16
+    },
+    "bins/bin25.fa": {
+      "md5": "689a371f6d0d2a8e5f139e290f4d2b62",
+      "records": 26
+    },
+    "bins/bin26.fa": {
+      "md5": "bc50975020388ece135d82e939e39d36",
+      "records": 13
+    },
+    "bins/bin27.fa": {
+      "md5": "9282da55cf832227328f1a19cc173318",
+      "records": 28
+    },
+    "bins/bin28.fa": {
+      "md5": "ef21df2ce4ca81137f3fdd2504c3cc56",
+      "records": 30
+    },
+    "bins/bin29.fa": {
+      "md5": "1d63775285c8c025c50098fee5c1240e",
+      "records": 11
+    },
+    "bins/bin30.fa": {
+      "md5": "4f873b19d1ef6f61fcdba5bb10bd687b",
+      "records": 15
+    },
+    "bins/bin31.fa": {
+      "md5": "045da399ac08b4e6cd92eba59013ce76",
+      "records": 22
+    },
+    "bins/bin32.fa": {
+      "md5": "dccd9a6703983b1a25ef4c8c7a3b166f",
+      "records": 26
+    },
+    "bins/bin33.fa": {
+      "md5": "4682c3cba2025512e39bbc2b60b32dec",
+      "records": 16
+    },
+    "bins/bin34.fa": {
+      "md5": "73856cbd2d133eb612381dc9f9faf69c",
+      "records": 29
+    },
+    "bins/bin35.fa": {
+      "md5": "e1f3f4c5ffd70e70046f189e5a976f8c",
+      "records": 30
+    },
+    "bins/bin36.fa": {
+      "md5": "153d53746d6ca091c1a32f7089bf5cce",
+      "records": 13
+    },
+    "bins/bin37.fa": {
+      "md5": "5ce48738c220ea25336c1993b443bf5b",
+      "records": 29
+    },
+    "bins/bin38.fa": {
+      "md5": "0cec05e5316f9054645862d84be544d8",
+      "records": 26
+    },
+    "bins/bin39.fa": {
+      "md5": "2359bcd93940c5a71788a997d23817f8",
+      "records": 25
+    },
+    "bins/bin40.fa": {
+      "md5": "daeaadad4f87b97490d6302fe82d21e9",
+      "records": 10
+    },
+    "txome_a.fa": {
+      "md5": "55fe522cc7819b51cc9b412e7d724d2b",
+      "records": 1500
+    },
+    "txome_b.fa": {
+      "md5": "e46423742c961228387ee4ba35b289bd",
+      "records": 800
+    }
+  },
+  "names": 3138,
+  "totals": {
+    "max_len": 19999,
+    "min_len": 150,
+    "num_seqs": 2826,
+    "total_length": 11763922
+  }
+}

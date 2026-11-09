@@ -6,8 +6,8 @@ use gtars_refget::digest::{
 use gtars_refget::digest::{md5, sha512t24u, AlphabetType};
 use gtars_refget::FhrMetadata;
 use gtars_refget::store::{
-    ExportOptions, ExportSelection, ExportSummary, FastaImportOptions, LabelTemplate, Molecule,
-    RefgetStore, RetrievedSequence, StorageMode,
+    ExportOptions, ExportSelection, ExportSummary, FastaImportOptions, FetchConfig, FetchCounters,
+    LabelTemplate, Molecule, PrefetchOptions, RefgetStore, RetrievedSequence, StorageMode,
 };
 
 // =========================================================================
@@ -113,18 +113,27 @@ pub fn open_local_store(root_path: &str) -> extendr_api::Result<Robj> {
     }
 }
 
-/// Open a remote RefgetStore with local caching
+/// Open a remote RefgetStore over the shared cache
 /// @export
-/// @param cache_path Local directory to cache downloaded metadata and sequences
+/// @param cache_path Cache root shared by all remote stores
 /// @param remote_url Base URL of the remote refget store
+/// @param fetch_jobs Parallel HTTP requests
 #[extendr]
-pub fn open_remote_store(cache_path: &str, remote_url: &str) -> extendr_api::Result<Robj> {
-    match RefgetStore::open_remote(cache_path, remote_url.to_string()) {
+pub fn open_remote_store(
+    cache_path: &str,
+    remote_url: &str,
+    fetch_jobs: i32,
+) -> extendr_api::Result<Robj> {
+    let fetch = FetchConfig {
+        jobs: fetch_jobs.max(1) as usize,
+        ..FetchConfig::default()
+    };
+    match RefgetStore::open_remote(cache_path, remote_url, &fetch) {
         Ok(store) => {
             let ext_ptr = ExternalPtr::new(store);
             Ok(ext_ptr.into())
         }
-        Err(e) => Err(format!("Error opening remote store: {}", e).into()),
+        Err(e) => Err(format!("Error opening remote store: {:#}", e).into()),
     }
 }
 
@@ -886,7 +895,7 @@ pub fn write_store(store_ptr: Robj) -> extendr_api::Result<()> {
     })
 }
 
-fn r_str_vec(x: &Robj) -> Option<Vec<String>> {
+pub(crate) fn r_str_vec(x: &Robj) -> Option<Vec<String>> {
     if x.is_null() {
         None
     } else {
@@ -899,9 +908,85 @@ fn summary_list(s: &ExportSummary) -> Robj {
         n_records = s.n_records as f64,
         n_bases = s.n_bases as f64,
         n_fallbacks = s.n_fallbacks as f64,
-        n_deduplicated = s.n_deduplicated as f64
+        n_deduplicated = s.n_deduplicated as f64,
+        fetch = counters_list(&s.fetch)
     )
     .into()
+}
+
+/// The counters as a named list, keyed by `FetchCounters`' field names.
+fn counters_list(c: &FetchCounters) -> Robj {
+    crate::blast::json_to_robj(&serde_json::to_value(c).unwrap_or_default())
+}
+
+/// Download sequences into the shared cache, in parallel
+/// @param store_ptr External pointer to RefgetStore
+/// @param digests Sequence digests
+/// @param progress Print a progress line to stderr every 5 s
+#[extendr]
+pub fn cache_sequences_store(store_ptr: Robj, digests: Robj, progress: bool) -> extendr_api::Result<Robj> {
+    let digests = r_str_vec(&digests).unwrap_or_default();
+    let opts = PrefetchOptions {
+        progress,
+        ..PrefetchOptions::default()
+    };
+    with_store!(store_ptr, store, {
+        store
+            .cache_sequences(&digests, opts)
+            .map(|c| counters_list(&c))
+            .map_err(|e| format!("Error caching sequences: {:#}", e).into())
+    })
+}
+
+/// Network and cache counters since the store opened
+/// @param store_ptr External pointer to RefgetStore
+#[extendr]
+pub fn fetch_stats_store(store_ptr: Robj) -> extendr_api::Result<Robj> {
+    with_store_ref!(store_ptr, store, { Ok(counters_list(&store.fetch_stats())) })
+}
+
+/// Load several collections (a remote store downloads them in parallel)
+/// @param store_ptr External pointer to RefgetStore
+/// @param digests Collection digests
+#[extendr]
+pub fn load_collections_store(store_ptr: Robj, digests: Robj) -> extendr_api::Result<()> {
+    let digests = r_str_vec(&digests).unwrap_or_default();
+    with_store!(store_ptr, store, {
+        store
+            .load_collections(&digests)
+            .map_err(|e| extendr_api::Error::Other(format!("Error loading collections: {:#}", e)))
+    })
+}
+
+/// The default shared cache root
+#[extendr]
+pub fn default_cache_dir_raw() -> String {
+    gtars_refget::store::default_cache_root().to_string_lossy().into_owned()
+}
+
+/// Summary of the cache at a root
+/// @param root Cache root
+#[extendr]
+pub fn cache_info_raw(root: &str) -> extendr_api::Result<Robj> {
+    let info = gtars_refget::store::cache_info(std::path::Path::new(root)).map_err(|e| e.to_string())?;
+    let urls: Vec<String> = info.remotes.iter().map(|(u, _)| u.clone()).collect();
+    let bytes: Vec<f64> = info.remotes.iter().map(|(_, b)| *b as f64).collect();
+    Ok(list!(
+        root = info.root.to_string_lossy().into_owned(),
+        sequence_files = info.sequence_files as f64,
+        sequence_bytes = info.sequence_bytes as f64,
+        remotes = data_frame!(url = urls, bytes = bytes)
+    )
+    .into())
+}
+
+/// Delete everything in the cache; returns the bytes freed
+/// @param root Cache root
+#[extendr]
+pub fn clear_cache_raw(root: &str) -> extendr_api::Result<f64> {
+    gtars_refget::store::clear_cache(std::path::Path::new(root))
+        .map(|b| b as f64)
+        .map_err(|e| e.to_string().into())
 }
 
 /// Export sequences to FASTA (a file, or stdout with "-")
@@ -914,6 +999,7 @@ fn summary_list(s: &ExportSummary) -> Robj {
 /// @param label Label template, e.g. "{seq}", "name", "{col}/{name}"
 /// @param molecule NULL, "dna" or "protein"
 /// @param line_width Bases per line (0 = unwrapped, negative = default 80)
+/// @param write_cache Write sequences downloaded from a remote store to the shared cache
 #[extendr]
 #[allow(clippy::too_many_arguments)]
 pub fn export_fasta_store(
@@ -926,6 +1012,7 @@ pub fn export_fasta_store(
     label: &str,
     molecule: Robj,
     line_width: i32,
+    write_cache: bool,
 ) -> extendr_api::Result<Robj> {
     let selection = ExportSelection::from_parts(
         r_str_vec(&collections),
@@ -940,6 +1027,7 @@ pub fn export_fasta_store(
         molecule: Molecule::from_opt(molecule.as_ref().and_then(|v| v.first()).map(String::as_str))
             .map_err(|e| e.to_string())?,
         line_width: if line_width < 0 { None } else { Some(line_width as usize) },
+        write_cache,
     };
     with_store!(store_ptr, store, {
         store
@@ -1623,6 +1711,14 @@ extendr_module! {
     fn on_disk_store;
     fn open_local_store;
     fn open_remote_store;
+
+    // Remote fetch and the shared cache
+    fn cache_sequences_store;
+    fn fetch_stats_store;
+    fn load_collections_store;
+    fn default_cache_dir_raw;
+    fn cache_info_raw;
+    fn clear_cache_raw;
 
     // Encoding mode
     fn enable_encoding_store;

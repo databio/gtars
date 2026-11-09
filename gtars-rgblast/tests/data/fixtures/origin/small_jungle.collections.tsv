@@ -1,0 +1,80 @@
+#collection	db_tag	display	aliases	taxid	species	assembly	n_sequences	total_length	n_fraction
+lXa-sGAmSafYXHN4iEwup0EsQh5F1krA	GRCh37-igenomes-ensembl	GRCh37-igenomes-ensembl	name:GRCh37-igenomes-ensembl,name:hg19_grch37_igenomes	9606	Homo sapiens		1	16569	0.07656419447617228
+k4mLJvbFzZiw3o6SL8hh63V2u7AjDMrE	GRCh37-primary-assembly-46-gencode	GRCh37-primary-assembly-46-gencode	name:GRCh37-primary-assembly-46-gencode,name:GRCh37-primary-assembly-47-gencode,name:hg19_primary_gencode	9606	Homo sapiens		58	5368658	0.07641342345631125
+kgTizBhIBf5BeEMTqBuyzRBi2AlwTRj6	GRCh37.p13-fasta-full-analysis	GRCh37.p13-fasta-full-analysis	name:GRCh37.p13-fasta-full-analysis,name:hg19_full_analysis	9606	Homo sapiens	GCA_000001405.14	151	17041259	0.0759861141200695
+XJWKh8nsSqBFfcU0DIHMZohYyCWF-vcA	GRCh37.p13-fasta-genomic	GRCh37.p13-fasta-genomic	name:GRCh37.p13-fasta-genomic,name:hg19_p13_genomic,refseq:GCF_000001405.25	9606	Homo sapiens	GCF_000001405.25	150	16869436	0.07516505799409647
+DvAlkUMPq7CRnTYAfXGkQmAOfFqVMZHE	GRCh37.p13-fasta-no-alt-analysis	GRCh37.p13-fasta-no-alt-analysis	name:GRCh37.p13-fasta-no-alt-analysis,name:hg19_no_alt_analysis	9606	Homo sapiens	GCA_000001405.14	59	5540481	0.07640918983835958
+6chutju9QVJW0rdA-wgubHbtoTQ42o-6	GRCh38-ena-15	GRCh38-ena-15	name:GRCh38-ena-15,name:hg38_p0_ena	9606	Homo sapiens		37	3770940	0.048773125340291316
+lWRRNMNypacEjnJCy-AYiDNUPy1brQGC	GRCh38-ena-29	GRCh38-ena-29	name:GRCh38-ena-29,name:hg38_p14_ena	9606	Homo sapiens		38	3959255	0.04877015817860492
+Cs-_YD8aP4e7Gz5GsfmxKt88hyJ00ZBL	GRCh38-full-decoy-hla-ddbj	GRCh38-full-decoy-hla-ddbj	name:GRCh38-full-decoy-hla-ddbj,name:hg38-broad,name:hg38_full_decoy_hla,name:homo-sapiens-assembly38-ddbj,name:hs38DH	9606	Homo sapiens		3233	38397916	0.05404868032140781
+vRjC5qM1Tc-fFjJo0TGRw4CVjFhmLG0f	GRCh38-igenomes-build36-3-ncbi	GRCh38-igenomes-build36-3-ncbi	name:GRCh38-igenomes-build36-3-ncbi,name:hg38_build36_3_igenomes	9606	Homo sapiens		1	16571	0.07219973643919674
+wdpZbFN0pd92H2VeKZBAp3riQN4nJXkK	GRCh38-igenomes-build37-1-ncbi	GRCh38-igenomes-build37-1-ncbi	name:GRCh38-igenomes-build37-1-ncbi,name:hg38_build37_1_igenomes	9606	Homo sapiens		1	16571	0.07570201682948453
+Dx_M8skbJqROkfXhhQRtWejcCyewRbdL	GRCh38-igenomes-build37-2-ncbi	GRCh38-igenomes-build37-2-ncbi	name:GRCh38-igenomes-build37-2-ncbi,name:hg38_build37_2_igenomes	9606	Homo sapiens		1	16569	0.07570201720142182
+FnbS0xDAGOePD7lp6Xt0vnbcASzkk3gk	GRCh38-igenomes-decoy-ncbi	GRCh38-igenomes-decoy-ncbi	name:GRCh38-igenomes-decoy-ncbi,name:hg38_decoy_igenomes	9606	Homo sapiens		2548	13618075	0.0531426717042651
+EiFob05aCWgVU_B_Ae0cypnQut3cxUP1	GRCh38-igenomes-ncbi	GRCh38-igenomes-ncbi	name:GRCh38-igenomes-ncbi,name:GRCh38.p14-fasta-no-alt-analysis,name:hg38-noALT-noHLA-noDecoy-broad,name:hg38-refgenie,name:hs38	9606	Homo sapiens	GCA_000001405.15	163	7825553	0.0532419742161551
+tkRdBlSp5hewK4OpEJC87J9pw-ac0vOa	GRCh38-p14-46-gencode	GRCh38-p14-46-gencode	name:GRCh38-p14-46-gencode,name:GRCh38-p14-47-gencode,name:hg38_p14_gencode	9606	Homo sapiens		438	45030251	0.04901425206823644
+tmnbiAyj2fke68d_TYjq2g487US8C15r	GRCh38-primary-assembly-46-gencode	GRCh38-primary-assembly-46-gencode	name:GRCh38-primary-assembly-46-gencode,name:GRCh38-primary-assembly-47-gencode,name:hg38_primary_gencode	9606	Homo sapiens		162	7653730	0.04875326332612531
+XemD97fxYMS4q-FBm_n5CHQgmzh1_67a	GRCh38.p0-fasta-genomic	GRCh38.p0-fasta-genomic	name:GRCh38.p0-fasta-genomic,name:hg38_p0_genomic,refseq:GCF_000001405.26	9606	Homo sapiens	GCF_000001405.26	322	30337104	0.04984604605702488
+P33s5fSkktH60MccIpfLNHAA79fJyxlt	GRCh38.p1-fasta-genomic	GRCh38.p1-fasta-genomic	name:GRCh38.p1-fasta-genomic,name:hg38_p1_genomic,refseq:GCF_000001405.27	9606	Homo sapiens	GCF_000001405.27	331	31505976	0.04980010853642704
+CbeNHqwFVEdeNKe6Obm77fX6U9-fzVUL	GRCh38.p12-fasta-genomic	GRCh38.p12-fasta-genomic	name:GRCh38.p12-fasta-genomic,name:hg38_p12_genomic,refseq:GCF_000001405.38	9606	Homo sapiens	GCF_000001405.38	396	40804225	0.0495403012099393
+d2GjQek3_I1_zkq4gLHTUI50BptQsoqZ	GRCh38.p13-fasta-genomic	GRCh38.p13-fasta-genomic	name:GRCh38.p13-fasta-genomic,name:hg38_p13_genomic,refseq:GCF_000001405.39	9606	Homo sapiens	GCF_000001405.39	419	42818143	0.04931668450646656
+EGlYk1stOsAjmTALWkqKDqtZOSkyA_YH	GRCh38.p14-fasta-full-analysis	GRCh38.p14-fasta-full-analysis	name:GRCh38.p14-fasta-full-analysis,name:hg38_full_analysis	9606	Homo sapiens	GCA_000001405.15	323	30508927	0.054181534359094424
+MkXYxV2-83BEcPmzskEVGJsJ7Qkb--gX	GRCh38.p14-fasta-full-analysis-plus-hs38d1	GRCh38.p14-fasta-full-analysis-plus-hs38d1	name:GRCh38.p14-fasta-full-analysis-plus-hs38d1,name:hg38_full_analysis_plus_decoy	9606	Homo sapiens	GCA_000001405.15	2708	36301449	0.05408392214049764
+u1HyLgIlq8M_XvEwy0oGqAvKGHJMGtxH	GRCh38.p14-fasta-genomic	GRCh38.p14-fasta-genomic	name:GRCh38.p14-fasta-genomic,name:hg38_p14_genomic,refseq:GCF_000001405.40	9606	Homo sapiens	GCF_000001405.40	434	44548825	0.04899644613899954
+7hP7E8o-q6H8qcqMHBEIYdbAK49PoEUZ	GRCh38.p14-fasta-no-alt-plus-hs38d1	GRCh38.p14-fasta-no-alt-plus-hs38d1	name:GRCh38.p14-fasta-no-alt-plus-hs38d1	9606	Homo sapiens	GCA_000001405.15	2548	13618075	0.0531426717042651
+t-g5olKSC0DsZHICbi3cYR3jF-7i4xaK	GRCh38.p2-fasta-genomic	GRCh38.p2-fasta-genomic	name:GRCh38.p2-fasta-genomic,name:hg38_p2_genomic,refseq:GCF_000001405.28	9606	Homo sapiens	GCF_000001405.28	335	31840902	0.04967530189051343
+9VlpW2Uty7rQNSBbYy-nYCNOHqyYoBTt	GRCh38.p6-fasta-genomic	GRCh38.p6-fasta-genomic	name:GRCh38.p6-fasta-genomic,name:hg38_p6_genomic,refseq:GCF_000001405.32	9606	Homo sapiens	GCF_000001405.32	355	34732922	0.04993919188097491
+e38absAQBVXM4If9Mp9UhrPrqNGOklZz	GRCh38.p7-fasta-genomic	GRCh38.p7-fasta-genomic	name:GRCh38.p7-fasta-genomic,name:hg38_p7_genomic,refseq:GCF_000001405.33	9606	Homo sapiens	GCF_000001405.33	355	34732922	0.04991988808724747
+41Q6kDYWPOs4h-tpnmW0xyNosJFgX8tH	GRCh38.p8-fasta-genomic	GRCh38.p8-fasta-genomic	name:GRCh38.p8-fasta-genomic,name:hg38_p8_genomic,refseq:GCF_000001405.34	9606	Homo sapiens	GCF_000001405.34	368	36729515	0.049861472043980094
+TQORtixTJqM3Su9dmtACKc7hNHAceE4I	GRCm38-igenomes-ensembl	GRCm38-igenomes-ensembl	name:GRCm38-igenomes-ensembl,name:mm38-igenomes-ncbi,name:mm38_igenomes	10090	Mus musculus		1	16299	0.02861818417964415
+jpOqOhddb15iOm2SIdJSjsf-U5Uu7Def	GRCm38.p6-fasta-genomic	GRCm38.p6-fasta-genomic	name:GRCm38.p6-fasta-genomic,name:mm38_p6_genomic,refseq:GCF_000001635.26	10090	Mus musculus	GCF_000001635.26	103	11430377	0.028178967084452018
+JL56x8L1q1Fs_-jHvZxBG01Vitac-CmO	GRCm38.p6-fasta-genomic-GCA	GRCm38.p6-fasta-genomic-GCA	name:GRCm38.p6-fasta-genomic-GCA,name:mm38_p6_genomic_gca,insdc:GCA_000001635.8	10090	Mus musculus	GCA_000001635.8	103	11430377	0.028178967084452018
+fXjBOJjw-DYsSnnfDBl5vtZu1N7lbnUl	GRCm39	GRCm39	name:GRCm39,name:GRCm39-fasta-genomic,name:mm39,refseq:GCF_000001635.27	10090	Mus musculus	GCF_000001635.27	34	2381145	0.026977517164343576
+qtPKGcXii2OuiyIoDA9K0jSKR62qCyzd	GRCm39-all-M1-gencode	GRCm39-all-M1-gencode	name:GRCm39-all-M1-gencode,name:mm9_gencode	10090	Mus musculus		79	5809292	0.035561551913585024
+WsOG-InFnIta0rqSy1KUBjrFrukbnE5j	GRCm39-all-M36-gencode	GRCm39-all-M36-gencode	name:GRCm39-all-M36-gencode,name:GRCm39-primary-M36-gencode,name:mm39_gencode	10090	Mus musculus		34	2381145	0.026977517164343576
+bLbjXXCz_5qAonaDXcVuadx65QZkC7mb	GRCm39-ena-02	GRCm39-ena-02	name:GRCm39-ena-02,name:GRCm39-ena-03,name:mm38_p1_ena	10090	Mus musculus		19	2668283	0.028567882599828055
+ABEupc6KHmxtHGarfWFXTmu9mUcNnfoM	GRCm39-ena-09	GRCm39-ena-09	name:GRCm39-ena-09,name:mm39_ena	10090	Mus musculus		13	1641888	0.026963696114345334
+-e70JAQq4NJDg8-1Ab2XhHu6yYjeW-zu	GRCm39-fasta-full-analysis	GRCm39-fasta-full-analysis	name:GRCm39-fasta-full-analysis,name:GRCm39-fasta-full-analysis-ucsc-ids,name:mm39_full_analysis	10090	Mus musculus	GCA_000001635.9	34	2381145	0.026977517164343576
+PM8ODmBlTISp4Onv0aSBFaAfi3QVCGzx	GRCm39-fasta-genomic-GCA	GRCm39-fasta-genomic-GCA	name:GRCm39-fasta-genomic-GCA,name:mm39_genomic_gca,insdc:GCA_000001635.9	10090	Mus musculus	GCA_000001635.9	34	2381145	0.026977517164343576
+2Ls1P5eUdKbvtOhjJx3s2R5r0_I-IB5Z	GRCm39-primary-113-ensembl	GRCm39-primary-113-ensembl	name:GRCm39-primary-113-ensembl,name:GRCm39-primary-sm-113-ensembl,name:mm39_primary_ensembl	10090	Mus musculus		34	2381145	0.026977517164343576
+D-6wf8dsOttiVNnLSImSglRJvw_8Zr_j	GRCm39-primary-rm-113-ensembl	GRCm39-primary-rm-113-ensembl	name:GRCm39-primary-rm-113-ensembl,name:mm39_primary_rm_ensembl	10090	Mus musculus		34	2381145	0.4661083719672095
+XVhfRj6PCzLoGiEeXjpFv7vriVN02aPc	GRCm39-toplevel-113-ensembl	GRCm39-toplevel-113-ensembl	name:GRCm39-toplevel-113-ensembl,name:GRCm39-toplevel-sm-113-ensembl,name:mm39_toplevel_ensembl	10090	Mus musculus		34	2381145	0.026977517164343576
+3rgz8-_XPSiTUYPamUTRF3DArhAhTint	GRCm39-toplevel-65-ensembl	GRCm39-toplevel-65-ensembl	name:GRCm39-toplevel-65-ensembl,name:mm9_toplevel_ensembl	10090	Mus musculus		79	5809292	0.035561551913585024
+qcT5VVX5G3mN2O9OqeFR-F0POVuY2oGw	GRCm39-toplevel-rm-113-ensembl	GRCm39-toplevel-rm-113-ensembl	name:GRCm39-toplevel-rm-113-ensembl,name:mm39_toplevel_rm_ensembl	10090	Mus musculus		34	2381145	0.4661083719672095
+JPyo8AqZzCyVaUx1lAkk6LbpyQPX4VUB	GRCm39-toplevel-rm-65-ensembl	GRCm39-toplevel-rm-65-ensembl	name:GRCm39-toplevel-rm-65-ensembl,name:mm9_toplevel_rm_ensembl	10090	Mus musculus		79	5809292	0.4762353460316193
+6-UTIAyR94-nanfrhd_sAF6oHLyMd0zH	NCBIM37-igenomes-ensembl	NCBIM37-igenomes-ensembl	name:NCBIM37-igenomes-ensembl,name:mm37-build37.1-igenomes-ncbi,name:mm37-build37.2-igenomes-ncbi,name:mm37_igenomes,genome_assembly:mm37	10090	Mus musculus		1	16299	0.036304689396546845
+eN7J_gZz_meakMCeXXBEvY_njignMPxl	b37-broad	b37-broad	name:b37-broad,name:hg19_b37	9606	Homo sapiens		59	5540481	0.07640918983835958
+ieWVCws5MC2QFRKgH9QcN3u5_Y_3hPG6	hg18-igenomes-ucsc	hg18-igenomes-ucsc	name:hg18-igenomes-ucsc,name:hg18_igenomes	9606	Homo sapiens		1	16571	0.07219973643919674
+YfZ0rklv8KY9DCtqG0iIX16zsgbuBgmM	hg18-refgenie	hg18-refgenie	name:hg18-refgenie	9606	Homo sapiens		8	819370	0.07280536333864035
+H9er8ocYfIN2TOfyf6zMyeXXm7trXGP7	hg18-ucsc	hg18-ucsc	name:hg18-ucsc,name:hg18_ucsc	9606	Homo sapiens		8	819370	0.07280536462577529
+GOIHeGSorDrbznRxihs5rIb6vTiTKaw7	hg19-igenomes-ucsc	hg19-igenomes-ucsc	name:hg19-igenomes-ucsc,name:hg19_igenomes	9606	Homo sapiens		1	16571	0.07570201779857257
+ThZcNYiLuWWL86NdJ8dvvJG15K9mW3Fo	hg19-initial-ucsc	hg19-initial-ucsc	name:hg19-initial-ucsc,name:hg19-refgenie	9606	Homo sapiens		58	5368660	0.07645472508932522
+H3RA3Jez6oqMOW87LGuwtSgKQqTgWVxx	hg19-masked-ucsc	hg19-masked-ucsc	name:hg19-masked-ucsc,name:hg19_masked	9606	Homo sapiens		58	5368660	0.5440504524220084
+-qU7PUmse_-pilikFDTJKyrt2_QJvUFy	hg19-p13-full-analysis-ucsc	hg19-p13-full-analysis-ucsc	name:hg19-p13-full-analysis-ucsc,name:hg19_p13_full_analysis	9606	Homo sapiens		151	17041259	0.0759861141200695
+svwHqvgassl0loigdqVIQJdjo7NWDIx3	hg19-p13-no-alt-analysis-ucsc	hg19-p13-no-alt-analysis-ucsc	name:hg19-p13-no-alt-analysis-ucsc,name:hg19_p13_no_alt_analysis	9606	Homo sapiens		59	5540481	0.07640918983835958
+q5Gn6dl5HbkZe6sRs9CZVGwGd1-XwyAq	hg19-p13-plusMT-masked-ucsc	hg19-p13-plusMT-masked-ucsc	name:hg19-p13-plusMT-masked-ucsc,name:hg19_p13_masked	9606	Homo sapiens		151	16886007	0.5446266571156041
+6pxZqxG0TYtyVb8yp14ONpaxZ8msQqKr	hg19-p13-plusMT-ucsc	hg19-p13-plusMT-ucsc	name:hg19-p13-plusMT-ucsc,name:hg19_p13	9606	Homo sapiens		151	16886007	0.07516467387746292
+5SdkZCnuZL2YIptqjSBZfupo_O7HpD_B	hg19_1kg	hg19_1kg	name:hg19_1kg,name:hs37-1kg	9606	Homo sapiens		58	5368658	0.07641342248913238
+Q3xii3AkJDCTXSO6Vg13kjbOutQu0KP9	hg19_hs37d5	hg19_hs37d5	name:hg19_hs37d5,name:hs37d5,name:hs37d5.fa	9606	Homo sapiens		59	5540481	0.0755753964311269
+0OgP0NkIM22lVYT5AMmkbb9knKDhk4I6	hg38-alt-113-ensembl	hg38-alt-113-ensembl	name:hg38-alt-113-ensembl,name:hg38-alt-sm-113-ensembl,name:hg38_alt_ensembl	9606	Homo sapiens		276	37376521	0.05323142618602582
+h_kOcvPobU9it_QR1LjPqeNpM56xjEJQ	hg38-alt-rm-113-ensembl	hg38-alt-rm-113-ensembl	name:hg38-alt-rm-113-ensembl,name:hg38_alt_rm_ensembl	9606	Homo sapiens		276	37376521	0.5570754375418273
+NTeQ1GQMt2ocCFkS8Z3_qkvetZjabWSt	hg38-ddbj	hg38-ddbj	name:hg38-ddbj,name:hg38-initial-ucsc,name:hg38_initial	9606	Homo sapiens		322	30337104	0.049846076905006885
+jFm0Uca8a7vK2cbuIQgBopjBilgCFheD	hg38-igenomes-ucsc	hg38-igenomes-ucsc	name:hg38-igenomes-ucsc,name:hg38-p14-analysisSet-ucsc,name:hg38_analysis_set	9606	Homo sapiens		163	7825553	0.053242004539493425
+xEg2q8K9gV4027DMTCiaUGLCcrqySglR	hg38-p14-masked-ucsc	hg38-p14-masked-ucsc	name:hg38-p14-masked-ucsc,name:hg38_p14_masked	9606	Homo sapiens		322	30337104	0.5448567842785086
+a_WL8OC7sFJfjux5m11M2bKl0dYepA1x	hg38-p14-ucsc	hg38-p14-ucsc	name:hg38-p14-ucsc,name:hg38_p14	9606	Homo sapiens		440	45328228	0.048984902473497835
+oLfPx0NOBKKXMIngGeQ4YewtU4Ge_wKz	hg38-primary-113-ensembl	hg38-primary-113-ensembl	name:hg38-primary-113-ensembl,name:hg38-primary-sm-113-ensembl,name:hg38_primary_ensembl	9606	Homo sapiens		162	7653730	0.04875326332612531
+Ba88PY52_qeifhJrgUXyin6UITdXNsg3	hg38-primary-refgenie	hg38-primary-refgenie	name:hg38-primary-refgenie	9606	Homo sapiens		1	16569	0.04877485454432761
+RGSkyOkQ4qnSLhjrR_e3AI51Ac-RohAL	hg38-primary-rm-113-ensembl	hg38-primary-rm-113-ensembl	name:hg38-primary-rm-113-ensembl,name:hg38_primary_rm_ensembl	9606	Homo sapiens		162	7653730	0.5602519989480006
+5ryrHdbJHIgyZuE29h5uzITRL4kinZWG	hg38-toplevel-113-ensembl	hg38-toplevel-113-ensembl	name:hg38-toplevel-113-ensembl,name:hg38-toplevel-sm-113-ensembl,name:hg38_toplevel_ensembl	9606	Homo sapiens		438	45030251	0.04901425206823644
+F9zeFn6M4EN4KGAJush7rZEU3GROoeNP	hg38-toplevel-rm-113-ensembl	hg38-toplevel-rm-113-ensembl	name:hg38-toplevel-rm-113-ensembl,name:hg38_toplevel_rm_ensembl	9606	Homo sapiens		438	45030251	0.5600668679486215
+hW3Ba5zoufl3-MGXQESlWXjsW56R5vPG	mm10-igenomes-ucsc	mm10-igenomes-ucsc	name:mm10-igenomes-ucsc,name:mm10_igenomes	10090	Mus musculus		1	16299	0.02861818417964415
+wsDErYxgCXiPnb2FWZ4sXtx3B0YyruRu	mm10-refgenie-ncbi	mm10-refgenie-ncbi	name:mm10-refgenie-ncbi	10090	Mus musculus		37	2710178	0.02859463221358851
+dMjpOU7EvpeZVb0gpPoZ7prNaxOu88Ta	mm10-refgenie-ucsc	mm10-refgenie-ucsc	name:mm10-refgenie-ucsc	10090	Mus musculus		1	16299	0.02861818417964415
+FTBYBUoMhkOJ_-8lWpERVTxe62kstAol	mm10-ucsc-initial-hard-masked	mm10-ucsc-initial-hard-masked	name:mm10-ucsc-initial-hard-masked,name:mm10_ucsc_masked	10090	Mus musculus		37	2710178	0.46747122225007115
+99TjKCwZJJLjpBqkLpTgC2E_Y3OgKtMz	mm10-ucsc-initial-soft-masked	mm10-ucsc-initial-soft-masked	name:mm10-ucsc-initial-soft-masked,name:mm10_ucsc	10090	Mus musculus		37	2710178	0.02859463221358851
+9k1WrFA4Ys2fPifOOVswhOEdurvsaLfI	mm10-ucsc-p6-hard-masked	mm10-ucsc-p6-hard-masked	name:mm10-ucsc-p6-hard-masked,name:mm10_p6_masked	10090	Mus musculus		103	11430377	0.46711859279972473
+M7ZWnvUTT06JREJnMb_7UGwgGaG0-13s	mm10-ucsc-p6-soft-masked	mm10-ucsc-p6-soft-masked	name:mm10-ucsc-p6-soft-masked,name:mm10_p6	10090	Mus musculus		103	11430377	0.02817898907826535
+3MS1-4k87pZ0-C80QDoUvhFmC0usPH28	mm39-ucsc-initial-hard-masked	mm39-ucsc-initial-hard-masked	name:mm39-ucsc-initial-hard-masked,name:mm39_ucsc_masked	10090	Mus musculus		34	2381145	0.46484285932591646
+KPagVaXI4XwQ1D0L0EW4eEuVl-otaAtX	mm39-ucsc-initial-soft-masked	mm39-ucsc-initial-soft-masked	name:mm39-ucsc-initial-soft-masked,name:mm39_ucsc	10090	Mus musculus		34	2381145	0.026977517164343576
+4mvptys3ckGgiUCcly4HOHB40IhpwwVT	mm9-igenomes-ucsc	mm9-igenomes-ucsc	name:mm9-igenomes-ucsc,name:mm9_igenomes	10090	Mus musculus		1	16299	0.036304689396546845
+vygX07e7feibvucSnWj6hRScGMfc7B6P	mm9-ucsc-initial	mm9-ucsc-initial	name:mm9-ucsc-initial,name:mm9_ucsc	10090	Mus musculus		4	222786	0.03867519408211333

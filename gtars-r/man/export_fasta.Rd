@@ -13,7 +13,8 @@ export_fasta(
   all = FALSE,
   label = "{seq}",
   molecule = NULL,
-  line_width = 80L
+  line_width = 80L,
+  write_cache = FALSE
 )
 }
 \arguments{
@@ -34,14 +35,19 @@ export_fasta(
 \item{molecule}{NULL, "dna" or "protein"}
 
 \item{line_width}{Bases per line (default 80; 0 = one line per sequence)}
+
+\item{write_cache}{Write sequences downloaded from a remote store to the
+shared cache, so a rerun downloads only what is missing}
 }
 \value{
-A named list of counts: n_records, n_bases, n_fallbacks, n_deduplicated
+A named list of counts: n_records, n_bases, n_fallbacks,
+n_deduplicated, and \code{fetch}, the network and cache counters
 }
 \description{
 Choose records with exactly one of \code{collections}, \code{seq_digests}
 or \code{all}; choose how they are labeled with \code{label}. Exports
-stream one sequence at a time and leave the store's loaded state unchanged.
+read sequences ahead of the writer in parallel, within a fixed memory
+budget, and leave the store's loaded state unchanged.
 }
 \details{
 Label fields: \code{{seq}} sequence digest (\code{SQ.}...), the default;

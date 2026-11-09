@@ -2,15 +2,17 @@
 % Please edit documentation in R/extendr-wrappers.R
 \name{open_remote_store}
 \alias{open_remote_store}
-\title{Open a remote RefgetStore with local caching}
+\title{Open a remote RefgetStore over the shared cache}
 \usage{
-open_remote_store(cache_path, remote_url)
+open_remote_store(cache_path, remote_url, fetch_jobs)
 }
 \arguments{
-\item{cache_path}{Local directory to cache downloaded metadata and sequences}
+\item{cache_path}{Cache root shared by all remote stores}
 
 \item{remote_url}{Base URL of the remote refget store}
+
+\item{fetch_jobs}{Parallel HTTP requests}
 }
 \description{
-Open a remote RefgetStore with local caching
+Open a remote RefgetStore over the shared cache
 }

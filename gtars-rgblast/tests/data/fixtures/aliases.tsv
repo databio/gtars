@@ -1,0 +1,7 @@
+#kind	namespace	alias	collection	name
+sequence	insdc	CM000001.1	asmA	chr1
+sequence	refseq	NC_TEST.1	asmA	chr1
+sequence	insdc	123456	asmA	chrM
+sequence	insdc	0099	asmB	chrB1
+collection	name	asmC-alt	asmC	
+collection	refseq	GCF_TEST.1	asmC	

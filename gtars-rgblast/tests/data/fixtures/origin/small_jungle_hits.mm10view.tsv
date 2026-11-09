@@ -1,0 +1,13 @@
+# Query: q_human_chrM_2001
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score, query length, score, subject ids, subject titles, subject tax ids
+# 1 hits found
+q_human_chrM_2001	mm10-ucsc-initial-soft-masked:chrM	75.766	1044	179	66	1	1000	1429	2442	1.67e-129	459	1000	248	gnl|mm10-ucsc-initial-soft-masked|chrM	Mus musculus mm10-ucsc-initial-soft-masked	10090
+# Query: q_mouse_chrM_5001
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score, query length, score, subject ids, subject titles, subject tax ids
+# 1 hits found
+q_mouse_chrM_5001	mm10-ucsc-initial-soft-masked:chrM	100.000	1000	0	0	1	1000	5001	6000	0.0	1847	1000	1000	gnl|mm10-ucsc-initial-soft-masked|chrM	Mus musculus mm10-ucsc-initial-soft-masked	10090
+# Query: q_ebv_100001
+# 0 hits found
+# Query: q_random
+# 0 hits found
+# BLAST processed 4 queries

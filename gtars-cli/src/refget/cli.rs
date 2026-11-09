@@ -1,4 +1,4 @@
-use clap::{Arg, ArgAction, Command};
+use clap::{Arg, ArgAction, ArgGroup, Command};
 
 pub const REFGET_CMD: &str = "refget";
 pub const REFGET_BUILD: &str = "build";
@@ -103,14 +103,46 @@ pub fn create_refget_cli() -> Command {
                      Examples:\n  \
                      gtars refget export -s store -c ucsc:hg38 -l name > hg38.fa\n  \
                      gtars refget export -s store --all | makeblastdb -in - -dbtype nucl -out store\n  \
-                     gtars refget export -s store --all -l '{col:ucsc}/{name}'",
+                     gtars refget export -s store --all -l '{col:ucsc}/{name}'\n  \
+                     gtars refget export --remote https://refgenie.s3.us-east-1.amazonaws.com/refget-store/jungle/ -c name:hg38-refgenie -l name --resume > hg38.fa\n\n\
+                     Remote stores download sequences in parallel into a shared cache \
+                     (REFGET_CACHE_DIR, else ~/.cache/refget).",
                 )
                 .arg(
                     Arg::new("store")
                         .long("store")
                         .short('s')
-                        .required(true)
                         .help("Path to an existing RefgetStore directory"),
+                )
+                .arg(
+                    Arg::new("remote")
+                        .long("remote")
+                        .value_name("URL")
+                        .help("URL of a remote RefgetStore to export from, instead of --store"),
+                )
+                .group(ArgGroup::new("source").args(["store", "remote"]).required(true))
+                .arg(
+                    Arg::new("cache_dir")
+                        .long("cache-dir")
+                        .value_name("DIR")
+                        .conflicts_with("store")
+                        .help("Cache root for remote stores (default: REFGET_CACHE_DIR, else ~/.cache/refget). Giving it also writes downloaded sequences there"),
+                )
+                .arg(
+                    Arg::new("resume")
+                        .long("resume")
+                        .action(ArgAction::SetTrue)
+                        .conflicts_with("store")
+                        .help("Write downloaded sequences to the cache, so rerunning the same command downloads only the sequences still missing"),
+                )
+                .arg(
+                    Arg::new("fetch_jobs")
+                        .long("fetch-jobs")
+                        .value_name("N")
+                        .value_parser(clap::value_parser!(usize))
+                        .default_value("32")
+                        .conflicts_with("store")
+                        .help("Parallel HTTP requests"),
                 )
                 .arg(
                     Arg::new("output")

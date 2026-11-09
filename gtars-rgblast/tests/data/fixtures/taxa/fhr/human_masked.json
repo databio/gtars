@@ -1,0 +1,5 @@
+{
+  "genome": "Homo sapiens",
+  "taxon": {"name": " Homo sapiens ", "uri": "taxonomy:9606"},
+  "masking": "hard-masked"
+}

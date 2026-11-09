@@ -36,7 +36,12 @@ impl Scratch {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        p.push(format!("gtars_memtest_{}_{}_{}", tag, std::process::id(), nanos));
+        p.push(format!(
+            "gtars_memtest_{}_{}_{}",
+            tag,
+            std::process::id(),
+            nanos
+        ));
         std::fs::create_dir_all(&p).unwrap();
         Scratch { path: p }
     }
@@ -116,7 +121,11 @@ fn build_and_measure_peak_rss(fastas: &[PathBuf], out_dir: &Path, jobs: usize) -
                 if let Some(kb) = read_vmhwm_kb(pid) {
                     peak_kb = peak_kb.max(kb);
                 }
-                assert!(status.success(), "gtars refget build failed (jobs={})", jobs);
+                assert!(
+                    status.success(),
+                    "gtars refget build failed (jobs={})",
+                    jobs
+                );
                 break;
             }
             None => std::thread::sleep(std::time::Duration::from_millis(2)),
@@ -132,11 +141,7 @@ fn read_vmhwm_kb(pid: u32) -> Option<u64> {
     for line in txt.lines() {
         if let Some(rest) = line.strip_prefix("VmHWM:") {
             // Format: "VmHWM:\t   12345 kB"
-            let kb: u64 = rest
-                .split_whitespace()
-                .next()?
-                .parse()
-                .ok()?;
+            let kb: u64 = rest.split_whitespace().next()?.parse().ok()?;
             return Some(kb);
         }
     }
@@ -262,5 +267,8 @@ fn refget_build_memory_is_bounded_and_flat() {
             }
         }
     }
-    assert!(found_seq, "expected .seq files persisted to disk during build");
+    assert!(
+        found_seq,
+        "expected .seq files persisted to disk during build"
+    );
 }

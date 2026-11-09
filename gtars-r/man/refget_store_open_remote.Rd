@@ -4,22 +4,30 @@
 \alias{refget_store_open_remote}
 \title{Open a remote RefgetStore}
 \usage{
-refget_store_open_remote(cache_path, remote_url)
+refget_store_open_remote(cache_path, remote_url, fetch_jobs = 32L)
 }
 \arguments{
-\item{cache_path}{Local directory for caching downloaded data}
+\item{cache_path}{Cache root shared by all remote stores}
 
 \item{remote_url}{URL of the remote RefgetStore}
+
+\item{fetch_jobs}{Parallel HTTP requests}
 }
 \value{
 A RefgetStore object
 }
 \description{
-Open a remote RefgetStore with local caching.
+Open a remote RefgetStore. Metadata downloads in parallel at
+open; sequences download on demand over parallel requests, each checked
+against its digest.
+\code{cache_path} is the shared cache root (see
+\code{refget_default_cache_dir()}): metadata goes to \code{remotes/<key>/}
+and downloaded sequences to \code{sequences/}, shared by every remote store
+opened with the same root.
 }
 \examples{
 \dontrun{
-store <- refget_store_open_remote("/local/cache", "https://example.com/store")
+store <- refget_store_open_remote(refget_default_cache_dir(), "https://example.com/store")
 }
 
 }
