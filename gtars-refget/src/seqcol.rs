@@ -173,7 +173,7 @@ impl ReadonlyRefgetStore {
         Ok(compare_arrays(
             arrays_a,
             arrays_b,
-            coll_a.metadata.digest.clone(),
+            Some(coll_a.metadata.digest.clone()),
             None,
         ))
     }
@@ -509,7 +509,7 @@ mod tests {
 
         // Self-compare: identical digests, all elements same order
         let self_result = store.compare(&meta_a.digest, &meta_a.digest).unwrap();
-        assert_eq!(Some(self_result.digests.a.as_str()), self_result.digests.b.as_deref());
+        assert_eq!(self_result.digests.a, self_result.digests.b);
         assert_eq!(self_result.attributes.a_and_b.len(), 6); // 3 core + 3 ancillary
         for attr in &self_result.attributes.a_and_b {
             assert_eq!(self_result.array_elements.a_and_b_same_order[attr], Some(true));
@@ -517,7 +517,7 @@ mod tests {
 
         // Cross-compare: different digests, all 6 attributes shared
         let cross_result = store.compare(&meta_a.digest, &meta_b.digest).unwrap();
-        assert_ne!(Some(cross_result.digests.a.as_str()), cross_result.digests.b.as_deref());
+        assert_ne!(cross_result.digests.a, cross_result.digests.b);
         assert_eq!(cross_result.attributes.a_and_b.len(), 6);
         assert!(cross_result.attributes.a_only.is_empty());
         assert!(cross_result.attributes.b_only.is_empty());
@@ -843,7 +843,7 @@ mod tests {
         let result = store.compare_with_level2(&meta.digest, &level2).unwrap();
 
         // digests.a is the stored digest, digests.b is None (no server-side digest for external body)
-        assert_eq!(result.digests.a, meta.digest);
+        assert_eq!(result.digests.a.as_deref(), Some(meta.digest.as_str()));
         assert!(result.digests.b.is_none(), "digests.b should be None for external level-2 comparison");
 
         // All three core attributes should be shared (a_and_b)
@@ -1111,10 +1111,10 @@ mod tests {
         assert_eq!(lvl2.names.len(), 3);
 
         let cmp = service.compare(&meta.digest, &meta.digest).unwrap();
-        assert_eq!(cmp.digests.a, meta.digest);
+        assert_eq!(cmp.digests.a.as_deref(), Some(meta.digest.as_str()));
 
         let cmp2 = service.compare_with_level2(&meta.digest, &lvl2).unwrap();
-        assert_eq!(cmp2.digests.a, meta.digest);
+        assert_eq!(cmp2.digests.a.as_deref(), Some(meta.digest.as_str()));
 
         let found = service
             .find_collections_by_attribute("names", &meta.names_digest)

@@ -5,9 +5,9 @@
 use std::io::Read;
 use std::path::PathBuf;
 
-use pyo3::exceptions::{PyIndexError, PyTypeError};
+use pyo3::exceptions::{PyIndexError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{IntoPyDict, PyBytes, PyString, PyType};
+use pyo3::types::{IntoPyDict, PyBytes, PyDict, PyString, PyType};
 
 use gtars_refget::collection::SequenceCollectionExt;
 use gtars_refget::digest::{
@@ -74,6 +74,33 @@ pub fn md5_digest(readable: &Bound<'_, PyAny>) -> PyResult<String> {
     } else {
         Err(PyTypeError::new_err("Expected str or bytes"))
     }
+}
+
+/// Compare two level-2 sequence collections given as dicts.
+///
+/// No store or digest is needed. Returns the seqcol spec comparison dict
+/// (digests, attributes, array_elements); `digests.a`/`digests.b` echo
+/// `digest_a`/`digest_b` (None when not given).
+#[pyfunction]
+#[pyo3(signature = (a, b, digest_a=None, digest_b=None))]
+pub fn compare_seqcols(
+    py: Python<'_>,
+    a: &Bound<'_, PyDict>,
+    b: &Bound<'_, PyDict>,
+    digest_a: Option<String>,
+    digest_b: Option<String>,
+) -> PyResult<Py<PyAny>> {
+    let json = py.import("json")?;
+    let to_value = |d: &Bound<'_, PyDict>| -> PyResult<serde_json::Value> {
+        let text: String = json.call_method1("dumps", (d,))?.extract()?;
+        serde_json::from_str(&text).map_err(|e| PyValueError::new_err(e.to_string()))
+    };
+    let comparison =
+        gtars_refget::compare_level2_json(&to_value(a)?, &to_value(b)?, digest_a, digest_b)
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+    let text =
+        serde_json::to_string(&comparison).map_err(|e| PyValueError::new_err(e.to_string()))?;
+    Ok(json.call_method1("loads", (text,))?.unbind())
 }
 
 /// Read a FASTA file and compute GA4GH digests for all sequences.
@@ -4127,6 +4154,7 @@ pub fn refget(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(compute_fai, m)?)?;
     m.add_function(wrap_pyfunction!(load_fasta, m)?)?;
     m.add_function(wrap_pyfunction!(digest_sequence, m)?)?;
+    m.add_function(wrap_pyfunction!(compare_seqcols, m)?)?;
     m.add_class::<PyAlphabetType>()?;
     m.add_class::<PySequenceMetadata>()?;
     m.add_class::<PyFaiMetadata>()?;

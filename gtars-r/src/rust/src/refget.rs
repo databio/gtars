@@ -711,7 +711,10 @@ pub fn compare_store(
         store
             .compare(digest_a, digest_b)
             .map(|comparison| {
-                let digests = list!(a = comparison.digests.a, b = comparison.digests.b.unwrap_or_default());
+                let digests = list!(
+                    a = comparison.digests.a.unwrap_or_default(),
+                    b = comparison.digests.b.unwrap_or_default()
+                );
                 let attributes = list!(
                     a_only = comparison.attributes.a_only,
                     b_only = comparison.attributes.b_only,

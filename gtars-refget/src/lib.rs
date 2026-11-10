@@ -63,6 +63,7 @@ pub use digest::{
     // Types
     SequenceRecord,
     canonicalize_json,
+    compare_level2_json,
     decode_string_from_bytes,
     decode_substring_from_bytes,
     // Fasta (bytes-based, WASM-compatible)

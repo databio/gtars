@@ -181,11 +181,14 @@ impl Write for FastaProcessor {
 /// State for format detection and processing
 enum ProcessorState {
     /// Haven't detected format yet
-    Detecting,
+    /// Holds the first byte when it arrived alone, since the gzip magic
+    /// number is two bytes.
+    Detecting(Option<u8>),
     /// Plain FASTA (uncompressed)
     Plain(FastaProcessor),
-    /// Gzipped FASTA - uses write::GzDecoder for true streaming decompression
-    Gzipped(flate2::write::GzDecoder<FastaProcessor>),
+    /// Gzipped FASTA - uses write::MultiGzDecoder for true streaming
+    /// decompression of every gzip member (bgzip files are many members)
+    Gzipped(flate2::write::MultiGzDecoder<FastaProcessor>),
 }
 
 /// A streaming FASTA hasher that processes data chunk-by-chunk.
@@ -221,7 +224,7 @@ impl FastaStreamHasher {
     /// Create a new streaming FASTA hasher.
     pub fn new() -> Self {
         Self {
-            state: ProcessorState::Detecting,
+            state: ProcessorState::Detecting(None),
         }
     }
 
@@ -241,30 +244,45 @@ impl FastaStreamHasher {
             return Ok(());
         }
 
-        // Detect format on first non-empty chunk
-        if matches!(self.state, ProcessorState::Detecting) {
-            let is_gzipped = chunk.len() >= 2 && chunk[0] == 0x1f && chunk[1] == 0x8b;
+        // Detect format once the first two bytes are available
+        let mut pending = None;
+        if let ProcessorState::Detecting(held) = self.state {
+            let (first, second) = match held {
+                Some(b) => (b, chunk[0]),
+                None if chunk.len() == 1 => {
+                    self.state = ProcessorState::Detecting(Some(chunk[0]));
+                    return Ok(());
+                }
+                None => (chunk[0], chunk[1]),
+            };
+            pending = held;
+            let is_gzipped = first == 0x1f && second == 0x8b;
 
             if is_gzipped {
-                // Create GzDecoder wrapping a FastaProcessor
-                // Decompressed data flows directly into the processor
+                // Create MultiGzDecoder wrapping a FastaProcessor.
+                // Decompressed data flows directly into the processor. A
+                // single-member GzDecoder would stop at the end of the first
+                // member, which breaks bgzip (BGZF) and concatenated gzip.
                 let processor = FastaProcessor::new();
-                let decoder = flate2::write::GzDecoder::new(processor);
+                let decoder = flate2::write::MultiGzDecoder::new(processor);
                 self.state = ProcessorState::Gzipped(decoder);
             } else {
                 self.state = ProcessorState::Plain(FastaProcessor::new());
             }
         }
 
-        // Process the chunk
+        // Process the held first byte (if any), then the chunk
+        let held = pending.as_slice();
         match &mut self.state {
-            ProcessorState::Detecting => unreachable!(),
+            ProcessorState::Detecting(_) => unreachable!(),
             ProcessorState::Plain(processor) => {
+                processor.write_all(held)?;
                 processor.write_all(chunk)?;
             }
             ProcessorState::Gzipped(decoder) => {
                 // Write compressed data to decoder
                 // Decoder decompresses and writes to inner FastaProcessor
+                decoder.write_all(held)?;
                 decoder.write_all(chunk)?;
             }
         }
@@ -277,7 +295,13 @@ impl FastaStreamHasher {
     /// This must be called after all chunks have been processed via `update()`.
     pub fn finish(self) -> anyhow::Result<SequenceCollection> {
         match self.state {
-            ProcessorState::Detecting => {
+            ProcessorState::Detecting(Some(b)) => {
+                // A one-byte input cannot be gzip; treat it as plain FASTA
+                let mut processor = FastaProcessor::new();
+                processor.write_all(&[b])?;
+                processor.finish()
+            }
+            ProcessorState::Detecting(None) => {
                 // No data was ever provided - return empty collection
                 let metadata = SequenceCollectionMetadata::from_sequences(&[], None);
                 Ok(SequenceCollection {
@@ -299,7 +323,7 @@ impl FastaStreamHasher {
     /// Get the current number of completed sequences.
     pub fn sequence_count(&self) -> usize {
         match &self.state {
-            ProcessorState::Detecting => 0,
+            ProcessorState::Detecting(_) => 0,
             ProcessorState::Plain(p) => p.sequences.len(),
             ProcessorState::Gzipped(d) => d.get_ref().sequences.len(),
         }
@@ -308,7 +332,7 @@ impl FastaStreamHasher {
     /// Check if currently processing a sequence.
     pub fn in_sequence(&self) -> bool {
         match &self.state {
-            ProcessorState::Detecting => false,
+            ProcessorState::Detecting(_) => false,
             ProcessorState::Plain(p) => p.current_name.is_some(),
             ProcessorState::Gzipped(d) => d.get_ref().current_name.is_some(),
         }
@@ -317,7 +341,7 @@ impl FastaStreamHasher {
     /// Get the name of the sequence currently being processed (if any).
     pub fn current_sequence_name(&self) -> Option<&str> {
         match &self.state {
-            ProcessorState::Detecting => None,
+            ProcessorState::Detecting(_) => None,
             ProcessorState::Plain(p) => p.current_name.as_deref(),
             ProcessorState::Gzipped(d) => d.get_ref().current_name.as_deref(),
         }
@@ -326,7 +350,7 @@ impl FastaStreamHasher {
     /// Get the current length of the sequence being processed.
     pub fn current_sequence_length(&self) -> usize {
         match &self.state {
-            ProcessorState::Detecting => 0,
+            ProcessorState::Detecting(_) => 0,
             ProcessorState::Plain(p) => p.current_length,
             ProcessorState::Gzipped(d) => d.get_ref().current_length,
         }
@@ -522,6 +546,41 @@ mod tests {
         assert_eq!(collection.sequences[0].metadata().length, 8);
         assert_eq!(collection.sequences[1].metadata().name, "chr2");
         assert_eq!(collection.sequences[1].metadata().length, 8);
+    }
+
+    #[test]
+    fn test_streaming_multi_member_gzip() {
+        // bgzip (BGZF) and `cat a.gz b.gz` produce several gzip members; all
+        // must be decoded, whatever the chunk boundaries.
+        use flate2::Compression;
+        use flate2::write::GzEncoder;
+
+        let fasta: &[u8] = b">chr1\nACGTTGCA\nGGGG\n>chr2\nGGGGAAAA\n>chr3\nTTTT\n";
+        let mut compressed = Vec::new();
+        for part in fasta.chunks(9) {
+            let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+            encoder.write_all(part).expect("compress");
+            compressed.extend(encoder.finish().expect("finish compression"));
+        }
+        // BGZF ends with an empty member.
+        let encoder = GzEncoder::new(Vec::new(), Compression::default());
+        compressed.extend(encoder.finish().expect("finish empty member"));
+
+        let expected = digest_fasta_bytes(fasta).expect("plain");
+        assert_eq!(expected.sequences.len(), 3);
+        // Start at 1: detection must wait for both magic bytes.
+        for chunk_size in 1..=compressed.len() {
+            let mut hasher = FastaStreamHasher::new();
+            for chunk in compressed.chunks(chunk_size) {
+                hasher.update(chunk).expect("update chunk");
+            }
+            let collection = hasher.finish().expect("finish");
+            assert_eq!(
+                collection.metadata.digest, expected.metadata.digest,
+                "Mismatch with chunk size {}",
+                chunk_size
+            );
+        }
     }
 
     #[test]

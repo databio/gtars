@@ -1,0 +1,47 @@
+{
+  "digests": {
+    "a": "Tpdsg75D4GKCGEHtIiDSL9Zx-DSuX5V8",
+    "b": "sv7GIP1K0qcskIKF3iaBmQpaum21vH74"
+  },
+  "attributes": {
+    "a_only": [],
+    "b_only": [],
+    "a_and_b": [
+      "lengths",
+      "name_length_pairs",
+      "names",
+      "sequences",
+      "sorted_sequences"
+    ]
+  },
+  "array_elements": {
+    "a_count": {
+      "lengths": 3,
+      "name_length_pairs": 3,
+      "names": 3,
+      "sequences": 3,
+      "sorted_sequences": 3
+    },
+    "b_count": {
+      "lengths": 2,
+      "name_length_pairs": 2,
+      "names": 2,
+      "sequences": 2,
+      "sorted_sequences": 2
+    },
+    "a_and_b_count": {
+      "lengths": 2,
+      "name_length_pairs": 2,
+      "names": 2,
+      "sequences": 2,
+      "sorted_sequences": 2
+    },
+    "a_and_b_same_order": {
+      "lengths": null,
+      "name_length_pairs": false,
+      "names": false,
+      "sequences": false,
+      "sorted_sequences": true
+    }
+  }
+}

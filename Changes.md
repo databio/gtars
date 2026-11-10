@@ -4,6 +4,9 @@
 
 ### Breaking
 
+- `gtars-refget`: `ComparisonDigests.a` is now `Option<String>` (was
+  `String`), matching `b`. A side compared from a level-2 body has no known
+  digest, so either digest can be `None` (JSON `null`).
 - `gtars-refget`: FASTA export is one method with two independent choices.
   `export_fasta(selection, output, opts)` replaces `export_fasta` and
   `export_fasta_by_digests`. `ExportSelection` picks the records (one or more
@@ -19,6 +22,9 @@
 
 ### Added
 
+- `gtars-refget`: new `compare_level2_json` compares two level-2 sequence
+  collection bodies given as JSON, with no store or digest needed. Exposed as
+  `compare_seqcols` in Python (`gtars.refget`) and `compareSeqcols` in WASM.
 - `gtars-refget`: label templates with the fields `{seq}`, `{seq:NS}`,
   `{col}`, `{col:NS}` and `{name}`, for example `{col:ucsc}/{name}`. A missing
   alias falls back to the digest. A label repeated for the same sequence is
@@ -32,6 +38,9 @@
 
 ### Fixed
 
+- `gtars-refget`: the streaming FASTA hasher (`FastaStreamHasher`) now reads
+  multi-member gzip, including bgzip (BGZF) and concatenated `.gz` files. It
+  used to decode only the first member.
 - `gtars-refget`: exports stream one sequence at a time and decode in chunks.
   Peak memory is one sequence's stored bytes plus a 1 MB chunk, instead of
   every exported sequence held in memory and never released. Exports leave
