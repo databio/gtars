@@ -13,7 +13,7 @@ and compiled via PyO3. This stub file provides the Python interface definition
 and structured documentation that tools can parse properly.
 """
 
-from typing import Any, Dict, Union, Optional, List, Iterator
+from typing import Any, Dict, Literal, Union, Optional, List, Iterator
 from enum import Enum
 from os import PathLike
 
@@ -1343,18 +1343,24 @@ class RefgetStore:
         collection_digest: str,
         bed_file_path: Union[str, PathLike],
         output_file_path: Union[str, PathLike],
-    ) -> None:
+        label: str = "{seq}",
+    ) -> Dict[str, int]:
         """Export sequences from BED file regions to a FASTA file.
 
-        Reads a BED file defining genomic regions and exports the sequences
-        for those regions to a FASTA file.
+        Writes one record per region, labeled by ``label`` (see
+        ``export_fasta``) with ``:start-end`` appended.
 
         Args:
             collection_digest: The collection's SHA-512/24u digest.
             bed_file_path: Path to BED file defining regions.
-            output_file_path: Path to write the output FASTA file.
+            output_file_path: Path to write the output FASTA file; "-" writes to stdout.
+            label: Label template (default "{seq}").
+
+        Returns:
+            Summary counts: n_records, n_bases, n_fallbacks, n_deduplicated.
 
         Raises:
+            ValueError: If the label template is invalid.
             IOError: If files cannot be read/written or sequences not found.
 
         Example::
@@ -1362,7 +1368,8 @@ class RefgetStore:
             store.export_fasta_from_regions(
                 "uC_UorBNf3YUu1YIDainBhI94CedlNeH",
                 "regions.bed",
-                "output.fa"
+                "output.fa",
+                label="name",
             )
         """
         ...
@@ -1397,36 +1404,54 @@ class RefgetStore:
 
     def export_fasta(
         self,
-        collection_digest: str,
         output_path: Union[str, PathLike],
-        sequence_names: Optional[List[str]] = None,
+        collections: Optional[Union[str, List[str]]] = None,
+        names: Optional[List[str]] = None,
+        seq_digests: Optional[List[str]] = None,
+        all: bool = False,
+        label: str = "{seq}",
+        molecule: Optional[Literal["dna", "protein"]] = None,
         line_width: Optional[int] = None,
-    ) -> None:
-        """Export sequences from a collection to a FASTA file.
+    ) -> Dict[str, int]:
+        """Export sequences as FASTA, to a file or to stdout.
+
+        Choose records with exactly one of ``collections``, ``seq_digests`` or
+        ``all``; choose how they are labeled with ``label``. Exports stream one
+        sequence at a time and leave the store's loaded state unchanged; a
+        remote store's sequences are not cached to disk.
+
+        Label fields: ``{seq}`` sequence digest as a refget ID (``SQ.…``, the
+        default), ``{seq:NS}`` the sequence's alias in namespace NS, ``{col}``
+        collection digest, ``{col:NS}`` the collection's alias in namespace
+        NS, ``{name}`` the sequence's name in its collection. Literal text is
+        copied as-is; a single field may drop its braces (``"name"``). A
+        missing alias falls back to the digest; records with no collection get
+        ``{seq}``. The same label for the same sequence is written once; the
+        same label for different sequences raises ValueError before any output.
 
         Args:
-            collection_digest: Collection to export from.
-            output_path: Path to write FASTA file.
-            sequence_names: Optional list of sequence names to export. If None,
-                exports all sequences in the collection.
-            line_width: Optional line width for wrapping sequences. If None,
-                uses default of 80.
-        """
-        ...
+            output_path: FASTA path ('.gz' compresses); "-" writes to stdout.
+            collections: Collection digest(s) to export.
+            names: Only these sequence names in each selected collection.
+            seq_digests: Sequence digests to export (no collection context).
+            all: Export every collection plus sequences in no collection.
+            label: Label template (default "{seq}").
+            molecule: "dna" or "protein" to keep only that molecule type.
+            line_width: Bases per line (default 80; 0 = one line per sequence).
 
-    def export_fasta_by_digests(
-        self,
-        seq_digests: List[str],
-        output_path: Union[str, PathLike],
-        line_width: Optional[int] = None,
-    ) -> None:
-        """Export sequences by their digests to a FASTA file.
+        Returns:
+            Summary counts: n_records, n_bases, n_fallbacks, n_deduplicated.
 
-        Args:
-            seq_digests: List of sequence digests to export.
-            output_path: Path to write FASTA file.
-            line_width: Optional line width for wrapping sequences. If None,
-                uses default of 80.
+        Raises:
+            ValueError: Bad selection, label template, namespace, molecule, or a label clash.
+            BrokenPipeError: The reader closed stdout (for example ``| head``).
+            IOError: If the file cannot be written or sequences are not found.
+
+        Example::
+
+            store.export_fasta("hg38.fa", collections=[digest], label="name")
+            store.export_fasta("-", all=True)
+            store.export_fasta("all.fa", all=True, label="{col:ucsc}/{name}")
         """
         ...
 

@@ -4,8 +4,8 @@ use anyhow::Result;
 use clap::ArgMatches;
 
 use gtars_refget::store::{
-    FastaImportOptions, LockOptions, RefgetStore, StorageMode, VerifyOptions, VerifyReport,
-    force_unlock, lock_status,
+    ExportOptions, ExportSelection, FastaImportOptions, LabelTemplate, LockOptions, Molecule,
+    RefgetStore, StorageMode, VerifyOptions, VerifyReport, force_unlock, lock_status,
 };
 use gtars_refget::{expand_fasta_inputs, FastaInputs};
 
@@ -233,80 +233,100 @@ fn run_export(matches: &ArgMatches) -> Result<()> {
         .expect("store is required");
     let output = matches
         .get_one::<String>("output")
-        .expect("output is required");
-    let requested_collection = matches.get_one::<String>("collection");
-    let names: Option<Vec<&str>> = matches
+        .map(String::as_str)
+        .unwrap_or("-");
+    let requested: Vec<&String> = matches
+        .get_many::<String>("collection")
+        .map(|v| v.collect())
+        .unwrap_or_default();
+    let names: Option<Vec<String>> = matches
         .get_many::<String>("names")
-        .map(|vals| vals.map(|s| s.as_str()).collect());
+        .map(|vals| vals.cloned().collect());
+    let label = LabelTemplate::parse(matches.get_one::<String>("label").expect("has default"))?;
+    let molecule: Option<Molecule> = matches
+        .get_one::<String>("molecule")
+        .map(|m| m.parse())
+        .transpose()?;
     let line_width = *matches.get_one::<usize>("line_width").unwrap_or(&80);
 
-    // Open the store. The manifest gives a stub (metadata) for every
-    // collection, which is all that resolving the digest below needs; the one
-    // collection being exported is loaded lazily by `get_collection`, and its
-    // sequence BYTES only after that, for what this export actually needs.
     let mut store = RefgetStore::open_local(store_path)
         .map_err(|e| anyhow::anyhow!("Failed to open store at {}: {}", store_path, e))?;
 
-    // Resolve the collection digest.
-    let collections = store
-        .list_collections(0, usize::MAX, &[])
-        .map_err(|e| anyhow::anyhow!("Failed to list collections: {}", e))?;
-    let digest = match requested_collection {
-        Some(c) => {
-            let resolved = resolve_collection_arg(&store, c)?;
-            if !collections.results.iter().any(|m| m.digest == resolved) {
-                let available: Vec<String> = collections
-                    .results
-                    .iter()
-                    .map(|m| describe_collection(&store, &m.digest))
-                    .collect();
-                return Err(anyhow::anyhow!(
-                    "Collection '{}' not found in store. Available: {}",
-                    c,
-                    available.join(", ")
-                ));
-            }
-            resolved
-        }
-        None => match collections.results.len() {
-            0 => return Err(anyhow::anyhow!("Store contains no collections to export")),
-            1 => collections.results[0].digest.clone(),
-            _ => {
-                let available: Vec<String> = collections
-                    .results
-                    .iter()
-                    .map(|m| describe_collection(&store, &m.digest))
-                    .collect();
-                return Err(anyhow::anyhow!(
-                    "Store contains multiple collections; specify one with --collection. Available: {}",
-                    available.join(", ")
-                ));
-            }
-        },
-    };
-
-    // export_fasta loads only the sequences it writes, never the whole store
-    // (the vgp store holds ~384k sequences / hundreds of GB).
-    let n_names = names.as_ref().map(|v| v.len());
-    store
-        .export_fasta(&digest, output, names, Some(line_width))
-        .map_err(|e| anyhow::anyhow!("Failed to export FASTA: {}", e))?;
-
-    let wrap_desc = if line_width == 0 {
-        "unwrapped (one sequence per line)".to_string()
+    let selection = if matches.get_flag("all") {
+        ExportSelection::All
     } else {
-        format!("wrapped at {} bases/line", line_width)
+        let collections = store
+            .list_collections(0, usize::MAX, &[])
+            .map_err(|e| anyhow::anyhow!("Failed to list collections: {}", e))?;
+        let available = || -> String {
+            collections
+                .results
+                .iter()
+                .map(|m| describe_collection(&store, &m.digest))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let digests: Vec<String> = if requested.is_empty() {
+            match collections.results.len() {
+                0 => return Err(anyhow::anyhow!("Store contains no collections to export")),
+                1 => vec![collections.results[0].digest.clone()],
+                _ => {
+                    return Err(anyhow::anyhow!(
+                        "Store contains multiple collections; specify one with --collection, or use --all. Available: {}",
+                        available()
+                    ))
+                }
+            }
+        } else {
+            let mut out = Vec::new();
+            for c in requested {
+                let resolved = resolve_collection_arg(&store, c)?;
+                if !collections.results.iter().any(|m| m.digest == resolved) {
+                    return Err(anyhow::anyhow!(
+                        "Collection '{}' not found in store. Available: {}",
+                        c,
+                        available()
+                    ));
+                }
+                out.push(resolved);
+            }
+            out
+        };
+        ExportSelection::Collections { digests, names }
     };
-    let seq_desc = match n_names {
-        Some(n) => format!("{} named sequence(s)", n),
-        None => "all sequences".to_string(),
+
+    let opts = ExportOptions { label, molecule, line_width: Some(line_width) };
+    let summary = match store.export_fasta(&selection, output, &opts) {
+        Ok(s) => s,
+        Err(e) if is_broken_pipe(&e) => return Ok(()),
+        Err(e) => return Err(anyhow::anyhow!("Failed to export FASTA: {}", e)),
     };
+
+    let mut notes = Vec::new();
+    if summary.n_fallbacks > 0 {
+        notes.push(format!("{} label(s) fell back to a digest", summary.n_fallbacks));
+    }
+    if summary.n_deduplicated > 0 {
+        notes.push(format!("{} repeated record(s) written once", summary.n_deduplicated));
+    }
+    let dest = if output == "-" { "stdout" } else { output };
     eprintln!(
-        "Exported collection {} ({}) to {} [{}]",
-        digest, seq_desc, output, wrap_desc
+        "Exported {} record(s), {} bases, to {}{}",
+        summary.n_records,
+        summary.n_bases,
+        dest,
+        if notes.is_empty() { String::new() } else { format!(" ({})", notes.join("; ")) }
     );
 
     Ok(())
+}
+
+/// Did the export fail because the reader closed the pipe (as `| head` does)?
+fn is_broken_pipe(e: &anyhow::Error) -> bool {
+    e.chain().any(|c| {
+        c.downcast_ref::<std::io::Error>()
+            .is_some_and(|io| io.kind() == std::io::ErrorKind::BrokenPipe)
+    })
 }
 
 /// Strip an optional `SQ.` prefix, matching the convention used elsewhere for

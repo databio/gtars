@@ -95,7 +95,16 @@ pub fn create_refget_cli() -> Command {
         )
         .subcommand(
             Command::new(REFGET_EXPORT)
-                .about("Export sequences from a RefgetStore to a FASTA file.")
+                .about("Export sequences from a RefgetStore as FASTA, to a file or to stdout.")
+                .after_help(
+                    "Label fields: {seq} sequence digest (SQ.…), {seq:NS} sequence alias in namespace NS, \
+                     {col} collection digest, {col:NS} collection alias in namespace NS, {name} sequence name.\n\
+                     A single field may drop its braces.\n\n\
+                     Examples:\n  \
+                     gtars refget export -s store -c ucsc:hg38 -l name > hg38.fa\n  \
+                     gtars refget export -s store --all | makeblastdb -in - -dbtype nucl -out store\n  \
+                     gtars refget export -s store --all -l '{col:ucsc}/{name}'",
+                )
                 .arg(
                     Arg::new("store")
                         .long("store")
@@ -107,20 +116,40 @@ pub fn create_refget_cli() -> Command {
                     Arg::new("output")
                         .long("output")
                         .short('o')
-                        .required(true)
-                        .help("Output FASTA path ('.gz' extension triggers gzip compression)"),
+                        .help("Output FASTA path ('.gz' extension triggers gzip compression). Default: stdout"),
                 )
                 .arg(
                     Arg::new("collection")
                         .long("collection")
                         .short('c')
-                        .help("Collection to export: a digest, or NAMESPACE:ALIAS as given to `build --collection-alias`. If omitted and the store holds exactly one collection, that one is used."),
+                        .action(ArgAction::Append)
+                        .help("Collection to export: a digest, or NAMESPACE:ALIAS as given to `build --collection-alias`. Repeatable. If omitted (and no --all) and the store holds exactly one collection, that one is used."),
+                )
+                .arg(
+                    Arg::new("all")
+                        .long("all")
+                        .action(ArgAction::SetTrue)
+                        .conflicts_with_all(["collection", "names"])
+                        .help("Export every sequence in the store: all collections, plus sequences in no collection"),
                 )
                 .arg(
                     Arg::new("names")
                         .long("names")
                         .num_args(1..)
-                        .help("Restrict export to these sequence names (default: all sequences in the collection)"),
+                        .help("Restrict export to these sequence names in each collection (default: all sequences)"),
+                )
+                .arg(
+                    Arg::new("label")
+                        .long("label")
+                        .short('l')
+                        .default_value("{seq}")
+                        .help("FASTA label template; see the fields below. Default {seq} labels each record by its digest"),
+                )
+                .arg(
+                    Arg::new("molecule")
+                        .long("molecule")
+                        .value_parser(["dna", "protein"])
+                        .help("Export only sequences of this molecule type"),
                 )
                 .arg(
                     Arg::new("line_width")

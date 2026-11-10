@@ -275,14 +275,14 @@ class TestRefget:
 
             temp_output_fa_path = os.path.join(temp_dir, "output.fa")
             store.export_fasta_from_regions(
-                collection_digest, temp_bed_path, temp_output_fa_path
+                collection_digest, temp_bed_path, temp_output_fa_path, label="name"
             )
 
             with open(temp_output_fa_path, "r") as f:
                 output_fa_content = f.read()
 
             # export_fasta_from_regions writes one record per BED region with a
-            # `>{chrom}:{start}-{end}` header (see gtars-refget export.rs, PR #259).
+            # `>{label}:{start}-{end}` header; label="name" gives `>{chrom}:...`.
             expected_fa_content = (
                 ">chr1:0-5\nATGCA\n>chr1:8-12\nATGC\n>chr2:0-4\nGGGG\n"
             )
@@ -622,7 +622,7 @@ class TestRefget:
         with tempfile.TemporaryDirectory() as tmpdir:
             # Export all sequences
             output_path = os.path.join(tmpdir, "all.fa")
-            store.export_fasta(collection_digest, output_path, None, None)
+            store.export_fasta(output_path, collections=collection_digest, label="name")
 
             with open(output_path) as f:
                 content = f.read()
@@ -632,7 +632,13 @@ class TestRefget:
 
             # Export subset
             subset_path = os.path.join(tmpdir, "subset.fa")
-            store.export_fasta(collection_digest, subset_path, ["chr1", "chr2"], 60)
+            store.export_fasta(
+                subset_path,
+                collections=collection_digest,
+                names=["chr1", "chr2"],
+                label="name",
+                line_width=60,
+            )
 
             with open(subset_path) as f:
                 subset_content = f.read()
@@ -641,7 +647,7 @@ class TestRefget:
             assert ">chr2" in subset_content
 
     def test_export_fasta_by_digests(self):
-        """Test export_fasta_by_digests() exports specific sequences by digest"""
+        """Test export_fasta(seq_digests=...) exports specific sequences by digest"""
         store = RefgetStore.in_memory()
         store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
 
@@ -651,7 +657,7 @@ class TestRefget:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = os.path.join(tmpdir, "by_digest.fa")
-            store.export_fasta_by_digests([sha_chr1, sha_chr2], output_path, None)
+            store.export_fasta(output_path, seq_digests=[sha_chr1, sha_chr2])
 
             with open(output_path) as f:
                 content = f.read()

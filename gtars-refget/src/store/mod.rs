@@ -98,6 +98,7 @@ mod import;
 mod persistence;
 #[cfg(feature = "filesystem")]
 mod export;
+mod label;
 mod verify;
 
 // The bulk of the store tests import FASTA via the filesystem-only API.
@@ -165,6 +166,10 @@ mod nofs_tests {
 pub use self::readonly::{PendingChanges, ReadonlyRefgetStore};
 pub use self::core::RefgetStore;
 pub use self::alias::{AliasKind, AliasManager};
+#[cfg(feature = "filesystem")]
+pub use self::export::{ExportOptions, ExportSelection, ExportSummary, Molecule};
+pub use self::label::{LabelError, LabelTemplate};
+pub(crate) use self::label::LabelObject;
 pub use self::atomic::is_transient_store_file;
 pub use self::lock::{LockInfo, LockOptions, StoreLock, force_unlock, lock_status};
 pub use self::fhr_metadata::{
