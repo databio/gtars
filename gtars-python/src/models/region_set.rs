@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use crate::models::PyRegion;
 use gtars_core::models::region_set::IntervalSetOps;
 use gtars_core::models::{Region, RegionSet};
+use gtars_core::utils::try_get_chrom_sizes;
 use gtars_genomicdist::models::ChromosomeStatistics;
 use gtars_genomicdist::statistics::GenomicIntervalSetStatistics;
 use gtars_overlaprs::IndexedRegionSet;
@@ -260,13 +261,25 @@ impl PyRegionSet {
         }
     }
 
+    /// Save this RegionSet as a bigBed file.
+    ///
+    /// ``chrom_size`` may be either a path to a chrom.sizes file (``str`` or
+    /// ``os.PathLike``) or a ``dict`` mapping chromosome name to length.
     fn to_bigbed(
         &self,
         out_path: &Bound<'_, PyAny>,
         chrom_size: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
+        let chrom_sizes: HashMap<String, u32> = if let Ok(dict) = chrom_size.cast::<PyDict>() {
+            dict.extract()?
+        } else {
+            // Treat as a path (str or os.PathLike); `.str()` handles pathlib.Path.
+            let path = chrom_size.str()?.to_string();
+            try_get_chrom_sizes(path).map_err(|e| PyValueError::new_err(e.to_string()))?
+        };
+
         self.regionset
-            .to_bigbed(out_path.to_string(), chrom_size.to_string())
+            .to_bigbed(out_path.str()?.to_string(), &chrom_sizes)
             .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
         Ok(())
     }
