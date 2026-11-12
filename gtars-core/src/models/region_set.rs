@@ -20,8 +20,6 @@ use bigtools::{BedEntry, BigBedWrite};
 
 use crate::errors::RegionSetError;
 use crate::models::Region;
-#[cfg(feature = "bigbed")]
-use crate::utils::get_chrom_sizes;
 use crate::utils::get_dynamic_reader;
 #[cfg(feature = "http")]
 use crate::utils::get_dynamic_reader_from_url;
@@ -422,13 +420,13 @@ impl RegionSet {
     ///
     /// # Arguments
     /// - out_path: the path to the bigbed file which should be created
-    /// - chrom_size: the path to chrom sizes file
+    /// - chrom_sizes: map of chromosome name to length
     ///
     #[cfg(feature = "bigbed")]
     pub fn to_bigbed<T: AsRef<Path>>(
         &self,
         out_path: T,
-        chrom_size: T,
+        chrom_sizes: &HashMap<String, u32>,
     ) -> Result<(), RegionSetError> {
         let out_path = out_path.as_ref();
 
@@ -439,7 +437,6 @@ impl RegionSet {
         if let Some(parent) = out_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let chrom_sizes: HashMap<String, u32> = get_chrom_sizes(chrom_size);
 
         let mut warnings_count: i32 = 0;
         let region_vector = self.regions.iter().map(|i| {
@@ -1599,13 +1596,14 @@ mod tests {
         let chrom_sizes_path: PathBuf = std::env::current_dir()
             .unwrap()
             .join("../tests/data/regionset/dummy_chrom_sizes");
+        let chrom_sizes = crate::utils::try_get_chrom_sizes(chrom_sizes_path).unwrap();
 
         let tempdir = tempfile::tempdir().unwrap();
         let mut new_file_path = tempdir.keep();
         new_file_path.push("new.bigbed");
 
         assert!(region_set
-            .to_bigbed(new_file_path.as_path(), chrom_sizes_path.as_path())
+            .to_bigbed(new_file_path.as_path(), &chrom_sizes)
             .is_ok());
     }
 
