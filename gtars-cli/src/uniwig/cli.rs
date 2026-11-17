@@ -29,6 +29,18 @@ fn create_bamqc_subcommand() -> Command {
                 .value_parser(clap::value_parser!(usize))
                 .default_value("1"),
         )
+        .arg(
+            Arg::new("min-mapq")
+                .long("min-mapq")
+                .help(
+                    "Skip reads with MAPQ below this value. The default, 0, counts every read, \
+                     as PEPATAC's bamQC.py does. Use --min-mapq 30 for the ENCODE \
+                     \"uniquely mapping\" prefilter (samtools view -q 30). Reads with \
+                     MAPQ 255 (not available) always pass.",
+                )
+                .value_parser(clap::value_parser!(u8))
+                .default_value("0"),
+        )
 }
 
 /// Creates the uniwig CLI Command object

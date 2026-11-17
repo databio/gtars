@@ -7,6 +7,12 @@
 - `gtars-refget`: `ComparisonDigests.a` is now `Option<String>` (was
   `String`), matching `b`. A side compared from a level-2 body has no known
   digest, so either digest can be `None` (JSON `null`).
+- `gtars uniwig bamqc` no longer drops reads with MAPQ below 30 by default.
+  The new `--min-mapq` option defaults to 0 (count every read), which matches
+  PEPATAC's `bamQC.py`; use `--min-mapq 30` for the old ENCODE "uniquely
+  mapping" prefilter. In `gtars-uniwig`, `compute_bam_qc`,
+  `compute_bam_qc_parallel`, `run_bam_qc` and `run_bam_qc_parallel` take a
+  new `min_mapq` argument.
 
 ### Added
 

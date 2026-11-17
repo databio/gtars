@@ -6,16 +6,11 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
-/// Minimum MAPQ for a read to count toward QC metrics, matching ENCODE's
-/// `samtools view -q 30` "uniquely mapping" prefilter. Reads with a present
-/// MAPQ below this are excluded from all counts; a missing MAPQ (255) passes,
-/// as it does with samtools.
-const MIN_MAPQ: u8 = 30;
-
-/// True if the read has a present MAPQ below `MIN_MAPQ`. A missing MAPQ (the
-/// 255 sentinel, which noodles surfaces as `None`) is treated as passing.
-fn is_below_min_mapq(record: &bam::Record) -> bool {
-    matches!(record.mapping_quality(), Some(mapq) if mapq.get() < MIN_MAPQ)
+/// True if the read has a present MAPQ below `min_mapq`. A missing MAPQ (the
+/// 255 sentinel, which noodles surfaces as `None`) is treated as passing, as
+/// it is by `samtools view -q`. With `min_mapq == 0` no read is dropped.
+fn is_below_min_mapq(record: &bam::Record, min_mapq: u8) -> bool {
+    matches!(record.mapping_quality(), Some(mapq) if mapq.get() < min_mapq)
 }
 
 #[derive(Debug, Clone, Default)]
@@ -65,7 +60,11 @@ fn is_mitochondrial(chrom: &str) -> bool {
     lower == "chrm" || lower == "mt" || lower == "chrmt" || lower.contains("rcrsd")
 }
 
-fn process_chromosome(bam_path: &Path, chrom: &str) -> Result<ChromResult, Box<dyn Error + Send + Sync>> {
+fn process_chromosome(
+    bam_path: &Path,
+    chrom: &str,
+    min_mapq: u8,
+) -> Result<ChromResult, Box<dyn Error + Send + Sync>> {
     let mut reader = bam::io::indexed_reader::Builder::default()
         .build_from_path(bam_path)?;
     let header = reader.read_header()?;
@@ -79,7 +78,7 @@ fn process_chromosome(bam_path: &Path, chrom: &str) -> Result<ChromResult, Box<d
     if is_mitochondrial(chrom) {
         for record_result in records {
             let record = record_result?;
-            if is_below_min_mapq(&record) {
+            if is_below_min_mapq(&record, min_mapq) {
                 continue;
             }
             if !record.flags().is_unmapped() {
@@ -99,7 +98,7 @@ fn process_chromosome(bam_path: &Path, chrom: &str) -> Result<ChromResult, Box<d
     for record_result in records {
         let record = record_result?;
 
-        if is_below_min_mapq(&record) {
+        if is_below_min_mapq(&record, min_mapq) {
             continue;
         }
 
@@ -162,7 +161,17 @@ fn process_chromosome(bam_path: &Path, chrom: &str) -> Result<ChromResult, Box<d
     Ok(result)
 }
 
-pub fn compute_bam_qc_parallel(bam_path: &Path, num_threads: usize) -> Result<BamQcResult, Box<dyn Error>> {
+/// Like [`compute_bam_qc`], but processes chromosomes on `num_threads` threads.
+///
+/// Reads with a present MAPQ below `min_mapq` are left out of every count.
+/// Pass 0 to count every read, as PEPATAC's `bamQC.py` does; pass 30 for the
+/// ENCODE "uniquely mapping" prefilter (`samtools view -q 30`). Reads with
+/// MAPQ 255 ("not available") always pass.
+pub fn compute_bam_qc_parallel(
+    bam_path: &Path,
+    num_threads: usize,
+    min_mapq: u8,
+) -> Result<BamQcResult, Box<dyn Error>> {
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(num_threads)
         .build()?;
@@ -181,7 +190,7 @@ pub fn compute_bam_qc_parallel(bam_path: &Path, num_threads: usize) -> Result<Ba
         chromosomes
             .par_iter()
             .filter_map(|chrom| {
-                match process_chromosome(bam_path, chrom) {
+                match process_chromosome(bam_path, chrom, min_mapq) {
                     Ok(result) => Some(result),
                     Err(_) => None,
                 }
@@ -244,7 +253,13 @@ pub fn compute_bam_qc_parallel(bam_path: &Path, num_threads: usize) -> Result<Ba
     })
 }
 
-pub fn compute_bam_qc(bam_path: &Path) -> Result<BamQcResult, Box<dyn Error>> {
+/// Computes library complexity metrics (NRF, PBC1, PBC2) for an indexed BAM.
+///
+/// Reads with a present MAPQ below `min_mapq` are left out of every count.
+/// Pass 0 to count every read, as PEPATAC's `bamQC.py` does; pass 30 for the
+/// ENCODE "uniquely mapping" prefilter (`samtools view -q 30`). Reads with
+/// MAPQ 255 ("not available") always pass.
+pub fn compute_bam_qc(bam_path: &Path, min_mapq: u8) -> Result<BamQcResult, Box<dyn Error>> {
     // Process chromosome-by-chromosome to reduce memory usage.
     // Compute M1/M2/M_DISTINCT per chromosome and sum them.
     // Position keys don't span chromosomes, so this is correct.
@@ -268,7 +283,7 @@ pub fn compute_bam_qc(bam_path: &Path) -> Result<BamQcResult, Box<dyn Error>> {
     let mut m2: u64 = 0;
 
     for chrom in &chromosomes {
-        match process_chromosome(bam_path, chrom) {
+        match process_chromosome(bam_path, chrom, min_mapq) {
             Ok(chrom_result) => {
                 total_reads += chrom_result.total_reads;
                 total_pairs += chrom_result.num_pairs;
@@ -340,16 +355,25 @@ pub fn write_bam_qc_tsv<W: Write>(result: &BamQcResult, writer: &mut W) -> Resul
     Ok(())
 }
 
-pub fn run_bam_qc(bam_path: &Path, output_path: &Path) -> Result<BamQcResult, Box<dyn Error>> {
-    let result = compute_bam_qc(bam_path)?;
+pub fn run_bam_qc(
+    bam_path: &Path,
+    output_path: &Path,
+    min_mapq: u8,
+) -> Result<BamQcResult, Box<dyn Error>> {
+    let result = compute_bam_qc(bam_path, min_mapq)?;
     let file = File::create(output_path)?;
     let mut writer = BufWriter::new(file);
     write_bam_qc_tsv(&result, &mut writer)?;
     Ok(result)
 }
 
-pub fn run_bam_qc_parallel(bam_path: &Path, output_path: &Path, num_threads: usize) -> Result<BamQcResult, Box<dyn Error>> {
-    let result = compute_bam_qc_parallel(bam_path, num_threads)?;
+pub fn run_bam_qc_parallel(
+    bam_path: &Path,
+    output_path: &Path,
+    num_threads: usize,
+    min_mapq: u8,
+) -> Result<BamQcResult, Box<dyn Error>> {
+    let result = compute_bam_qc_parallel(bam_path, num_threads, min_mapq)?;
     let file = File::create(output_path)?;
     let mut writer = BufWriter::new(file);
     write_bam_qc_tsv(&result, &mut writer)?;
@@ -386,7 +410,7 @@ mod tests {
             eprintln!("Test BAM file not found, skipping: {:?}", bam_path);
             return;
         }
-        let result = compute_bam_qc(&bam_path).expect("Failed to compute BAM QC");
+        let result = compute_bam_qc(&bam_path, 0).expect("Failed to compute BAM QC");
         assert!(result.total_reads > 0, "Expected some reads");
         assert!(result.nrf >= 0.0 && result.nrf <= 1.0, "NRF should be between 0 and 1");
         assert!(result.pbc1 >= 0.0 && result.pbc1 <= 1.0, "PBC1 should be between 0 and 1");
@@ -399,7 +423,7 @@ mod tests {
             eprintln!("Test BAM file not found, skipping: {:?}", bam_path);
             return;
         }
-        let result = compute_bam_qc(&bam_path).expect("Failed to compute BAM QC");
+        let result = compute_bam_qc(&bam_path, 0).expect("Failed to compute BAM QC");
         println!("Dummy BAM results: {:?}", result);
     }
 }
