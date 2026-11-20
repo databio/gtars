@@ -454,6 +454,10 @@ class RefgetStore:
             if store is not None:
                 process(store)
 
+        **Threads**: slow calls (disk, network, FASTA import, export) release
+        the GIL, so other Python threads keep running. Threads may share one
+        store; their calls on it run one at a time.
+
     Examples:
         Create a new store and import sequences::
 

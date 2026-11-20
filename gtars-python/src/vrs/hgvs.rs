@@ -502,7 +502,7 @@ pub fn hgvs_to_vrs_id(
     py: Python<'_>,
     hgvs_str: &str,
     provider: &crate::reftx::ReftxProviderPy,
-    refget: &mut crate::refget::PyRefgetStore,
+    refget: &crate::refget::PyRefgetStore,
     collection_digest: &str,
 ) -> PyResult<String> {
     let s = hgvs_str.to_string();
@@ -510,13 +510,8 @@ pub fn hgvs_to_vrs_id(
     let prov = provider.inner.clone();
     // NOTE: warnings are currently dropped at the FFI boundary; surfacing them
     // to Python is out of scope for this change.
-    py.detach(|| {
-        gtars_vrs::hgvs::bridge::hgvs_str_to_vrs_id(
-            &s,
-            &prov,
-            &mut refget.inner,
-            &coll,
-        )
+    refget.with_store(py, |store| {
+        gtars_vrs::hgvs::bridge::hgvs_str_to_vrs_id(&s, &prov, store, &coll)
     })
     .map(|b| b.value)
     .map_err(map_hgvs_err)
