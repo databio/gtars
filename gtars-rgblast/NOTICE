@@ -1,0 +1,43 @@
+gtars-rgblast includes a Rust port of parts of NCBI BLAST+ 2.17.0:
+
+- the nucleotide search core (`algo/blast/core`), in `src/engine/`;
+- the symmetric DUST masker (`algo/dustmask/symdust.cpp`), in `src/engine/dust.rs`;
+- the `CRandom` generator (`util/random_gen.cpp`), in `src/convert/random.rs`;
+- the query batching rule of the blastn application (`app/blast/blast_app_util.hpp`), in
+  `src/engine/search.rs`.
+
+It also writes BLAST version 5 databases that are byte-identical to those of `makeblastdb`
+(`src/blastdb/`). Each module header names the NCBI source file it follows.
+
+The NCBI source carries this notice:
+
+                          PUBLIC DOMAIN NOTICE
+             National Center for Biotechnology Information
+
+This software/database is a "United States Government Work" under the
+terms of the United States Copyright Act.  It was written as part of
+the author's official duties as a United States Government employee and
+thus cannot be copyrighted.  This software/database is freely available
+to the public for use. The National Library of Medicine and the U.S.
+Government have not placed any restriction on its use or reproduction.
+
+Although all reasonable efforts have been taken to ensure the accuracy
+and reliability of the software and data, the NLM and the U.S.
+Government do not and cannot warrant the performance or results that
+may be obtained by using this software or data. The NLM and the U.S.
+Government disclaim all warranties, express or implied, including
+warranties of performance, merchantability or fitness for any particular
+purpose.
+
+Please cite the author in any work or product based on this material.
+
+Citation: Camacho C, Coulouris G, Avagyan V, Ma N, Papadopoulos J, Bealer K, Madden TL.
+BLAST+: architecture and applications. BMC Bioinformatics 10, 421 (2009).
+https://doi.org/10.1186/1471-2105-10-421
+
+Source: https://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/2.17.0/
+
+gtars-rgblast also includes a Rust port of parts of LMDB (`libraries/liblmdb/mdb.c`), in
+`src/blastdb/lmdb/`: Copyright 2011-2021 Howard Chu, Symas Corp., derived from btree.c,
+Copyright (c) 2009, 2010 Martin Hedenfalk. It is used under the OpenLDAP Public License,
+Version 2.8; the notices and the full license text are in `LICENSE-LMDB`.

@@ -32,6 +32,40 @@ const PROGRESS_INTERVAL: usize = 10_000;
 /// Read buffer size used while streaming a sequence for verification.
 const VERIFY_READ_BUF_SIZE: usize = 1024 * 1024;
 
+/// sha512t24u of one sequence's stored bytes (packed, raw or zstd), decoded
+/// in 1 MiB windows so memory stays small. Used to check downloads.
+pub(crate) fn digest_packed(bytes: &[u8], meta: &crate::digest::SequenceMetadata, mode: StorageMode) -> Result<String> {
+    use std::io::Read;
+    let mut hasher = SequenceHasher::new(false);
+    match mode {
+        StorageMode::Encoded => {
+            let alphabet = crate::digest::lookup_alphabet(&meta.alphabet);
+            let mut start = 0;
+            while start < meta.length {
+                let end = (start + VERIFY_READ_BUF_SIZE).min(meta.length);
+                hasher.update(&crate::digest::decode_substring_from_bytes(bytes, start, end, alphabet));
+                start = end;
+            }
+        }
+        StorageMode::Raw => hasher.update(bytes),
+        StorageMode::Zstd => {
+            let mut decoder = zstd::stream::read::Decoder::with_buffer(bytes)
+                .map_err(|e| anyhow!("Failed to open zstd sequence record: {}", e))?;
+            let mut buf = vec![0u8; VERIFY_READ_BUF_SIZE];
+            loop {
+                let n = decoder
+                    .read(&mut buf)
+                    .map_err(|e| anyhow!("Failed to zstd-decompress sequence record: {}", e))?;
+                if n == 0 {
+                    break;
+                }
+                hasher.update(&buf[..n]);
+            }
+        }
+    }
+    Ok(hasher.finalize().0)
+}
+
 // =========================================================================
 // Options
 // =========================================================================

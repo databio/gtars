@@ -1,10 +1,21 @@
 //! FASTA export and BED region extraction for RefgetStore.
+//!
+//! Exports stream records in order: a prefetch reads each record's stored
+//! bytes (from RAM, a local `.seq` file, the shared cache, or the remote store,
+//! many at once) ahead of the writer, within a fixed memory budget (1 GiB),
+//! and the writer decodes them in chunks. An export never loads sequences into the store, and
+//! writes downloaded `.seq` files to the shared cache only with
+//! [`ExportOptions::write_cache`].
 
 use super::*;
+use super::label::{label_err, AliasMaps, LabelObject, LabelTemplate};
+use super::catalog::SeqView;
 use super::readonly::ReadonlyRefgetStore;
+use super::fetch::FetchCounters;
+use super::prefetch::{PrefetchOptions, PrefetchOrder, DEFAULT_MEMORY_BUDGET};
 
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
-
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
@@ -16,65 +27,253 @@ use flate2::read::MultiGzDecoder;
 use gtars_core::utils::get_file_info;
 
 use crate::digest::{
-    SequenceMetadata,
-    decode_substring_from_bytes, lookup_alphabet,
+    AlphabetType, SequenceMetadata, decode_substring_from_bytes, lookup_alphabet, strip_sq_prefix,
 };
+use crate::hashkeyable::{DigestKey, HashKeyable, key_to_digest_string};
 
+/// Bases decoded per chunk when streaming a record.
+pub(crate) const EXPORT_CHUNK_BASES: usize = 1 << 20;
+
+/// Records between progress lines on stderr.
+const PROGRESS_EVERY: usize = 1000;
 
 // ============================================================================
-// Free function
+// Public export types
 // ============================================================================
 
-/// Helper function to decode a sequence record and write it as a FASTA entry.
-///
-/// Handles decoding (encoded or raw storage modes), header formatting (with optional
-/// description), and sequence output.
-///
-/// `line_width` controls sequence wrapping: a value `> 0` wraps the sequence body at
-/// that many bases per line; a value of `0` disables wrapping entirely, emitting the
-/// whole sequence on a single line (one-sequence-per-line, as GGCAT/SSHash expect).
-pub(crate) fn write_fasta_record(
-    writer: &mut dyn Write,
-    metadata: &SequenceMetadata,
-    sequence_data: &[u8],
-    mode: StorageMode,
-    line_width: usize,
-) -> Result<()> {
-    let decoded_sequence = match mode {
-        StorageMode::Encoded => {
-            let alphabet = lookup_alphabet(&metadata.alphabet);
-            let decoded =
-                decode_substring_from_bytes(sequence_data, 0, metadata.length, alphabet);
-            String::from_utf8(decoded).context("Failed to decode sequence as UTF-8")?
-        }
-        StorageMode::Raw => String::from_utf8(sequence_data.to_vec())
-            .context("Failed to decode raw sequence as UTF-8")?,
-        StorageMode::Zstd => {
-            let ascii = zstd::decode_all(sequence_data)
-                .context("Failed to zstd-decompress sequence record")?;
-            String::from_utf8(ascii).context("Failed to decode sequence as UTF-8")?
-        }
-    };
+/// Which records an export writes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExportSelection {
+    /// One or more collections, optionally limited to some sequence names in each.
+    Collections { digests: Vec<String>, names: Option<Vec<String>> },
+    /// Specific sequences by digest. These records have no collection.
+    SeqDigests(Vec<String>),
+    /// Every collection, plus any sequence that is in no collection.
+    All,
+}
 
-    let header = match &metadata.description {
-        Some(desc) => format!(">{} {}", metadata.name, desc),
-        None => format!(">{}", metadata.name),
-    };
-    writeln!(writer, "{}", header)?;
+impl ExportSelection {
+    /// Build a selection from binding-style arguments: exactly one of
+    /// `collections`, `seq_digests` or `all`, and `names` only with collections.
+    pub fn from_parts(
+        collections: Option<Vec<String>>,
+        names: Option<Vec<String>>,
+        seq_digests: Option<Vec<String>>,
+        all: bool,
+    ) -> Result<Self> {
+        if collections.is_some() as u8 + seq_digests.is_some() as u8 + all as u8 != 1 {
+            return Err(label_err!("Set exactly one of collections, seq_digests or all"));
+        }
+        Ok(match (collections, seq_digests) {
+            (Some(digests), _) => ExportSelection::Collections { digests, names },
+            _ if names.is_some() => {
+                return Err(label_err!("names only applies with collections"))
+            }
+            (_, Some(digests)) => ExportSelection::SeqDigests(digests),
+            _ => ExportSelection::All,
+        })
+    }
+}
 
-    if line_width == 0 {
-        // Unwrapped: emit the entire sequence on a single line. `chunks(0)` would
-        // panic, so this branch is required, not merely an optimization.
-        writer.write_all(decoded_sequence.as_bytes())?;
-        writer.write_all(b"\n")?;
+/// Molecule filter: BLAST and similar tools need one molecule type per database.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Molecule {
+    /// `Dna2bit`, `Dna3bit` and `DnaIupac` sequences.
+    Dna,
+    /// `Protein` sequences.
+    Protein,
+}
+
+impl Molecule {
+    /// Parse an optional `"dna"` / `"protein"` argument.
+    pub fn from_opt(s: Option<&str>) -> Result<Option<Self>> {
+        s.map(str::parse).transpose()
+    }
+
+    fn keeps(&self, alphabet: &AlphabetType) -> bool {
+        match self {
+            Molecule::Dna => matches!(
+                alphabet,
+                AlphabetType::Dna2bit | AlphabetType::Dna3bit | AlphabetType::DnaIupac
+            ),
+            Molecule::Protein => matches!(alphabet, AlphabetType::Protein),
+        }
+    }
+}
+
+impl std::str::FromStr for Molecule {
+    type Err = anyhow::Error;
+    fn from_str(s: &str) -> Result<Self> {
+        match s.to_ascii_lowercase().as_str() {
+            "dna" => Ok(Molecule::Dna),
+            "protein" => Ok(Molecule::Protein),
+            other => Err(label_err!("Invalid molecule '{}': expected 'dna' or 'protein'", other)),
+        }
+    }
+}
+
+/// How an export labels and formats its records.
+#[derive(Debug, Clone, Default)]
+pub struct ExportOptions {
+    /// Label template; default `{seq}`.
+    pub label: LabelTemplate,
+    /// Keep only sequences of this molecule type.
+    pub molecule: Option<Molecule>,
+    /// Bases per line: `None` is 80, `Some(0)` writes each sequence on one line.
+    pub line_width: Option<usize>,
+    /// Publish sequences downloaded from a remote store to the shared cache,
+    /// so an interrupted export can resume without downloading them again.
+    pub write_cache: bool,
+}
+
+/// Counts reported by an export.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ExportSummary {
+    /// Records written.
+    pub n_records: usize,
+    /// Bases written.
+    pub n_bases: u64,
+    /// Records whose label fell back to a digest (missing alias, or no collection).
+    pub n_fallbacks: usize,
+    /// Records skipped because the same label and sequence were already written.
+    pub n_deduplicated: usize,
+    /// What reading the sequences took: network, cache and local reads.
+    pub fetch: FetchCounters,
+}
+
+// ============================================================================
+// Output and record writing
+// ============================================================================
+
+/// Open an export destination. `"-"` is stdout; a `.gz` path is gzipped.
+pub(crate) fn open_output(path: &Path) -> Result<Box<dyn Write>> {
+    if path == Path::new("-") {
+        return Ok(Box::new(BufWriter::with_capacity(1 << 20, std::io::stdout().lock())));
+    }
+    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent)?;
+    }
+    let file = File::create(path)
+        .with_context(|| format!("Failed to create output file: {}", path.display()))?;
+    Ok(if path.extension() == Some(OsStr::new("gz")) {
+        Box::new(GzEncoder::new(BufWriter::new(file), Compression::default()))
     } else {
-        for chunk in decoded_sequence.as_bytes().chunks(line_width) {
-            writer.write_all(chunk)?;
+        Box::new(BufWriter::new(file))
+    })
+}
+
+/// Write `bases` as lines of `line_width` (`0`: no wrapping, no newline).
+/// Callers keep every chunk but the last a multiple of `line_width`.
+fn write_lines(writer: &mut dyn Write, bases: &[u8], line_width: usize) -> Result<()> {
+    if line_width == 0 {
+        writer.write_all(bases)?;
+    } else {
+        for line in bases.chunks(line_width) {
+            writer.write_all(line)?;
             writer.write_all(b"\n")?;
         }
     }
-
     Ok(())
+}
+
+/// Read until `buf` is full or the reader ends; return the bytes read.
+fn read_full(reader: &mut impl std::io::Read, buf: &mut [u8]) -> Result<usize> {
+    let mut filled = 0;
+    while filled < buf.len() {
+        match reader.read(&mut buf[filled..]) {
+            Ok(0) => break,
+            Ok(n) => filled += n,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(e.into()),
+        }
+    }
+    Ok(filled)
+}
+
+/// Write one FASTA record, decoding the body in chunks of about `chunk_bases`.
+///
+/// `header` is the label, written as `>{header}`. `data` is the stored bytes
+/// (packed, raw or zstd per `mode`). `line_width > 0` wraps the body;
+/// `0` writes it on a single line.
+pub(crate) fn write_fasta_record(
+    writer: &mut dyn Write,
+    header: &str,
+    meta: &SequenceMetadata,
+    data: &[u8],
+    mode: StorageMode,
+    line_width: usize,
+    chunk_bases: usize,
+) -> Result<()> {
+    // A multiple of line_width, so line breaks never straddle a chunk.
+    let chunk = if line_width == 0 {
+        chunk_bases.max(1)
+    } else {
+        (chunk_bases / line_width).max(1) * line_width
+    };
+
+    writer.write_all(b">")?;
+    writer.write_all(header.as_bytes())?;
+    writer.write_all(b"\n")?;
+
+    match mode {
+        StorageMode::Encoded => {
+            let alphabet = lookup_alphabet(&meta.alphabet);
+            let mut start = 0;
+            while start < meta.length {
+                let end = (start + chunk).min(meta.length);
+                let decoded = decode_substring_from_bytes(data, start, end, alphabet);
+                write_lines(writer, &decoded, line_width)?;
+                start = end;
+            }
+        }
+        StorageMode::Raw => {
+            for piece in data.chunks(chunk) {
+                write_lines(writer, piece, line_width)?;
+            }
+        }
+        StorageMode::Zstd => {
+            let mut decoder = zstd::stream::read::Decoder::with_buffer(data)
+                .context("Failed to open zstd sequence record")?;
+            let mut buf = vec![0u8; chunk];
+            loop {
+                let n = read_full(&mut decoder, &mut buf)
+                    .context("Failed to zstd-decompress sequence record")?;
+                if n == 0 {
+                    break;
+                }
+                write_lines(writer, &buf[..n], line_width)?;
+                if n < chunk {
+                    break;
+                }
+            }
+        }
+    }
+
+    if line_width == 0 {
+        writer.write_all(b"\n")?;
+    }
+    Ok(())
+}
+
+/// One record to write: its label and the sequence behind it.
+struct PlannedRecord {
+    label: String,
+    key: DigestKey,
+}
+
+/// A record before labeling: the sequence plus how it was reached.
+struct Candidate<'a> {
+    key: DigestKey,
+    meta: SeqView<'a>,
+    /// `(collection digest, sequence name)` when reached through a collection.
+    collection: Option<(String, &'a str)>,
+}
+
+fn source_of(collection: &Option<(String, &str)>) -> String {
+    match collection {
+        Some((col, _)) => format!("collection {}", col),
+        None => "the sequence list".to_string(),
+    }
 }
 
 // ============================================================================
@@ -303,168 +502,340 @@ impl ReadonlyRefgetStore {
         })
     }
 
+    /// Digest -> alias maps for every namespace `label` uses, after checking
+    /// each namespace exists in this store.
+    pub(crate) fn label_alias_maps(&self, label: &LabelTemplate) -> Result<AliasMaps> {
+        let mut maps = AliasMaps::default();
+        let seq_namespaces = self.aliases.sequence_namespaces();
+        for ns in label.namespaces(LabelObject::Seq) {
+            if !seq_namespaces.contains(&ns) {
+                return Err(label_err!(
+                    "Unknown sequence-alias namespace '{}' in label '{}'. This store's sequence-alias namespaces: {}",
+                    ns,
+                    label,
+                    list_or_none(&seq_namespaces)
+                ));
+            }
+            maps.add_sequence_namespace(&ns, self.aliases.namespace_map(AliasKind::Sequence, &ns));
+        }
+        let col_namespaces = self.aliases.collection_namespaces();
+        for ns in label.namespaces(LabelObject::Col) {
+            if !col_namespaces.contains(&ns) {
+                return Err(label_err!(
+                    "Unknown collection-alias namespace '{}' in label '{}'. This store's collection-alias namespaces: {}",
+                    ns,
+                    label,
+                    list_or_none(&col_namespaces)
+                ));
+            }
+            maps.add_collection_namespace(&ns, self.aliases.namespace_map(AliasKind::Collection, &ns));
+        }
+        Ok(maps)
+    }
+
     /// Export sequences from BED file regions to a FASTA file.
     ///
-    /// Region export is inherently unwrapped: each region's sequence is written on a
-    /// single line under a `>chrom:start-end` header, regardless of any line width.
+    /// Writes one record per BED line, each on a single line, labeled by
+    /// `label` with `:start-end` appended (as samtools does). Labels repeat
+    /// when regions repeat; no uniqueness rule applies.
     pub fn export_fasta_from_regions<K: AsRef<[u8]>>(
         &self,
         collection_digest: K,
         bed_file_path: &str,
         output_file_path: &str,
-    ) -> Result<()> {
-        let output_path_obj = Path::new(output_file_path);
-        if let Some(parent) = output_path_obj.parent() {
-            std::fs::create_dir_all(parent)?;
+        label: &LabelTemplate,
+    ) -> Result<ExportSummary> {
+        let collection_str = self
+            .loaded_coll_row(collection_digest.as_ref())
+            .map(|c| self.catalog.coll_meta(c).digest.clone())?;
+        let maps = self.label_alias_maps(label)?;
+
+        // Label each name once, from this collection's own records. A repeated
+        // name keeps its last record, as the region lookup does.
+        let mut name_labels: HashMap<&str, (String, bool)> = HashMap::new();
+        for m in self.collection_members(collection_digest.as_ref())? {
+            let rendered =
+                label.render(m.seq().sha512t24u().as_str(), Some((&collection_str, m.name())), &maps);
+            check_label_whitespace(&rendered.0)?;
+            name_labels.insert(m.name(), rendered);
         }
-
-        let file = File::create(output_file_path)?;
-
-        let mut writer: Box<dyn Write> = if output_path_obj.extension() == Some(OsStr::new("gz")) {
-            Box::new(GzEncoder::new(file, Compression::default()))
-        } else {
-            Box::new(file)
-        };
 
         let seq_iter = self.substrings_from_regions(&collection_digest, bed_file_path)?;
+        let mut writer = open_output(Path::new(output_file_path))?;
+        let mut summary = ExportSummary::default();
 
-        for rs in seq_iter.into_iter() {
+        for rs in seq_iter {
             let rs = rs?;
-
-            // Write one header per region with coordinates
-            let header = format!(">{}:{}-{}\n", rs.chrom_name, rs.start, rs.end);
-            writer.write_all(header.as_bytes())?;
+            let (name_label, fallback) = name_labels
+                .get(rs.chrom_name.as_str())
+                .ok_or_else(|| anyhow!("Sequence '{}' not found in collection", rs.chrom_name))?;
+            writeln!(writer, ">{}:{}-{}", name_label, rs.start, rs.end)?;
             writer.write_all(rs.sequence.as_bytes())?;
             writer.write_all(b"\n")?;
+            summary.n_records += 1;
+            summary.n_bases += rs.sequence.len() as u64;
+            summary.n_fallbacks += *fallback as usize;
         }
 
         writer.flush()?;
-
-        Ok(())
+        Ok(summary)
     }
 
-    /// Export sequences from a collection to a FASTA file.
+    /// Export sequences to a FASTA file, or to stdout when `output_path` is `"-"`.
     ///
-    /// `line_width` controls sequence wrapping via the sentinel convention:
-    /// `None` defaults to 80 bases per line; `Some(n)` with `n > 0` wraps at `n`;
-    /// `Some(0)` disables wrapping, emitting one sequence per line (unwrapped) as
-    /// GGCAT/SSHash and similar k-mer tooling expect.
-    pub fn export_fasta<K: AsRef<[u8]>, P: AsRef<Path>>(
+    /// `selection` chooses which records to write; `opts.label` chooses how
+    /// each is labeled, the same way whatever the selection. The whole
+    /// `(label, sequence)` list is planned from metadata before any output is
+    /// written, so label errors never leave half a file. A repeated label for
+    /// the same sequence is written once (counted in `n_deduplicated`); a
+    /// repeated label for different sequences is an error.
+    ///
+    /// Record order: collections in the order given (digest order for `All`),
+    /// each in its own order; then, for `All`, sequences in no collection, in
+    /// digest order. When the label uses no collection field (`{seq}`,
+    /// `{seq:NS}`), `All` lists each sequence once in digest order, without
+    /// reading any collection.
+    ///
+    /// Exports stream one sequence at a time and leave the store's loaded
+    /// state unchanged. Collections named by `selection` (all of them for
+    /// `All` with a collection field) must be loaded; [`RefgetStore::export_fasta`]
+    /// loads them.
+    pub fn export_fasta<P: AsRef<Path>>(
         &self,
-        collection_digest: K,
+        selection: &ExportSelection,
         output_path: P,
-        sequence_names: Option<Vec<&str>>,
-        line_width: Option<usize>,
-    ) -> Result<()> {
-        let line_width = line_width.unwrap_or(80);
-        let output_path = output_path.as_ref();
-        // Headers come from the collection's own members so a sequence shared
-        // across collections is exported under this collection's name and
-        // description, not the label of whichever import came first.
-        let coll = self.loaded_coll_row(collection_digest.as_ref()).map_err(|e| {
-            anyhow!(
-                "Collection not found: {:?}: {}",
-                String::from_utf8_lossy(collection_digest.as_ref()),
-                e
-            )
-        })?;
+        opts: &ExportOptions,
+    ) -> Result<ExportSummary> {
+        let line_width = opts.line_width.unwrap_or(80);
+        let maps = self.label_alias_maps(&opts.label)?;
+        let candidates = self.export_candidates(selection, &opts.label)?;
 
-        let names_to_export: Vec<&str> = if let Some(names) = sequence_names {
-            names
-        } else {
-            // Unique names, first-occurrence order (a duplicated name exports
-            // once, as its last member).
-            let mut seen = std::collections::HashSet::new();
+        // Plan: label every record, apply the uniqueness rule.
+        let mut summary = ExportSummary::default();
+        let mut seen: HashMap<String, (DigestKey, String)> = HashMap::new();
+        let mut plan: Vec<PlannedRecord> = Vec::new();
+        for c in candidates {
+            if let Some(m) = opts.molecule {
+                if !m.keeps(&c.meta.alphabet()) {
+                    continue;
+                }
+            }
+            let coll = c.collection.as_ref().map(|(col, name)| (col.as_str(), *name));
+            let (label, fallback) = opts.label.render(c.meta.sha512t24u().as_str(), coll, &maps);
+            check_label_whitespace(&label)?;
+            match seen.get(&label) {
+                Some((key, _)) if *key == c.key => {
+                    summary.n_deduplicated += 1;
+                    continue;
+                }
+                Some((key, first_source)) => {
+                    return Err(label_err!(
+                        "Label '{}' would name two different sequences: {} from {} and {} from {}. \
+                         Add {{col:NS}} or {{col}} to the label (for example '{{col}}/{{name}}') to make labels unique.",
+                        label,
+                        key_to_digest_string(key),
+                        first_source,
+                        c.meta.sha512t24u().as_str(),
+                        source_of(&c.collection)
+                    ));
+                }
+                None => {}
+            }
+            summary.n_fallbacks += fallback as usize;
+            seen.insert(label.clone(), (c.key, source_of(&c.collection)));
+            plan.push(PlannedRecord { label, key: c.key });
+        }
+        drop(seen);
+
+        // Write: stream each record's bytes, read ahead in parallel.
+        let remote = self.remote_source.is_some();
+        let mut writer = open_output(output_path.as_ref())?;
+        let keys: Vec<DigestKey> = plan.iter().map(|r| r.key).collect();
+        let popts = PrefetchOptions {
+            order: PrefetchOrder::Input,
+            write_cache: opts.write_cache,
+            progress: remote && !self.quiet,
+        };
+        let mut fetch = self.prefetch_keys(&keys, popts, DEFAULT_MEMORY_BUDGET)?;
+        let total = plan.len();
+        for (i, rec) in plan.iter().enumerate() {
+            let item = fetch
+                .next()
+                .ok_or_else(|| anyhow!("Sequence data for record {} was not delivered", rec.label))??;
+            debug_assert_eq!(item.digest.to_key(), rec.key);
+            let meta = self
+                .catalog
+                .find_sha(key_to_digest_string(&rec.key))
+                .map(|r| self.catalog.seq(r).to_metadata())
+                .ok_or_else(|| anyhow!("Sequence record not found: {}", key_to_digest_string(&rec.key)))?;
+            write_fasta_record(
+                &mut *writer,
+                &rec.label,
+                &meta,
+                item.bytes(),
+                self.mode,
+                line_width,
+                EXPORT_CHUNK_BASES,
+            )?;
+            drop(item);
+            summary.n_records += 1;
+            summary.n_bases += meta.length as u64;
+            if !self.quiet && ((i + 1) % PROGRESS_EVERY == 0 || i + 1 == total) {
+                let fetched = if remote {
+                    let c = fetch.counters();
+                    format!(", fetched {:.2} GB at {:.1} MB/s", c.bytes_downloaded as f64 / 1e9, c.rate_mb_s())
+                } else {
+                    String::new()
+                };
+                eprintln!(
+                    "exported {}/{} records ({:.2} GB){}",
+                    i + 1,
+                    total,
+                    summary.n_bases as f64 / 1e9,
+                    fetched
+                );
+            }
+        }
+        writer.flush()?;
+        summary.fetch = fetch.counters();
+        drop(fetch);
+        if remote && !self.quiet {
+            eprintln!("{}", summary.fetch.network_line());
+        }
+        Ok(summary)
+    }
+
+    /// Every record a selection reaches, in output order, before labeling.
+    fn export_candidates(
+        &self,
+        selection: &ExportSelection,
+        label: &LabelTemplate,
+    ) -> Result<Vec<Candidate<'_>>> {
+        let global = |key: &DigestKey| -> Result<SeqView<'_>> {
             self.catalog
-                .members(coll)
-                .map(|m| m.name())
-                .filter(|n| seen.insert(*n))
-                .collect()
+                .find_sha(key_to_digest_string(key))
+                .map(|r| self.catalog.seq(r))
+                .ok_or_else(|| anyhow!("Sequence record not found for digest: {}", key_to_digest_string(key)))
         };
+        let mut out: Vec<Candidate<'_>> = Vec::new();
 
-        let file = File::create(output_path).context(format!(
-            "Failed to create output file: {}",
-            output_path.display()
-        ))?;
-
-        let mut writer: Box<dyn Write> = if output_path.extension() == Some(OsStr::new("gz")) {
-            Box::new(GzEncoder::new(BufWriter::new(file), Compression::default()))
-        } else {
-            Box::new(BufWriter::new(file))
-        };
-
-        for seq_name in names_to_export {
-            let member = self
-                .catalog
-                .member_by_name(coll, seq_name)
-                .ok_or_else(|| anyhow!("Sequence '{}' not found in collection", seq_name))?;
-            let meta = member.to_metadata();
-
-            // Only the bytes come from the sequence row.
-            let sequence = self.seq_bytes(member.seq_row()).ok_or_else(|| {
-                anyhow!("Sequence data not loaded for '{}'. Call load_sequence() or load_all_sequences() first.", seq_name)
-            })?;
-
-            write_fasta_record(&mut *writer, &meta, &sequence, self.mode, line_width)?;
+        match selection {
+            ExportSelection::Collections { digests, names } => {
+                if digests.is_empty() {
+                    return Err(anyhow!("No collections selected for export"));
+                }
+                for digest in digests {
+                    self.collection_candidates(digest, names.as_deref(), &global, &mut out)?;
+                }
+            }
+            ExportSelection::SeqDigests(digests) => {
+                for d in digests {
+                    let view = self
+                        .sequence_view(strip_sq_prefix(d))
+                        .ok_or_else(|| anyhow!("Sequence not found: {}", d))?;
+                    let key = view.sha512t24u().to_key();
+                    out.push(Candidate { key, meta: global(&key)?, collection: None });
+                }
+            }
+            ExportSelection::All => {
+                let mut in_collection: HashSet<DigestKey> = HashSet::new();
+                if label.needs_collection() {
+                    let mut coll_digests: Vec<String> = self
+                        .catalog
+                        .coll_rows()
+                        .map(|c| self.catalog.coll_meta(c).digest.clone())
+                        .collect();
+                    coll_digests.sort();
+                    for digest in &coll_digests {
+                        let start = out.len();
+                        self.collection_candidates(digest, None, &global, &mut out)?;
+                        in_collection.extend(out[start..].iter().map(|c| c.key));
+                    }
+                }
+                let mut rest: Vec<(String, DigestKey)> = self
+                    .sequence_views()
+                    .map(|v| (v.sha512t24u().to_string(), v.sha512t24u().to_key()))
+                    .filter(|(_, k)| !in_collection.contains(k))
+                    .collect();
+                rest.sort();
+                for (_, key) in rest {
+                    out.push(Candidate { key, meta: global(&key)?, collection: None });
+                }
+            }
         }
-
-        writer.flush()?;
-
-        Ok(())
+        Ok(out)
     }
 
-    /// Export sequences by their sequence digests to a FASTA file.
-    ///
-    /// There is no collection context here, so each header uses the store-wide
-    /// record's name and description (first import wins for a sequence shared by
-    /// several collections). Use [`Self::export_fasta`] for collection-specific names.
-    ///
-    /// `line_width` follows the same sentinel convention as [`Self::export_fasta`]:
-    /// `None` defaults to 80; `Some(n)` with `n > 0` wraps at `n`; `Some(0)` disables
-    /// wrapping, emitting one sequence per line (unwrapped).
-    pub fn export_fasta_by_digests<P: AsRef<Path>>(
-        &self,
-        seq_digests: Vec<&str>,
-        output_path: P,
-        line_width: Option<usize>,
+    /// Append one collection's records (optionally only `names`) to `out`.
+    fn collection_candidates<'a>(
+        &'a self,
+        digest: &str,
+        names: Option<&[String]>,
+        global: &dyn Fn(&DigestKey) -> Result<SeqView<'a>>,
+        out: &mut Vec<Candidate<'a>>,
     ) -> Result<()> {
-        let line_width = line_width.unwrap_or(80);
-        let output_path = output_path.as_ref();
-
-        let file = File::create(output_path).context(format!(
-            "Failed to create output file: {}",
-            output_path.display()
-        ))?;
-
-        let mut writer: Box<dyn Write> = if output_path.extension() == Some(OsStr::new("gz")) {
-            Box::new(GzEncoder::new(BufWriter::new(file), Compression::default()))
-        } else {
-            Box::new(BufWriter::new(file))
-        };
-
-        for digest_str in seq_digests {
-            let row = self
-                .catalog
-                .find_sha(digest_str)
-                .ok_or_else(|| anyhow!("Sequence record not found for digest: {}", digest_str))?;
-            let sequence = self.seq_bytes(row).ok_or_else(|| {
-                anyhow!("Sequence data not loaded for digest: {}", digest_str)
-            })?;
-            let metadata = self.catalog.seq(row).to_metadata();
-
-            write_fasta_record(&mut *writer, &metadata, &sequence, self.mode, line_width)?;
+        let c = self.loaded_coll_row(digest)?;
+        let digest_str = self.catalog.coll_meta(c).digest.clone();
+        let wanted: Option<HashSet<&str>> = names.map(|ns| ns.iter().map(String::as_str).collect());
+        if let Some(names) = names {
+            let present: HashSet<&str> = self.catalog.members(c).map(|m| m.name()).collect();
+            if let Some(n) = names.iter().find(|n| !present.contains(n.as_str())) {
+                return Err(anyhow!("Sequence '{}' not found in collection {}", n, digest_str));
+            }
         }
-
-        writer.flush()?;
-
+        for m in self.catalog.members(c) {
+            if wanted.as_ref().is_some_and(|w| !w.contains(m.name())) {
+                continue;
+            }
+            let seq_key = m.seq().sha512t24u().to_key();
+            out.push(Candidate {
+                key: seq_key,
+                meta: global(&seq_key)?,
+                collection: Some((digest_str.clone(), m.name())),
+            });
+        }
         Ok(())
     }
 }
 
+fn list_or_none(items: &[String]) -> String {
+    if items.is_empty() {
+        "(none)".to_string()
+    } else {
+        items.join(", ")
+    }
+}
+
+fn check_label_whitespace(label: &str) -> Result<()> {
+    if label.is_empty() {
+        return Err(label_err!("A record's label is empty; FASTA IDs need at least one character"));
+    }
+    if label.chars().any(char::is_whitespace) {
+        return Err(label_err!(
+            "Label '{}' contains whitespace; FASTA IDs end at the first space. Change the label template or the alias.",
+            label
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::store::{FastaImportOptions, RefgetStore};
+    use crate::store::{ExportOptions, ExportSelection, FastaImportOptions, LabelTemplate, RefgetStore};
     use std::io::Write;
+
+    fn coll(digest: &str) -> ExportSelection {
+        ExportSelection::Collections { digests: vec![digest.to_string()], names: None }
+    }
+
+    fn name_opts(line_width: usize) -> ExportOptions {
+        ExportOptions {
+            label: LabelTemplate::parse("name").unwrap(),
+            molecule: None,
+            line_width: Some(line_width),
+            ..Default::default()
+        }
+    }
     use tempfile::{NamedTempFile, TempDir};
 
     /// Build a small in-memory store from a temp FASTA and return it plus the
@@ -520,7 +891,7 @@ mod tests {
     fn export_headers(store: &crate::store::ReadonlyRefgetStore, digest: &str, dir: &TempDir) -> Vec<String> {
         let out = dir.path().join(format!("{}.fa", digest));
         store
-            .export_fasta(digest, &out, None, Some(0))
+            .export_fasta(&coll(digest), &out, &name_opts(0))
             .expect("export collection");
         let content = std::fs::read_to_string(&out).unwrap();
         records(&content).into_iter().map(|(h, _)| h).collect()
@@ -547,7 +918,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let out = dir.path().join("unwrapped.fa");
         readonly
-            .export_fasta(&digest, &out, None, Some(0))
+            .export_fasta(&coll(&digest), &out, &name_opts(0))
             .expect("export unwrapped");
 
         let content = std::fs::read_to_string(&out).unwrap();
@@ -574,7 +945,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let out = dir.path().join("wrapped.fa");
         readonly
-            .export_fasta(&digest, &out, None, Some(80))
+            .export_fasta(&coll(&digest), &out, &name_opts(80))
             .expect("export wrapped");
 
         let content = std::fs::read_to_string(&out).unwrap();
@@ -587,7 +958,7 @@ mod tests {
     }
 
     #[test]
-    fn shared_sequence_exports_with_each_collections_own_header() {
+    fn shared_sequence_exports_with_each_collections_own_name() {
         let (fasta_a, fasta_b) = shared_sequence_fastas();
 
         // Both import orders: the first-imported label must never leak into
@@ -605,13 +976,13 @@ mod tests {
 
             assert_eq!(
                 export_headers(&readonly, &digest_a, &dir),
-                vec!["chr1 ucsc desc".to_string()],
+                vec!["chr1".to_string()],
                 "swap={}",
                 swap
             );
             assert_eq!(
                 export_headers(&readonly, &digest_b, &dir),
-                vec!["1 flybase desc".to_string()],
+                vec!["1".to_string()],
                 "swap={}",
                 swap
             );
@@ -642,7 +1013,7 @@ mod tests {
     }
 
     #[test]
-    fn shared_sequence_disk_roundtrip_exports_own_header() {
+    fn shared_sequence_disk_roundtrip_exports_own_name() {
         let (fasta_a, fasta_b) = shared_sequence_fastas();
         let store_dir = TempDir::new().unwrap();
 
@@ -662,11 +1033,11 @@ mod tests {
         let dir = TempDir::new().unwrap();
         assert_eq!(
             export_headers(&readonly, &digest_b, &dir),
-            vec!["1 flybase desc".to_string()]
+            vec!["1".to_string()]
         );
         assert_eq!(
             export_headers(&readonly, &digest_a, &dir),
-            vec!["chr1 ucsc desc".to_string()]
+            vec!["chr1".to_string()]
         );
 
         let coll_b = readonly.get_collection(&digest_b).unwrap();

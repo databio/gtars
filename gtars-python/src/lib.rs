@@ -5,8 +5,12 @@ static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
+#[cfg(feature = "blast")]
+mod blast;
 #[cfg(feature = "genomic_distributions")]
 mod genomic_distributions;
+#[cfg(feature = "lola")]
+mod lola;
 #[cfg(feature = "models")]
 mod models;
 #[cfg(feature = "refget")]
@@ -17,8 +21,6 @@ mod reftx;
 mod tokenizers;
 #[cfg(any(feature = "utils", feature = "tokenizers"))]
 mod utils;
-#[cfg(feature = "lola")]
-mod lola;
 #[cfg(feature = "vrs")]
 mod vrs;
 
@@ -35,6 +37,14 @@ fn gtars(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
         let refget_module = pyo3::wrap_pymodule!(refget::refget);
         m.add_wrapped(refget_module)?;
         sys_modules.set_item("gtars.refget", m.getattr("refget")?)?;
+    }
+
+    #[cfg(feature = "blast")]
+    {
+        // `gtars.blast` is the Python package in py_src, which wraps this module
+        let blast_module = pyo3::wrap_pymodule!(blast::blast);
+        m.add_wrapped(blast_module)?;
+        sys_modules.set_item("gtars._blast", m.getattr("blast")?)?;
     }
 
     #[cfg(feature = "tokenizers")]

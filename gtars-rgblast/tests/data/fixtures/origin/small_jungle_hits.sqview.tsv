@@ -1,0 +1,32 @@
+# Query: q_human_chrM_2001
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score, query length, score, subject ids, subject titles, subject tax ids
+# 15 hits found
+q_human_chrM_2001	SQ.k3grVkjY-hoWcCUojHw6VU6GE3MZ8Sct	100.000	1000	0	0	1	1000	2001	3000	0.0	1847	1000	1000	SQ.k3grVkjY-hoWcCUojHw6VU6GE3MZ8Sct	Homo sapiens MT; 37 assemblies; length:16569; md5:c68f52674c9fb33aef52dcf399755519	9606
+q_human_chrM_2001	SQ.0OuoW5TtYDY1wRpMuLRWJbm53fqreyy5	99.700	1000	3	0	1	1000	2003	3002	0.0	1831	1000	991	SQ.0OuoW5TtYDY1wRpMuLRWJbm53fqreyy5	Homo sapiens MT; 8 assemblies; length:16571; md5:d2ed829b8a1628d16cbeee88e88e39eb	9606
+q_human_chrM_2001	SQ.IefZqMQcwYR9aHjkjMlErB-KyzfUV9ae	100.000	589	0	0	1	589	2001	2589	0.0	1088	1000	589	SQ.IefZqMQcwYR9aHjkjMlErB-KyzfUV9ae	Homo sapiens MT; 2 assemblies; length:16569; md5:028aaa7be3b3bed6a54927998468bcf1	9606
+q_human_chrM_2001	SQ.IefZqMQcwYR9aHjkjMlErB-KyzfUV9ae	100.000	255	0	0	746	1000	2746	3000	2.54e-134	472	1000	255	SQ.IefZqMQcwYR9aHjkjMlErB-KyzfUV9ae	Homo sapiens MT; 2 assemblies; length:16569; md5:028aaa7be3b3bed6a54927998468bcf1	9606
+q_human_chrM_2001	SQ.uV3NTFNGcRKZYGLZcunCmGmQLXrrl2K1	100.000	589	0	0	1	589	2001	2589	0.0	1088	1000	589	SQ.uV3NTFNGcRKZYGLZcunCmGmQLXrrl2K1	Homo sapiens chrMT; 2 assemblies; length:16569; md5:aeb5ef1acd93046fac553776005c9c35	9606
+q_human_chrM_2001	SQ.uV3NTFNGcRKZYGLZcunCmGmQLXrrl2K1	100.000	255	0	0	746	1000	2746	3000	2.54e-134	472	1000	255	SQ.uV3NTFNGcRKZYGLZcunCmGmQLXrrl2K1	Homo sapiens chrMT; 2 assemblies; length:16569; md5:aeb5ef1acd93046fac553776005c9c35	9606
+q_human_chrM_2001	SQ.gmhw81dugp5_QxJKhdfhdaYV29tyUBG1	99.660	589	2	0	1	589	2003	2591	0.0	1077	1000	583	SQ.gmhw81dugp5_QxJKhdfhdaYV29tyUBG1	Homo sapiens chrM; 2 assemblies; length:16571; md5:d67c5f74ad9327bb5d7ce6b640ca966b	9606
+q_human_chrM_2001	SQ.gmhw81dugp5_QxJKhdfhdaYV29tyUBG1	100.000	255	0	0	746	1000	2748	3002	2.54e-134	472	1000	255	SQ.gmhw81dugp5_QxJKhdfhdaYV29tyUBG1	Homo sapiens chrM; 2 assemblies; length:16571; md5:d67c5f74ad9327bb5d7ce6b640ca966b	9606
+q_human_chrM_2001	SQ.1BOrY0gjxARFX2lPLmYnmsXK8yfyWLAX	75.766	1044	179	66	1	1000	1429	2442	1.98e-130	459	1000	248	SQ.1BOrY0gjxARFX2lPLmYnmsXK8yfyWLAX	Mus musculus MT; 24 assemblies; length:16299; md5:11c8af2a2528b25f2c080ab7da42edda	10090
+q_human_chrM_2001	SQ.w8gn14jG_zQW4KpNcG1_tNL8fejSOGab	73.765	587	99	47	1	555	1429	1992	1.72e-46	180	1000	97	SQ.w8gn14jG_zQW4KpNcG1_tNL8fejSOGab	Mus musculus chrM; 1 assembly; length:16299; md5:ff1cce1ddd649773bbc33825ec459a6b	10090
+q_human_chrM_2001	SQ.w8gn14jG_zQW4KpNcG1_tNL8fejSOGab	81.553	206	26	12	803	1000	2241	2442	2.25e-40	159	1000	86	SQ.w8gn14jG_zQW4KpNcG1_tNL8fejSOGab	Mus musculus chrM; 1 assembly; length:16299; md5:ff1cce1ddd649773bbc33825ec459a6b	10090
+q_human_chrM_2001	SQ.iBbNFSNlZFcA-V-FakgmERXuUxKR06mB	73.765	587	99	47	1	555	1429	1992	1.72e-46	180	1000	97	SQ.iBbNFSNlZFcA-V-FakgmERXuUxKR06mB	Mus musculus chrM; 2 assemblies; length:16299; md5:6bc4d9fea9529b7954b9487bfdca88fe	10090
+q_human_chrM_2001	SQ.iBbNFSNlZFcA-V-FakgmERXuUxKR06mB	81.553	206	26	12	803	1000	2241	2442	2.25e-40	159	1000	86	SQ.iBbNFSNlZFcA-V-FakgmERXuUxKR06mB	Mus musculus chrM; 2 assemblies; length:16299; md5:6bc4d9fea9529b7954b9487bfdca88fe	10090
+q_human_chrM_2001	SQ.B-VllCnCfJo3-IGnJWSu84_owyJJVmdU	74.338	491	73	45	96	555	1524	1992	2.25e-40	159	1000	86	SQ.B-VllCnCfJo3-IGnJWSu84_owyJJVmdU	Mus musculus MT; 1 assembly; length:16299; md5:5a2e1e7878369e0baff4331234459d57	10090
+q_human_chrM_2001	SQ.B-VllCnCfJo3-IGnJWSu84_owyJJVmdU	81.553	206	26	12	803	1000	2241	2442	2.25e-40	159	1000	86	SQ.B-VllCnCfJo3-IGnJWSu84_owyJJVmdU	Mus musculus MT; 1 assembly; length:16299; md5:5a2e1e7878369e0baff4331234459d57	10090
+# Query: q_mouse_chrM_5001
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score, query length, score, subject ids, subject titles, subject tax ids
+# 4 hits found
+q_mouse_chrM_5001	SQ.w8gn14jG_zQW4KpNcG1_tNL8fejSOGab	100.000	1000	0	0	1	1000	5001	6000	0.0	1847	1000	1000	SQ.w8gn14jG_zQW4KpNcG1_tNL8fejSOGab	Mus musculus chrM; 1 assembly; length:16299; md5:ff1cce1ddd649773bbc33825ec459a6b	10090
+q_mouse_chrM_5001	SQ.iBbNFSNlZFcA-V-FakgmERXuUxKR06mB	100.000	1000	0	0	1	1000	5001	6000	0.0	1847	1000	1000	SQ.iBbNFSNlZFcA-V-FakgmERXuUxKR06mB	Mus musculus chrM; 2 assemblies; length:16299; md5:6bc4d9fea9529b7954b9487bfdca88fe	10090
+q_mouse_chrM_5001	SQ.1BOrY0gjxARFX2lPLmYnmsXK8yfyWLAX	100.000	1000	0	0	1	1000	5001	6000	0.0	1847	1000	1000	SQ.1BOrY0gjxARFX2lPLmYnmsXK8yfyWLAX	Mus musculus MT; 24 assemblies; length:16299; md5:11c8af2a2528b25f2c080ab7da42edda	10090
+q_mouse_chrM_5001	SQ.B-VllCnCfJo3-IGnJWSu84_owyJJVmdU	98.900	1000	11	0	1	1000	5001	6000	0.0	1807	1000	978	SQ.B-VllCnCfJo3-IGnJWSu84_owyJJVmdU	Mus musculus MT; 1 assembly; length:16299; md5:5a2e1e7878369e0baff4331234459d57	10090
+# Query: q_ebv_100001
+# Fields: query acc.ver, subject acc.ver, % identity, alignment length, mismatches, gap opens, q. start, q. end, s. start, s. end, evalue, bit score, query length, score, subject ids, subject titles, subject tax ids
+# 1 hits found
+q_ebv_100001	SQ.uaSHwSBbT5ikyk1XiWIGXgBqHUEN-N4k	100.000	1000	0	0	1	1000	100001	101000	0.0	1847	1000	1000	SQ.uaSHwSBbT5ikyk1XiWIGXgBqHUEN-N4k	Homo sapiens chrEBV; 13 assemblies; length:171823; md5:6743bd63b3ff2b5b8985d8933c53290a	9606
+# Query: q_random
+# 0 hits found
+# BLAST processed 4 queries

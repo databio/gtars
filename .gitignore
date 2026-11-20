@@ -21,6 +21,7 @@ uv.lock
 /.idea/vcs.xml
 # this is for "act"
 bin/
+!gtars-rgblast/src/bin/
 /.idea/gtars.iml
 /gtars/tests/data/test1.bw
 

@@ -20,3 +20,5 @@ gtars-overlaprs = { path = "../../../gtars-overlaprs" }
 gtars-lola = { path = "../../../gtars-lola" }
 gtars-tokenizers = { path = "../../../gtars-tokenizers", features = ["huggingface"] }
 serde_json = "1.0"
+gtars-rgblast = { path = "../../../gtars-rgblast" }
+serde = "1.0"

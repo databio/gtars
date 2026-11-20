@@ -1,0 +1,12 @@
+{"label": "proto_t1", "rep": 0, "wall": 2.19, "time_elapsed": "2.18", "maxrss_kb": "195580", "load": ["3.67", "5.52", "5.28"], "rc": 0, "tail": []}
+{"label": "rgmakeblastdb_t1", "rep": 0, "wall": 1.68, "time_elapsed": "1.67", "maxrss_kb": "200292", "load": ["3.62", "5.48", "5.27"], "rc": 0, "tail": []}
+{"label": "proto_t16", "rep": 0, "wall": 0.69, "time_elapsed": "0.69", "maxrss_kb": "1648332", "load": ["3.62", "5.48", "5.27"], "rc": 0, "tail": []}
+{"label": "rgmakeblastdb_t16", "rep": 0, "wall": 0.55, "time_elapsed": "0.55", "maxrss_kb": "1685672", "load": ["3.81", "5.49", "5.27"], "rc": 0, "tail": []}
+{"label": "proto_t1", "rep": 1, "wall": 1.7, "time_elapsed": "1.69", "maxrss_kb": "196044", "load": ["3.81", "5.49", "5.27"], "rc": 0, "tail": []}
+{"label": "rgmakeblastdb_t1", "rep": 1, "wall": 1.67, "time_elapsed": "1.66", "maxrss_kb": "200256", "load": ["3.81", "5.49", "5.27"], "rc": 0, "tail": []}
+{"label": "proto_t16", "rep": 1, "wall": 0.52, "time_elapsed": "0.51", "maxrss_kb": "1660948", "load": ["3.58", "5.42", "5.25"], "rc": 0, "tail": []}
+{"label": "rgmakeblastdb_t16", "rep": 1, "wall": 0.54, "time_elapsed": "0.53", "maxrss_kb": "1650912", "load": ["3.58", "5.42", "5.25"], "rc": 0, "tail": []}
+{"label": "proto_t1", "rep": 2, "wall": 1.64, "time_elapsed": "1.64", "maxrss_kb": "196172", "load": ["4.18", "5.51", "5.28"], "rc": 0, "tail": []}
+{"label": "rgmakeblastdb_t1", "rep": 2, "wall": 1.66, "time_elapsed": "1.65", "maxrss_kb": "200248", "load": ["4.18", "5.51", "5.28"], "rc": 0, "tail": []}
+{"label": "proto_t16", "rep": 2, "wall": 0.54, "time_elapsed": "0.54", "maxrss_kb": "1669508", "load": ["4.00", "5.45", "5.26"], "rc": 0, "tail": []}
+{"label": "rgmakeblastdb_t16", "rep": 2, "wall": 0.57, "time_elapsed": "0.56", "maxrss_kb": "1686944", "load": ["4.00", "5.43", "5.26"], "rc": 0, "tail": []}

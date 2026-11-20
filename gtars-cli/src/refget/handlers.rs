@@ -4,10 +4,11 @@ use anyhow::Result;
 use clap::ArgMatches;
 
 use gtars_refget::store::{
-    FastaImportOptions, LockOptions, RefgetStore, StorageMode, VerifyOptions, VerifyReport,
+    ExportOptions, ExportSelection, FastaImportOptions, FetchConfig, LabelTemplate, LockOptions,
+    Molecule, RefgetStore, StorageMode, VerifyOptions, VerifyReport, default_cache_root,
     force_unlock, lock_status,
 };
-use gtars_refget::{expand_fasta_inputs, FastaInputs};
+use gtars_refget::{FastaInputs, expand_fasta_inputs};
 
 pub fn run_refget(matches: &ArgMatches) -> Result<()> {
     match matches.subcommand() {
@@ -40,7 +41,9 @@ fn run_compact(matches: &ArgMatches) -> Result<()> {
 }
 
 fn run_lock_status(matches: &ArgMatches) -> Result<()> {
-    let store = matches.get_one::<String>("store").expect("store is required");
+    let store = matches
+        .get_one::<String>("store")
+        .expect("store is required");
     let path = std::path::Path::new(store);
 
     match lock_status(path)? {
@@ -152,9 +155,7 @@ fn run_build(matches: &ArgMatches) -> Result<()> {
     let mut total_seqs: usize = 0;
     let start = Instant::now();
 
-    let mut opts = FastaImportOptions::new()
-        .force(force)
-        .jobs(jobs);
+    let mut opts = FastaImportOptions::new().force(force).jobs(jobs);
     if let Some((ns, alias)) = collection_alias.as_ref() {
         opts = opts.collection_alias(ns, alias);
     }
@@ -225,7 +226,11 @@ fn resolve_collection_arg(store: &RefgetStore, raw: &str) -> Result<String> {
                 anyhow::anyhow!(
                     "Collection alias '{}' not found in store. Known aliases: {}",
                     raw,
-                    if known.is_empty() { "(none)".to_string() } else { known.join(", ") }
+                    if known.is_empty() {
+                        "(none)".to_string()
+                    } else {
+                        known.join(", ")
+                    }
                 )
             });
     }
@@ -262,85 +267,138 @@ fn describe_collection(store: &RefgetStore, digest: &str) -> String {
 }
 
 fn run_export(matches: &ArgMatches) -> Result<()> {
-    let store_path = matches
-        .get_one::<String>("store")
-        .expect("store is required");
     let output = matches
         .get_one::<String>("output")
-        .expect("output is required");
-    let requested_collection = matches.get_one::<String>("collection");
-    let names: Option<Vec<&str>> = matches
+        .map(String::as_str)
+        .unwrap_or("-");
+    let requested: Vec<&String> = matches
+        .get_many::<String>("collection")
+        .map(|v| v.collect())
+        .unwrap_or_default();
+    let names: Option<Vec<String>> = matches
         .get_many::<String>("names")
-        .map(|vals| vals.map(|s| s.as_str()).collect());
+        .map(|vals| vals.cloned().collect());
+    let label = LabelTemplate::parse(matches.get_one::<String>("label").expect("has default"))?;
+    let molecule: Option<Molecule> = matches
+        .get_one::<String>("molecule")
+        .map(|m| m.parse())
+        .transpose()?;
     let line_width = *matches.get_one::<usize>("line_width").unwrap_or(&80);
 
-    // Open the store. The manifest gives a stub (metadata) for every
-    // collection, which is all that resolving the digest below needs; the one
-    // collection being exported is loaded lazily by `get_collection`, and its
-    // sequence BYTES only after that, for what this export actually needs.
-    let mut store = RefgetStore::open_local(store_path)
-        .map_err(|e| anyhow::anyhow!("Failed to open store at {}: {}", store_path, e))?;
-
-    // Resolve the collection digest.
-    let collections = store
-        .list_collections(0, usize::MAX, &[])
-        .map_err(|e| anyhow::anyhow!("Failed to list collections: {}", e))?;
-    let digest = match requested_collection {
-        Some(c) => {
-            let resolved = resolve_collection_arg(&store, c)?;
-            if !collections.results.iter().any(|m| m.digest == resolved) {
-                let available: Vec<String> = collections
-                    .results
-                    .iter()
-                    .map(|m| describe_collection(&store, &m.digest))
-                    .collect();
-                return Err(anyhow::anyhow!(
-                    "Collection '{}' not found in store. Available: {}",
-                    c,
-                    available.join(", ")
-                ));
-            }
-            resolved
+    let remote = matches.get_one::<String>("remote");
+    let cache_dir = matches.get_one::<String>("cache_dir");
+    let resume = matches.get_flag("resume");
+    let mut store = match remote {
+        Some(url) => {
+            let fetch = FetchConfig {
+                jobs: *matches.get_one::<usize>("fetch_jobs").expect("has default"),
+                ..FetchConfig::default()
+            };
+            let root = cache_dir
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(default_cache_root);
+            RefgetStore::open_remote(&root, url, &fetch)
+                .map_err(|e| anyhow::anyhow!("Failed to open remote store {}: {:#}", url, e))?
         }
-        None => match collections.results.len() {
-            0 => return Err(anyhow::anyhow!("Store contains no collections to export")),
-            1 => collections.results[0].digest.clone(),
-            _ => {
-                let available: Vec<String> = collections
-                    .results
-                    .iter()
-                    .map(|m| describe_collection(&store, &m.digest))
-                    .collect();
-                return Err(anyhow::anyhow!(
-                    "Store contains multiple collections; specify one with --collection. Available: {}",
-                    available.join(", ")
-                ));
-            }
-        },
+        None => {
+            let store_path = matches
+                .get_one::<String>("store")
+                .expect("store or remote is required");
+            RefgetStore::open_local(store_path)
+                .map_err(|e| anyhow::anyhow!("Failed to open store at {}: {}", store_path, e))?
+        }
     };
 
-    // export_fasta loads only the sequences it writes, never the whole store
-    // (the vgp store holds ~384k sequences / hundreds of GB).
-    let n_names = names.as_ref().map(|v| v.len());
-    store
-        .export_fasta(&digest, output, names, Some(line_width))
-        .map_err(|e| anyhow::anyhow!("Failed to export FASTA: {}", e))?;
-
-    let wrap_desc = if line_width == 0 {
-        "unwrapped (one sequence per line)".to_string()
+    let selection = if matches.get_flag("all") {
+        ExportSelection::All
     } else {
-        format!("wrapped at {} bases/line", line_width)
+        let collections = store
+            .list_collections(0, usize::MAX, &[])
+            .map_err(|e| anyhow::anyhow!("Failed to list collections: {}", e))?;
+        let available = || -> String {
+            collections
+                .results
+                .iter()
+                .map(|m| describe_collection(&store, &m.digest))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let digests: Vec<String> = if requested.is_empty() {
+            match collections.results.len() {
+                0 => return Err(anyhow::anyhow!("Store contains no collections to export")),
+                1 => vec![collections.results[0].digest.clone()],
+                _ => {
+                    return Err(anyhow::anyhow!(
+                        "Store contains multiple collections; specify one with --collection, or use --all. Available: {}",
+                        available()
+                    ));
+                }
+            }
+        } else {
+            let mut out = Vec::new();
+            for c in requested {
+                let resolved = resolve_collection_arg(&store, c)?;
+                if !collections.results.iter().any(|m| m.digest == resolved) {
+                    return Err(anyhow::anyhow!(
+                        "Collection '{}' not found in store. Available: {}",
+                        c,
+                        available()
+                    ));
+                }
+                out.push(resolved);
+            }
+            out
+        };
+        ExportSelection::Collections { digests, names }
     };
-    let seq_desc = match n_names {
-        Some(n) => format!("{} named sequence(s)", n),
-        None => "all sequences".to_string(),
+
+    let opts = ExportOptions {
+        label,
+        molecule,
+        line_width: Some(line_width),
+        write_cache: resume || cache_dir.is_some(),
     };
+    let summary = match store.export_fasta(&selection, output, &opts) {
+        Ok(s) => s,
+        Err(e) if is_broken_pipe(&e) => return Ok(()),
+        Err(e) => return Err(anyhow::anyhow!("Failed to export FASTA: {}", e)),
+    };
+
+    let mut notes = Vec::new();
+    if summary.n_fallbacks > 0 {
+        notes.push(format!(
+            "{} label(s) fell back to a digest",
+            summary.n_fallbacks
+        ));
+    }
+    if summary.n_deduplicated > 0 {
+        notes.push(format!(
+            "{} repeated record(s) written once",
+            summary.n_deduplicated
+        ));
+    }
+    let dest = if output == "-" { "stdout" } else { output };
     eprintln!(
-        "Exported collection {} ({}) to {} [{}]",
-        digest, seq_desc, output, wrap_desc
+        "Exported {} record(s), {} bases, to {}{}",
+        summary.n_records,
+        summary.n_bases,
+        dest,
+        if notes.is_empty() {
+            String::new()
+        } else {
+            format!(" ({})", notes.join("; "))
+        }
     );
 
     Ok(())
+}
+
+/// Did the export fail because the reader closed the pipe (as `| head` does)?
+fn is_broken_pipe(e: &anyhow::Error) -> bool {
+    e.chain().any(|c| {
+        c.downcast_ref::<std::io::Error>()
+            .is_some_and(|io| io.kind() == std::io::ErrorKind::BrokenPipe)
+    })
 }
 
 /// Strip an optional `SQ.` prefix, matching the convention used elsewhere for
@@ -373,7 +431,9 @@ fn write_verify_tsv<W: std::io::Write>(mut out: W, report: &VerifyReport) -> Res
 }
 
 fn run_verify(matches: &ArgMatches) -> Result<()> {
-    let store_path = matches.get_one::<String>("store").expect("store is required");
+    let store_path = matches
+        .get_one::<String>("store")
+        .expect("store is required");
     let requested_collection = matches.get_one::<String>("collection");
     let digests: Option<Vec<String>> = matches
         .get_many::<String>("digest")
@@ -391,7 +451,11 @@ fn run_verify(matches: &ArgMatches) -> Result<()> {
     eprintln!(
         "Verifying store at {} (jobs={}, check_md5={})",
         store_path,
-        if jobs == 0 { "auto".to_string() } else { jobs.to_string() },
+        if jobs == 0 {
+            "auto".to_string()
+        } else {
+            jobs.to_string()
+        },
         check_md5,
     );
 

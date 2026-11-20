@@ -4,6 +4,7 @@ pub mod genomicdist;
 pub mod igd;
 pub mod io;
 pub mod lola;
+pub mod blast;
 pub mod refget;
 
 #[extendr]
@@ -15,6 +16,7 @@ extendr_module! {
     use io;
     use igd;
     use lola;
+    use blast;
     use refget;
     fn __init__;
 }

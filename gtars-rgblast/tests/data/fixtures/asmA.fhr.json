@@ -1,0 +1,5 @@
+{
+  "schema": "https://raw.githubusercontent.com/FAIRtracks/fhr-spec/main/fhr.json",
+  "genome": "Testus fixturus",
+  "version": "asmA.1"
+}

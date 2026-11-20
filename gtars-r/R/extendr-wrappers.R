@@ -508,11 +508,38 @@ on_disk_store <- function(path) .Call(wrap__on_disk_store, path)
 #' @param root_path Path to read store from
 open_local_store <- function(root_path) .Call(wrap__open_local_store, root_path)
 
-#' Open a remote RefgetStore with local caching
+#' Open a remote RefgetStore over the shared cache
 #' @export
-#' @param cache_path Local directory to cache downloaded metadata and sequences
+#' @param cache_path Cache root shared by all remote stores
 #' @param remote_url Base URL of the remote refget store
-open_remote_store <- function(cache_path, remote_url) .Call(wrap__open_remote_store, cache_path, remote_url)
+#' @param fetch_jobs Parallel HTTP requests
+open_remote_store <- function(cache_path, remote_url, fetch_jobs) .Call(wrap__open_remote_store, cache_path, remote_url, fetch_jobs)
+
+#' Download sequences into the shared cache, in parallel
+#' @param store_ptr External pointer to RefgetStore
+#' @param digests Sequence digests
+#' @param progress Print a progress line to stderr every 5 s
+cache_sequences_store <- function(store_ptr, digests, progress) .Call(wrap__cache_sequences_store, store_ptr, digests, progress)
+
+#' Network and cache counters since the store opened
+#' @param store_ptr External pointer to RefgetStore
+fetch_stats_store <- function(store_ptr) .Call(wrap__fetch_stats_store, store_ptr)
+
+#' Load several collections (a remote store downloads them in parallel)
+#' @param store_ptr External pointer to RefgetStore
+#' @param digests Collection digests
+load_collections_store <- function(store_ptr, digests) .Call(wrap__load_collections_store, store_ptr, digests)
+
+#' The default shared cache root
+default_cache_dir_raw <- function() .Call(wrap__default_cache_dir_raw)
+
+#' Summary of the cache at a root
+#' @param root Cache root
+cache_info_raw <- function(root) .Call(wrap__cache_info_raw, root)
+
+#' Delete everything in the cache; returns the bytes freed
+#' @param root Cache root
+clear_cache_raw <- function(root) .Call(wrap__clear_cache_raw, root)
 
 #' Enable 2-bit encoding for space efficiency
 #' @param store_ptr External pointer to RefgetStore
@@ -711,27 +738,25 @@ write_store_to_directory_store <- function(store_ptr, root_path, seqdata_path_te
 #' @param store_ptr External pointer to RefgetStore
 write_store <- function(store_ptr) .Call(wrap__write_store, store_ptr)
 
-#' Export sequences from a collection to FASTA
+#' Export sequences to FASTA (a file, or stdout with "-")
 #' @param store_ptr External pointer to RefgetStore
-#' @param collection_digest Collection digest
-#' @param output_path Output FASTA file path
-#' @param sequence_names Optional vector of sequence names to export (NULL for all)
-#' @param line_width Bases per line (default 80)
-export_fasta_store <- function(store_ptr, collection_digest, output_path, sequence_names, line_width) .Call(wrap__export_fasta_store, store_ptr, collection_digest, output_path, sequence_names, line_width)
-
-#' Export sequences by their digests to FASTA
-#' @param store_ptr External pointer to RefgetStore
-#' @param seq_digests Vector of sequence digests
-#' @param output_path Output FASTA file path
-#' @param line_width Bases per line (default 80)
-export_fasta_by_digests_store <- function(store_ptr, seq_digests, output_path, line_width) .Call(wrap__export_fasta_by_digests_store, store_ptr, seq_digests, output_path, line_width)
+#' @param output_path Output FASTA file path, or "-" for stdout
+#' @param collections Collection digests (NULL unless selecting collections)
+#' @param names Sequence names to keep in each collection (NULL for all)
+#' @param seq_digests Sequence digests (NULL unless selecting by digest)
+#' @param all Export every collection plus sequences in no collection
+#' @param label Label template, e.g. "{seq}", "name", "{col}/{name}"
+#' @param molecule NULL, "dna" or "protein"
+#' @param line_width Bases per line (0 = unwrapped, negative = default 80)
+export_fasta_store <- function(store_ptr, output_path, collections, names, seq_digests, all, label, molecule, line_width, write_cache) .Call(wrap__export_fasta_store, store_ptr, output_path, collections, names, seq_digests, all, label, molecule, line_width, write_cache)
 
 #' Extract BED file sequences from store as FASTA
 #' @param store_ptr External pointer to RefgetStore
 #' @param collection_digest Sequence collection digest
 #' @param bed_file_path Path to BED file
-#' @param output_file_path Path to output FASTA file
-get_seqs_bed_file_store <- function(store_ptr, collection_digest, bed_file_path, output_file_path) .Call(wrap__get_seqs_bed_file_store, store_ptr, collection_digest, bed_file_path, output_file_path)
+#' @param output_file_path Path to output FASTA file, or "-" for stdout
+#' @param label Label template; ":start-end" is appended to each label
+get_seqs_bed_file_store <- function(store_ptr, collection_digest, bed_file_path, output_file_path, label) .Call(wrap__get_seqs_bed_file_store, store_ptr, collection_digest, bed_file_path, output_file_path, label)
 
 #' Extract BED file sequences from store into memory
 #' @param store_ptr External pointer to RefgetStore
@@ -861,6 +886,17 @@ list_fhr_metadata_store <- function(store_ptr) .Call(wrap__list_fhr_metadata_sto
 #' @param collection_digest Collection digest
 #' @param path Path to JSON file
 load_fhr_metadata_store <- function(store_ptr, collection_digest, path) .Call(wrap__load_fhr_metadata_store, store_ptr, collection_digest, path)
+
+
+blast_start_rs <- function(argv) .Call(wrap__blast_start_rs, argv)
+
+blast_poll_rs <- function(job, wait_ms) .Call(wrap__blast_poll_rs, job, wait_ms)
+
+blast_cancel_rs <- function(job) invisible(.Call(wrap__blast_cancel_rs, job))
+
+blast_report_fields_rs <- function() .Call(wrap__blast_report_fields_rs)
+
+blast_summary_columns_rs <- function() .Call(wrap__blast_summary_columns_rs)
 
 
 # nolint end

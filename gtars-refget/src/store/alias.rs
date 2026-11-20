@@ -868,8 +868,6 @@ impl RefgetStore {
         namespace: Option<&str>,
         strategy: SyncStrategy,
     ) -> Result<PullResult> {
-        let mut result = PullResult::default();
-
         let seq_namespaces: Vec<String> = match namespace {
             Some(ns) => vec![ns.to_string()],
             None => self.inner.available_sequence_alias_namespaces.clone(),
@@ -878,14 +876,23 @@ impl RefgetStore {
             Some(ns) => vec![ns.to_string()],
             None => self.inner.available_collection_alias_namespaces.clone(),
         };
+        self.pull_alias_namespaces(&seq_namespaces, &coll_namespaces, strategy)
+    }
 
-        for ns in &seq_namespaces {
-            self.pull_alias_file(ns, "sequences", &strategy, &mut result)?;
-        }
-
-        for ns in &coll_namespaces {
-            self.pull_alias_file(ns, "collections", &strategy, &mut result)?;
-        }
+    /// Pull the given sequence and collection alias namespaces in one
+    /// parallel batch.
+    pub(crate) fn pull_alias_namespaces(
+        &mut self,
+        seq_namespaces: &[String],
+        coll_namespaces: &[String],
+        strategy: SyncStrategy,
+    ) -> Result<PullResult> {
+        let rels: Vec<String> = seq_namespaces
+            .iter()
+            .map(|ns| format!("aliases/sequences/{}.tsv", ns))
+            .chain(coll_namespaces.iter().map(|ns| format!("aliases/collections/{}.tsv", ns)))
+            .collect();
+        let (result, _) = self.inner.sync_sidecars(&rels, &strategy)?;
 
         if result.pulled > 0 {
             if let Some(ref local_path) = self.inner.local_path {
@@ -896,102 +903,6 @@ impl RefgetStore {
         }
 
         Ok(result)
-    }
-
-    /// Pull a single alias TSV file.
-    fn pull_alias_file(
-        &self,
-        namespace: &str,
-        kind: &str,
-        strategy: &SyncStrategy,
-        result: &mut PullResult,
-    ) -> Result<()> {
-        let relative_path = format!("aliases/{}/{}.tsv", kind, namespace);
-
-        match strategy {
-            SyncStrategy::KeepOurs => {
-                let was_local = self
-                    .inner
-                    .local_path
-                    .as_ref()
-                    .map(|p| p.join(&relative_path).exists())
-                    .unwrap_or(false);
-                match ReadonlyRefgetStore::fetch_file(
-                    &self.inner.local_path,
-                    &self.inner.remote_source,
-                    &relative_path,
-                    self.inner.persist_to_disk,
-                    false,
-                ) {
-                    Ok(_) => {
-                        if was_local {
-                            result.skipped += 1;
-                        } else {
-                            result.pulled += 1;
-                        }
-                    }
-                    Err(_) => {
-                        result.not_found += 1;
-                    }
-                }
-            }
-            SyncStrategy::KeepTheirs => {
-                match ReadonlyRefgetStore::fetch_file(
-                    &self.inner.local_path,
-                    &self.inner.remote_source,
-                    &relative_path,
-                    self.inner.persist_to_disk,
-                    true,
-                ) {
-                    Ok(_) => {
-                        result.pulled += 1;
-                    }
-                    Err(_) => {
-                        result.not_found += 1;
-                    }
-                }
-            }
-            SyncStrategy::Notify => {
-                let local_exists = self
-                    .inner
-                    .local_path
-                    .as_ref()
-                    .map(|p| p.join(&relative_path).exists())
-                    .unwrap_or(false);
-
-                if local_exists {
-                    match ReadonlyRefgetStore::fetch_file(
-                        &None,
-                        &self.inner.remote_source,
-                        &relative_path,
-                        false,
-                        false,
-                    ) {
-                        Ok(remote_data) => {
-                            let local_path = self
-                                .inner
-                                .local_path
-                                .as_ref()
-                                .unwrap()
-                                .join(&relative_path);
-                            let local_data = fs::read(&local_path)?;
-                            if local_data != remote_data {
-                                result.conflicts.push(relative_path);
-                            } else {
-                                result.skipped += 1;
-                            }
-                        }
-                        Err(_) => {
-                            result.not_found += 1;
-                        }
-                    }
-                } else {
-                    result.conflicts.push(relative_path);
-                }
-            }
-        }
-
-        Ok(())
     }
 }
 
@@ -1749,6 +1660,9 @@ mod tests {
         fs::create_dir_all(&local_store_path).unwrap();
 
         let mut store = RefgetStore::on_disk(&local_store_path).unwrap();
+        store.inner.fetcher = Some(std::sync::Arc::new(
+            super::fetch::Fetcher::new(&base_url, super::FetchConfig::default()).unwrap(),
+        ));
         store.inner.remote_source = Some(base_url);
         // Advertise "ncbi" as an available namespace for both sequences and collections.
         // pull_aliases(Some("ncbi"), ...) pulls both kinds, so we need both files on remote.

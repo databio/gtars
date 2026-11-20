@@ -275,14 +275,14 @@ class TestRefget:
 
             temp_output_fa_path = os.path.join(temp_dir, "output.fa")
             store.export_fasta_from_regions(
-                collection_digest, temp_bed_path, temp_output_fa_path
+                collection_digest, temp_bed_path, temp_output_fa_path, label="name"
             )
 
             with open(temp_output_fa_path, "r") as f:
                 output_fa_content = f.read()
 
             # export_fasta_from_regions writes one record per BED region with a
-            # `>{chrom}:{start}-{end}` header (see gtars-refget export.rs, PR #259).
+            # `>{label}:{start}-{end}` header; label="name" gives `>{chrom}:...`.
             expected_fa_content = (
                 ">chr1:0-5\nATGCA\n>chr1:8-12\nATGC\n>chr2:0-4\nGGGG\n"
             )
@@ -622,7 +622,7 @@ class TestRefget:
         with tempfile.TemporaryDirectory() as tmpdir:
             # Export all sequences
             output_path = os.path.join(tmpdir, "all.fa")
-            store.export_fasta(collection_digest, output_path, None, None)
+            store.export_fasta(output_path, collections=collection_digest, label="name")
 
             with open(output_path) as f:
                 content = f.read()
@@ -632,7 +632,13 @@ class TestRefget:
 
             # Export subset
             subset_path = os.path.join(tmpdir, "subset.fa")
-            store.export_fasta(collection_digest, subset_path, ["chr1", "chr2"], 60)
+            store.export_fasta(
+                subset_path,
+                collections=collection_digest,
+                names=["chr1", "chr2"],
+                label="name",
+                line_width=60,
+            )
 
             with open(subset_path) as f:
                 subset_content = f.read()
@@ -641,7 +647,7 @@ class TestRefget:
             assert ">chr2" in subset_content
 
     def test_export_fasta_by_digests(self):
-        """Test export_fasta_by_digests() exports specific sequences by digest"""
+        """Test export_fasta(seq_digests=...) exports specific sequences by digest"""
         store = RefgetStore.in_memory()
         store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
 
@@ -651,7 +657,7 @@ class TestRefget:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = os.path.join(tmpdir, "by_digest.fa")
-            store.export_fasta_by_digests([sha_chr1, sha_chr2], output_path, None)
+            store.export_fasta(output_path, seq_digests=[sha_chr1, sha_chr2])
 
             with open(output_path) as f:
                 content = f.read()
@@ -1303,7 +1309,8 @@ def test_remote_three_flows(tmp_path):
     digest = coll.sequences[0].metadata.sha512t24u
 
     def seq_files():
-        return [f for _, _, fs in os.walk(str(cache)) for f in fs if f.endswith(".seq")]
+        # The shared cache keeps sequences under <root>/sequences/<tag>/.
+        return [f for _, _, fs in os.walk(str(cache / "sequences")) for f in fs if f.endswith(".seq")]
 
     # Flow 1: lean partial read of an interior window. Must persist nothing.
     sub = store.get_substring(digest, 1_000_000, 1_000_060)
@@ -1341,7 +1348,7 @@ def test_remote_store_lookups_load_deferred_index(tmp_path):
     writer.add_sequence_collection_from_fasta(str(fasta))
     writer.write()
 
-    # A separate process: the binding holds the GIL during HTTP fetches.
+    # A separate process keeps the server off this interpreter's threads.
     server = subprocess.Popen(
         [sys.executable, "-u", "-m", "http.server", "0", "--bind", "127.0.0.1",
          "--directory", str(served)],
@@ -1434,3 +1441,131 @@ def test_verify_digests_subset_limits_n_checked(tmp_path):
 
     with pytest.raises(ValueError):
         store.verify(digests=[one_digest], collection="whatever")
+
+
+# ---------------------------------------------------------------------------
+# Parallel remote fetch and the shared cache (local HTTP fixture)
+# ---------------------------------------------------------------------------
+
+
+import contextlib
+import json as _json
+
+
+@contextlib.contextmanager
+def _served(directory, log, *extra):
+    import re
+    import subprocess
+    import sys
+
+    fixture = os.path.join(os.path.dirname(__file__), "http_fixture.py")
+    proc = subprocess.Popen(
+        [sys.executable, "-u", fixture, "--directory", str(directory), "--log", str(log), *extra],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+    )
+    try:
+        port = re.search(r"port (\d+)", proc.stdout.readline())[1]
+        yield f"http://127.0.0.1:{port}/s/"
+    finally:
+        proc.kill()
+        proc.wait()
+
+
+def _requests(log, substring):
+    if not os.path.exists(log):
+        return []
+    with open(log) as f:
+        return [r for r in map(_json.loads, f) if substring in r["path"]]
+
+
+def _small_remote_store(tmp_path):
+    served = tmp_path / "served"
+    fasta = tmp_path / "a.fa"
+    fasta.write_text(">chr1\n" + "ACGT" * 50 + "\n>chr2\n" + "GGCCA" * 30 + "\n>chr3\nTTTT\n")
+    writer = RefgetStore.on_disk(str(served))
+    writer.add_sequence_collection_from_fasta(str(fasta))
+    writer.write()
+    digests = [m.sha512t24u for m in RefgetStore.open_local(str(served)).list_sequences()]
+    return served, digests
+
+
+def test_open_remote_options_cache_sequences_and_fetch_stats(tmp_path):
+    served, digests = _small_remote_store(tmp_path)
+    log = tmp_path / "log.jsonl"
+    cache = tmp_path / "cache"
+    with _served(served, log) as url:
+        store = RefgetStore.open_remote(str(cache), url, fetch_jobs=4)
+        store.set_quiet(True)
+        first = store.cache_sequences(digests)
+        assert first["sequences_fetched"] == 3
+        assert first["bytes_downloaded"] > 0
+        n_seq = len(_requests(log, ".seq"))
+        assert n_seq == 3
+        second = store.cache_sequences(digests)
+        assert second["cache_hits"] == 3
+        assert second["sequences_fetched"] == 0
+        assert len(_requests(log, ".seq")) == n_seq, "a warm call makes no sequence requests"
+        stats = store.fetch_stats()
+        assert stats["requests"] >= 3 and stats["cache_hits"] == 3
+        assert len(list((cache / "sequences").rglob("*.seq"))) == 3
+        assert len(list((cache / "remotes").iterdir())) == 1
+
+
+def test_export_fasta_write_cache_then_cache_hit(tmp_path):
+    served, digests = _small_remote_store(tmp_path)
+    log = tmp_path / "log.jsonl"
+    cache = tmp_path / "cache"
+    with _served(served, log) as url:
+        store = RefgetStore.open_remote(str(cache), url)
+        store.set_quiet(True)
+        out = tmp_path / "a.fa"
+        plain = store.export_fasta(str(out), all=True)
+        assert plain["fetch"]["sequences_fetched"] == 3
+        assert not list((cache / "sequences").rglob("*.seq")), "a plain export caches nothing"
+        first = store.export_fasta(str(out), all=True, write_cache=True)
+        assert first["n_records"] == 3
+        second = store.export_fasta(str(out), all=True, write_cache=True)
+        assert second["fetch"]["cache_hits"] == 3
+        assert second["fetch"]["sequences_fetched"] == 0
+        assert out.read_text().count(">") == 3
+
+
+def test_retried_503_and_progress_line(tmp_path, capfd):
+    served, digests = _small_remote_store(tmp_path)
+    log = tmp_path / "log.jsonl"
+    with _served(served, log, "--fail-first", "2", "--fail-status", "503", "--match", ".seq") as url:
+        store = RefgetStore.open_remote(str(tmp_path / "cache"), url)
+        store.set_quiet(True)
+        counters = store.cache_sequences(digests, progress=True)
+        assert counters["retries"] == 2
+        assert counters["sequences_fetched"] == 3
+        assert "fetch: 3/3 sequences" in capfd.readouterr().err
+
+
+def test_default_cache_dir_follows_env(monkeypatch, tmp_path):
+    from gtars.refget import default_cache_dir
+
+    monkeypatch.setenv("REFGET_CACHE_DIR", str(tmp_path / "rc"))
+    assert default_cache_dir() == str(tmp_path / "rc")
+    monkeypatch.delenv("REFGET_CACHE_DIR")
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
+    assert default_cache_dir() == str(tmp_path / "xdg" / "refget")
+
+
+def test_cache_info_and_clear_cache(tmp_path):
+    from gtars.refget import cache_info, clear_cache
+
+    served, digests = _small_remote_store(tmp_path)
+    log = tmp_path / "log.jsonl"
+    cache = tmp_path / "cache"
+    with _served(served, log) as url:
+        store = RefgetStore.open_remote(str(cache), url)
+        store.set_quiet(True)
+        store.cache_sequences(digests)
+        info = cache_info(str(cache))
+        assert info["sequence_files"] == 3
+        assert [r["url"] for r in info["remotes"]] == [url.rstrip("/")]
+        assert clear_cache(str(cache)) >= info["sequence_bytes"]
+        after = cache_info(str(cache))
+        assert after["sequence_files"] == 0 and after["remotes"] == []
+        assert clear_cache(str(cache)) == 0

@@ -1,0 +1,53 @@
+# SUBJECT_PLAN_VERSION=2
+#oid	digest	defline	ids	title
+0	0qz3i6ptdG3_7ZgLCCp-Uw7KFI5Xu74s	0	lcl|SQ.0qz3i6ptdG3_7ZgLCCp-Uw7KFI5Xu74s lcl|CM000001.1 lcl|NC_TEST.1	unknown species chr1; 2 assemblies; length:1000; md5:a853f8f5e5623e0f13acd693d4f238b2
+0	0qz3i6ptdG3_7ZgLCCp-Uw7KFI5Xu74s	1	gnl|asmA|chr1 gnl|Y_voZA1zHPUvfzOD3pPZCibEJbAVqb5R|chr1	asmA
+0	0qz3i6ptdG3_7ZgLCCp-Uw7KFI5Xu74s	2	gnl|asmB|chr1 gnl|HSJLe9CBFGybW7SDzUCmJTYCqnydiTZJ|chr1	asmB
+1	p97DXk_mPGfzC6rWFqntwMeb7XYZXL_f	0	lcl|SQ.p97DXk_mPGfzC6rWFqntwMeb7XYZXL_f	unknown species chr2; 2 assemblies; length:12670; md5:3d0f95290354d3519e17c47919633b0a
+1	p97DXk_mPGfzC6rWFqntwMeb7XYZXL_f	1	gnl|asmA|chr2 gnl|Y_voZA1zHPUvfzOD3pPZCibEJbAVqb5R|chr2	asmA N runs 1 15 16 4095 4096 4097
+1	p97DXk_mPGfzC6rWFqntwMeb7XYZXL_f	2	gnl|asmB|chrUn_x gnl|HSJLe9CBFGybW7SDzUCmJTYCqnydiTZJ|chrUn_x	asmB
+2	3yZw5U1MFeSTWRQXlfH999lL8oO9qvFf	0	lcl|SQ.3yZw5U1MFeSTWRQXlfH999lL8oO9qvFf lcl|123456	unknown species chrM; 1 assembly; length:400; md5:c5882571e07ffe7464c5397ca0e8c4fd
+2	3yZw5U1MFeSTWRQXlfH999lL8oO9qvFf	1	gnl|asmA|chrM gnl|Y_voZA1zHPUvfzOD3pPZCibEJbAVqb5R|chrM	asmA
+3	S-pndRFYUOX6mpDwnC1_3HyfAkiTEJ24	0	lcl|SQ.S-pndRFYUOX6mpDwnC1_3HyfAkiTEJ24	unknown species iupac1; 1 assembly; length:300; md5:e8257c90c0503c4b65ccbf8b2d809f6b
+3	S-pndRFYUOX6mpDwnC1_3HyfAkiTEJ24	1	gnl|asmA|iupac1 gnl|Y_voZA1zHPUvfzOD3pPZCibEJbAVqb5R|iupac1	asmA
+4	kZdFQqnBkeVKwvj1fKHFPTshzusEGw3z	0	lcl|SQ.kZdFQqnBkeVKwvj1fKHFPTshzusEGw3z	unknown species ENA|KI270740|KI270740.1; 1 assembly; length:200; md5:53d33cf4567eaf627ca896630fb92628
+4	kZdFQqnBkeVKwvj1fKHFPTshzusEGw3z	1	gnl|asmA|ENA_KI270740_KI270740.1 gnl|Y_voZA1zHPUvfzOD3pPZCibEJbAVqb5R|ENA_KI270740_KI270740.1	asmA Homo sapiens test contig
+5	OICCT9h0s-hlYym2D_aJgUGLkOSIMt4W	0	lcl|SQ.OICCT9h0s-hlYym2D_aJgUGLkOSIMt4W	unknown species chrX;alt; 1 assembly; length:150; md5:66ed38124c1f090675c2ba521ceb2844
+5	OICCT9h0s-hlYym2D_aJgUGLkOSIMt4W	1	gnl|asmA|chrX_alt gnl|Y_voZA1zHPUvfzOD3pPZCibEJbAVqb5R|chrX_alt	asmA
+6	1ZONVh1Ux7Nbvqt1P1z3guQjs8HIpS8i	0	lcl|SQ.1ZONVh1Ux7Nbvqt1P1z3guQjs8HIpS8i	unknown species HLA-A*01:01:01:01; 1 assembly; length:120; md5:92375fc930026b8224226cadf1f38bfc
+6	1ZONVh1Ux7Nbvqt1P1z3guQjs8HIpS8i	1	gnl|asmA|HLA-A*01:01:01:01 gnl|Y_voZA1zHPUvfzOD3pPZCibEJbAVqb5R|HLA-A*01:01:01:01	asmA
+7	dHJYUvl1OvCUWvNOne5mlxCzfH1Io5c3	0	lcl|SQ.dHJYUvl1OvCUWvNOne5mlxCzfH1Io5c3 lcl|0099	unknown species chrB1; 1 assembly; length:1001; md5:6038cdcada707fbe925dd9772bd0fb5b
+7	dHJYUvl1OvCUWvNOne5mlxCzfH1Io5c3	1	gnl|asmB|chrB1 gnl|HSJLe9CBFGybW7SDzUCmJTYCqnydiTZJ|chrB1	asmB
+8	Homw-m2zlyrgaQ38lpXbQv8axAnW9wtw	0	lcl|SQ.Homw-m2zlyrgaQ38lpXbQv8axAnW9wtw	unknown species chrB2; 1 assembly; length:1002; md5:2e02a07f6a576e3b24144bc5754c798c
+8	Homw-m2zlyrgaQ38lpXbQv8axAnW9wtw	1	gnl|asmB|chrB2 gnl|HSJLe9CBFGybW7SDzUCmJTYCqnydiTZJ|chrB2	asmB
+9	m4EMbwL31HttXm6Y7ADy9QK__-uBrOGt	0	lcl|SQ.m4EMbwL31HttXm6Y7ADy9QK__-uBrOGt	unknown species chrB3; 1 assembly; length:1003; md5:8b9d059ee5c0e70f33e38b8b587592f4
+9	m4EMbwL31HttXm6Y7ADy9QK__-uBrOGt	1	gnl|asmB|chrB3 gnl|HSJLe9CBFGybW7SDzUCmJTYCqnydiTZJ|chrB3	asmB
+10	srhtm0qpvi1tMvgRyhSe1uux0OnXnfyR	0	lcl|SQ.srhtm0qpvi1tMvgRyhSe1uux0OnXnfyR	unknown species c1; 1 assembly; length:500; md5:37ebef711878dc792e71b935d0a742c8
+10	srhtm0qpvi1tMvgRyhSe1uux0OnXnfyR	1	gnl|asmC|c1 gnl|asmC-alt|c1 gnl|GCF_TEST.1|c1 gnl|xebuU0h9Vkdyfnrz56Z1qg3vf-rexgeI|c1	asmC (GCF_TEST.1)
+11	HxZK3MmsH2afXP2OhAW4QbO2D5HAxEwN	0	lcl|SQ.HxZK3MmsH2afXP2OhAW4QbO2D5HAxEwN	unknown species c2; 1 assembly; length:64; md5:57f262039df874fe7426e7dbc4dd9485
+11	HxZK3MmsH2afXP2OhAW4QbO2D5HAxEwN	1	gnl|asmC|c2 gnl|asmC-alt|c2 gnl|GCF_TEST.1|c2 gnl|xebuU0h9Vkdyfnrz56Z1qg3vf-rexgeI|c2	asmC (GCF_TEST.1)
+12	5-SIvlSCgNb2gvpu1E-vEWyufL3s4XUt	0	lcl|SQ.5-SIvlSCgNb2gvpu1E-vEWyufL3s4XUt	unknown species dash36; 1 assembly; length:80; md5:33bd4d0a17a68125a4f3deb1a50f6dc1
+12	5-SIvlSCgNb2gvpu1E-vEWyufL3s4XUt	1	gnl|asmD|dash36 gnl|-mUDCQQpL9DEJNAWJwKUihDtm1yGTnoP|dash36	asmD
+13	leAbEgEMVk-rALHfHnZGTwE49PgmpJ1i	0	lcl|SQ.leAbEgEMVk-rALHfHnZGTwE49PgmpJ1i	unknown species 0; 1 assembly; length:40; md5:ed58c8d52cbd5b9f745ca03100043d4b
+13	leAbEgEMVk-rALHfHnZGTwE49PgmpJ1i	1	gnl|numeric|0 gnl|OAe-bP3x6HQHegqa1NAOIGLSd_vSA-RV|0	numeric
+14	fYi605HFnWDwRSRMW5-qJhHco5uAF2hT	0	lcl|SQ.fYi605HFnWDwRSRMW5-qJhHco5uAF2hT	unknown species 1; 1 assembly; length:40; md5:e779313749e736225efe9070a41327b6
+14	fYi605HFnWDwRSRMW5-qJhHco5uAF2hT	1	gnl|numeric|1 gnl|OAe-bP3x6HQHegqa1NAOIGLSd_vSA-RV|1	numeric
+15	3x6i4Gjvt9YnFq6zn26LJVAC4lnnB83Q	0	lcl|SQ.3x6i4Gjvt9YnFq6zn26LJVAC4lnnB83Q	unknown species 22; 1 assembly; length:40; md5:4a4f61c0bf4ee7e895ca1f888dc6a1cb
+15	3x6i4Gjvt9YnFq6zn26LJVAC4lnnB83Q	1	gnl|numeric|22 gnl|OAe-bP3x6HQHegqa1NAOIGLSd_vSA-RV|22	numeric
+16	_4wXzGW4Jx1HeH9iJkKcXTZuespwGLQc	0	lcl|SQ._4wXzGW4Jx1HeH9iJkKcXTZuespwGLQc	unknown species 00; 1 assembly; length:40; md5:237497c18e4d1a0aa54b3a407906d44b
+16	_4wXzGW4Jx1HeH9iJkKcXTZuespwGLQc	1	gnl|numeric|00 gnl|OAe-bP3x6HQHegqa1NAOIGLSd_vSA-RV|00	numeric
+17	9UPC7lIalUr62bpd2b-CZZY6MJEEpyvv	0	lcl|SQ.9UPC7lIalUr62bpd2b-CZZY6MJEEpyvv	unknown species 007; 1 assembly; length:40; md5:0bc6c636cbf2a2f3fcc1930efb140733
+17	9UPC7lIalUr62bpd2b-CZZY6MJEEpyvv	1	gnl|numeric|007 gnl|OAe-bP3x6HQHegqa1NAOIGLSd_vSA-RV|007	numeric
+18	w5UTBDz-4-16r8UxzwNW1LAp3bvGFgwm	0	lcl|SQ.w5UTBDz-4-16r8UxzwNW1LAp3bvGFgwm	unknown species 0012; 1 assembly; length:40; md5:6464f277575254d0fee0026d4843f46b
+18	w5UTBDz-4-16r8UxzwNW1LAp3bvGFgwm	1	gnl|numeric|0012 gnl|OAe-bP3x6HQHegqa1NAOIGLSd_vSA-RV|0012	numeric
+19	miX--56LnSGMhBSHGy2SOQBYJZuqzUYf	0	lcl|SQ.miX--56LnSGMhBSHGy2SOQBYJZuqzUYf	unknown species 2147483647; 1 assembly; length:40; md5:54f7109b4d11964807aaf6bab199930b
+19	miX--56LnSGMhBSHGy2SOQBYJZuqzUYf	1	gnl|numeric|2147483647 gnl|OAe-bP3x6HQHegqa1NAOIGLSd_vSA-RV|2147483647	numeric
+20	HXAokLRIUJpurBy2CRetXZz5F-pj5jHc	0	lcl|SQ.HXAokLRIUJpurBy2CRetXZz5F-pj5jHc	unknown species 2147483648; 1 assembly; length:40; md5:05286ad1ad37e9193d338e2435640e03
+20	HXAokLRIUJpurBy2CRetXZz5F-pj5jHc	1	gnl|numeric|2147483648 gnl|OAe-bP3x6HQHegqa1NAOIGLSd_vSA-RV|2147483648	numeric
+21	Cly8XaPxW8SeYTk8DbwzDzNK1q7B2Jxc	0	lcl|SQ.Cly8XaPxW8SeYTk8DbwzDzNK1q7B2Jxc	unknown species 4294967296; 1 assembly; length:40; md5:187b9db3300fe5f3be299c830a4b0eaa
+21	Cly8XaPxW8SeYTk8DbwzDzNK1q7B2Jxc	1	gnl|numeric|4294967296 gnl|OAe-bP3x6HQHegqa1NAOIGLSd_vSA-RV|4294967296	numeric
+22	QfHXYKgB6nuEJGBBOw3O4CHtPWUGqCg9	0	lcl|SQ.QfHXYKgB6nuEJGBBOw3O4CHtPWUGqCg9	unknown species +1; 1 assembly; length:40; md5:3caa2e73ad7293a46a773ae0e80de408
+22	QfHXYKgB6nuEJGBBOw3O4CHtPWUGqCg9	1	gnl|numeric|+1 gnl|OAe-bP3x6HQHegqa1NAOIGLSd_vSA-RV|+1	numeric
+23	Vamafdq6XWpQ62x4Q9A2cVJUi6EXcCC_	0	lcl|SQ.Vamafdq6XWpQ62x4Q9A2cVJUi6EXcCC_	unknown species -1; 1 assembly; length:40; md5:cc63bd5219300e3e16723028d335c127
+23	Vamafdq6XWpQ62x4Q9A2cVJUi6EXcCC_	1	gnl|numeric|-1 gnl|OAe-bP3x6HQHegqa1NAOIGLSd_vSA-RV|-1	numeric
+24	rtMTHmnKkHw7Fu53F6QTDpeXQtcVWogg	0	lcl|SQ.rtMTHmnKkHw7Fu53F6QTDpeXQtcVWogg	no collection; length:90; md5:71f0a1aa1f3ad3901da93bc5b7f39b60

@@ -13,7 +13,7 @@ and compiled via PyO3. This stub file provides the Python interface definition
 and structured documentation that tools can parse properly.
 """
 
-from typing import Any, Dict, Union, Optional, List, Iterator
+from typing import Any, Dict, Literal, Union, Optional, List, Iterator
 from enum import Enum
 from os import PathLike
 
@@ -591,41 +591,94 @@ class RefgetStore:
 
     @classmethod
     def open_remote(
-        cls, cache_path: Union[str, PathLike], remote_url: str
+        cls,
+        cache_path: Union[str, PathLike],
+        remote_url: str,
+        *,
+        fetch_jobs: int = 32,
     ) -> "RefgetStore":
-        """Open a remote RefgetStore with local caching.
+        """Open a remote RefgetStore.
 
-        Loads only lightweight metadata and stubs from the remote URL: the store
-        manifest (rgstore.json) and collection index (collections.rgci). The
-        sequence index (sequences.rgsi) is fetched on first sequence access, and
-        sequence data (.seq files) on demand, cached locally.
+        Loads only lightweight metadata from the remote URL, in parallel: the
+        store manifest (rgstore.json), the collection index (collections.rgci)
+        and the alias tables. The sequence index (sequences.rgsi) is fetched on
+        first sequence access, and sequence data (.seq files) on demand, many
+        at once over parallel requests. Every downloaded sequence is checked
+        against its digest.
 
-        By default, persistence is enabled (sequences are cached to disk).
-        Call `disable_persistence()` after loading to keep only in memory.
+        ``cache_path`` is the shared cache root (see ``default_cache_dir()``):
+        metadata goes to ``remotes/<key>/`` and downloaded sequences to
+        ``sequences/``, shared by every remote store opened with the same root.
+        ``load_sequence`` and ``cache_sequences`` write sequences there; partial
+        reads, streaming and (by default) exports do not.
 
         Args:
-            cache_path: Local directory to cache downloaded metadata and sequences.
-                Created if it doesn't exist.
+            cache_path: Cache root. Created if it doesn't exist.
             remote_url: Base URL of the remote refget store (e.g.,
-                "https://example.com/hg38" or "s3://bucket/hg38").
+                "https://example.com/hg38").
+            fetch_jobs: Parallel HTTP requests.
 
         Returns:
-            RefgetStore with metadata loaded, sequences fetched on-demand.
+            RefgetStore with metadata loaded, sequences fetched on demand.
 
         Raises:
-            IOError: If remote metadata cannot be fetched or cache cannot be written.
+            IOError: If remote metadata cannot be fetched or the cache cannot be written.
 
         Example::
 
             store = RefgetStore.open_remote(
-                "/data/cache/hg38",
-                "https://refget-server.com/hg38"
+                default_cache_dir(),
+                "https://refget-server.com/hg38",
+                fetch_jobs=16,
             )
-            # First access fetches from remote and caches
             seq = store.get_substring("chr1_digest", 0, 1000)
-            # Second access uses cache
-            seq2 = store.get_substring("chr1_digest", 1000, 2000)
         """
+        ...
+
+    def load_all_collections(self) -> None:
+        """Load every collection (a remote store downloads the files in parallel)."""
+        ...
+
+    def load_collections(self, digests: List[str]) -> None:
+        """Load several collections; a remote store downloads the missing files in parallel."""
+        ...
+
+    def load_collection(self, digest: str) -> None:
+        """Load one collection by digest."""
+        ...
+
+    def load_all_sequences(self) -> None:
+        """Load every sequence into memory (a remote store downloads in parallel into the cache)."""
+        ...
+
+    def load_sequence(self, digest: str) -> None:
+        """Load one sequence into memory (a remote store downloads it into the cache)."""
+        ...
+
+    def cache_sequences(
+        self,
+        digests: List[str],
+        *,
+        progress: bool = False,
+    ) -> Dict[str, Any]:
+        """Download sequences into the shared cache, in parallel, without loading them.
+
+        Already-cached sequences are skipped. Each downloaded sequence is
+        checked against its digest before it is cached.
+
+        Args:
+            digests: Sequence digests (sha512t24u or md5, with or without "SQ.").
+            progress: Print a progress line to stderr every 5 s.
+
+        Returns:
+            Counters: requests, retries, bytes_downloaded, sequences_fetched,
+            cache_hits, cache_hit_bytes, local_reads, local_read_bytes,
+            missing, elapsed_secs.
+        """
+        ...
+
+    def fetch_stats(self) -> Dict[str, Any]:
+        """Network and cache counters since the store opened (zeros for a local store)."""
         ...
 
     def set_encoding_mode(self, mode: StorageMode) -> None:
@@ -1343,18 +1396,24 @@ class RefgetStore:
         collection_digest: str,
         bed_file_path: Union[str, PathLike],
         output_file_path: Union[str, PathLike],
-    ) -> None:
+        label: str = "{seq}",
+    ) -> Dict[str, int]:
         """Export sequences from BED file regions to a FASTA file.
 
-        Reads a BED file defining genomic regions and exports the sequences
-        for those regions to a FASTA file.
+        Writes one record per region, labeled by ``label`` (see
+        ``export_fasta``) with ``:start-end`` appended.
 
         Args:
             collection_digest: The collection's SHA-512/24u digest.
             bed_file_path: Path to BED file defining regions.
-            output_file_path: Path to write the output FASTA file.
+            output_file_path: Path to write the output FASTA file; "-" writes to stdout.
+            label: Label template (default "{seq}").
+
+        Returns:
+            Summary counts: n_records, n_bases, n_fallbacks, n_deduplicated.
 
         Raises:
+            ValueError: If the label template is invalid.
             IOError: If files cannot be read/written or sequences not found.
 
         Example::
@@ -1362,7 +1421,8 @@ class RefgetStore:
             store.export_fasta_from_regions(
                 "uC_UorBNf3YUu1YIDainBhI94CedlNeH",
                 "regions.bed",
-                "output.fa"
+                "output.fa",
+                label="name",
             )
         """
         ...
@@ -1397,36 +1457,59 @@ class RefgetStore:
 
     def export_fasta(
         self,
-        collection_digest: str,
         output_path: Union[str, PathLike],
-        sequence_names: Optional[List[str]] = None,
+        collections: Optional[Union[str, List[str]]] = None,
+        names: Optional[List[str]] = None,
+        seq_digests: Optional[List[str]] = None,
+        all: bool = False,
+        label: str = "{seq}",
+        molecule: Optional[Literal["dna", "protein"]] = None,
         line_width: Optional[int] = None,
-    ) -> None:
-        """Export sequences from a collection to a FASTA file.
+        write_cache: bool = False,
+    ) -> Dict[str, Any]:
+        """Export sequences as FASTA, to a file or to stdout.
+
+        Choose records with exactly one of ``collections``, ``seq_digests`` or
+        ``all``; choose how they are labeled with ``label``. Exports read
+        sequences ahead of the writer in parallel, within a memory budget, and
+        leave the store's loaded state unchanged; a remote store's sequences
+        are cached only with ``write_cache=True``.
+
+        Label fields: ``{seq}`` sequence digest as a refget ID (``SQ.…``, the
+        default), ``{seq:NS}`` the sequence's alias in namespace NS, ``{col}``
+        collection digest, ``{col:NS}`` the collection's alias in namespace
+        NS, ``{name}`` the sequence's name in its collection. Literal text is
+        copied as-is; a single field may drop its braces (``"name"``). A
+        missing alias falls back to the digest; records with no collection get
+        ``{seq}``. The same label for the same sequence is written once; the
+        same label for different sequences raises ValueError before any output.
 
         Args:
-            collection_digest: Collection to export from.
-            output_path: Path to write FASTA file.
-            sequence_names: Optional list of sequence names to export. If None,
-                exports all sequences in the collection.
-            line_width: Optional line width for wrapping sequences. If None,
-                uses default of 80.
-        """
-        ...
+            output_path: FASTA path ('.gz' compresses); "-" writes to stdout.
+            collections: Collection digest(s) to export.
+            names: Only these sequence names in each selected collection.
+            seq_digests: Sequence digests to export (no collection context).
+            all: Export every collection plus sequences in no collection.
+            label: Label template (default "{seq}").
+            molecule: "dna" or "protein" to keep only that molecule type.
+            line_width: Bases per line (default 80; 0 = one line per sequence).
+            write_cache: Write sequences downloaded from a remote store to the
+                shared cache, so a rerun downloads only what is missing.
 
-    def export_fasta_by_digests(
-        self,
-        seq_digests: List[str],
-        output_path: Union[str, PathLike],
-        line_width: Optional[int] = None,
-    ) -> None:
-        """Export sequences by their digests to a FASTA file.
+        Returns:
+            Summary counts: n_records, n_bases, n_fallbacks, n_deduplicated,
+            and ``fetch``, the network and cache counters.
 
-        Args:
-            seq_digests: List of sequence digests to export.
-            output_path: Path to write FASTA file.
-            line_width: Optional line width for wrapping sequences. If None,
-                uses default of 80.
+        Raises:
+            ValueError: Bad selection, label template, namespace, molecule, or a label clash.
+            BrokenPipeError: The reader closed stdout (for example ``| head``).
+            IOError: If the file cannot be written or sequences are not found.
+
+        Example::
+
+            store.export_fasta("hg38.fa", collections=[digest], label="name")
+            store.export_fasta("-", all=True)
+            store.export_fasta("all.fa", all=True, label="{col:ucsc}/{name}")
         """
         ...
 
@@ -1617,6 +1700,10 @@ class RefgetStore:
 
 class ReadonlyRefgetStore:
     """An immutable RefgetStore for concurrent read access.
+
+    ``cache_sequences(digests, *, progress=False)`` and
+    ``fetch_stats()`` work as on ``RefgetStore`` (load the sequence index
+    before ``into_readonly()``).
 
     All read methods use immutable references, making this suitable for
     concurrent access patterns (e.g., shared across threads in a server).
@@ -1914,6 +2001,21 @@ class ReadonlyRefgetStore:
     def __len__(self) -> int: ...
     def __str__(self) -> str: ...
     def __repr__(self) -> str: ...
+
+def default_cache_dir() -> str:
+    """The default shared cache root for remote stores: REFGET_CACHE_DIR, else
+    $XDG_CACHE_HOME/refget, else ~/.cache/refget."""
+    ...
+
+def cache_info(root: Union[str, PathLike]) -> Dict[str, Any]:
+    """Summarize a cache: root, sequence_files, sequence_bytes, and remotes
+    (a list of {url, bytes})."""
+    ...
+
+def clear_cache(root: Union[str, PathLike]) -> int:
+    """Delete everything in a cache (sequences and remote metadata) and
+    return the bytes freed."""
+    ...
 
 def sha512t24u_digest(readable: Union[str, bytes]) -> str:
     """Compute the GA4GH SHA-512/24u digest for a sequence.
