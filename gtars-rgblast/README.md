@@ -344,7 +344,9 @@ fail and say how to provide it.
 ## Scripts
 
 - `scripts/golden/`: manual checks at scale. `remote_verify.sh` builds hg38 from the S3 store,
-  compares it byte for byte with a local build and checks every md5; `search_matrix.py` runs the
+  compares it byte for byte with a local build and checks every md5; `remote_smoke.sh` checks
+  remote downloads, the cache, resume after Ctrl-C and rgblastn on the public S3 stores and on a
+  packed store served by a local nginx; `search_matrix.py` runs the
   rgblastn flag matrix against blastn on a real store. Helpers: `compare.py`, `md5check.py` (the
   Python scripts run with `uv run --script`).
 - `scripts/bench/`: benchmarks (`bench_hg38.sh`, `bench_jungle.sh`, and `txome_store.sh` for
