@@ -36,7 +36,7 @@ pub fn run_json(
     argv: &[String],
     progress: &mut dyn FnMut(&ProgressEvent) -> bool,
 ) -> Result<Value, Error> {
-    let cmd = match Argv::try_parse_from(argv) {
+    let cmd = match Argv::try_parse_from(super::blast::hoist_own_flags(argv.to_vec(), 0)) {
         Ok(a) => a.cmd,
         Err(e) => {
             use clap::error::ErrorKind as K;
@@ -101,7 +101,7 @@ pub fn run_json(
 /// report on stdout, clap's help and errors) and return the exit code; `prog` prefixes the
 /// messages. The refget CLI passes `refget blast` through to this.
 pub fn main_argv(prog: &str, argv: &[String]) -> i32 {
-    match Argv::try_parse_from(argv) {
+    match Argv::try_parse_from(super::blast::hoist_own_flags(argv.to_vec(), 0)) {
         Ok(a) => a.cmd.run_code(prog),
         Err(e) => {
             let _ = e.print();

@@ -54,6 +54,69 @@ impl BlastCommand {
     }
 }
 
+/// `rgblast search` and `origin` pass blastn flags through to the engine, and clap hands
+/// everything after the first one to the pass-through, rgblast's own flags included. Move
+/// each own flag (and its value) in front of the pass-through, so `search -out x --quiet`
+/// means what it says. Arguments after an explicit `--` stay as they are. `argv[skip]` is
+/// the verb.
+pub(crate) fn hoist_own_flags(argv: Vec<String>, skip: usize) -> Vec<String> {
+    use clap::Subcommand;
+    let Some(verb) = argv.get(skip).map(String::as_str) else {
+        return argv;
+    };
+    if verb != "search" && verb != "origin" {
+        return argv;
+    }
+    let all = BlastCommand::augment_subcommands(clap::Command::new("x"));
+    let Some(sub) = all.find_subcommand(verb) else {
+        return argv;
+    };
+    // own long flag -> takes a value
+    let own = |name: &str| -> Option<bool> {
+        match name {
+            "help" => Some(false),
+            _ => sub
+                .get_arguments()
+                .find(|a| a.get_long() == Some(name))
+                .map(|a| a.get_action().takes_values()),
+        }
+    };
+    let mut head: Vec<String> = argv[..=skip].to_vec();
+    let mut moved: Vec<String> = Vec::new();
+    let mut rest: Vec<String> = Vec::new();
+    let mut in_pass = false;
+    let mut i = skip + 1;
+    while i < argv.len() {
+        let a = &argv[i];
+        if a == "--" {
+            rest.extend(argv[i..].iter().cloned());
+            break;
+        }
+        let flag = a
+            .strip_prefix("--")
+            .map(|f| f.split_once('=').map_or((f, false), |(n, _)| (n, true)));
+        let takes = flag.and_then(|(n, _)| own(n));
+        match (flag, takes) {
+            (Some((_, has_eq)), Some(takes)) => {
+                let out = if in_pass { &mut moved } else { &mut head };
+                out.push(a.clone());
+                if takes && !has_eq && i + 1 < argv.len() {
+                    i += 1;
+                    out.push(argv[i].clone());
+                }
+            }
+            _ => {
+                in_pass = true;
+                rest.push(a.clone());
+            }
+        }
+        i += 1;
+    }
+    head.extend(moved);
+    head.extend(rest);
+    head
+}
+
 /// The `main` of a binary that mounts some of the verbs (`rgmakeblastdb`, `rgblast`): parse the
 /// process arguments, run the verb and return its exit code.
 pub fn main_with_verbs(prog: &'static str, about: &'static str, verbs: &[&str]) -> i32 {
@@ -69,7 +132,8 @@ pub fn main_with_verbs(prog: &'static str, about: &'static str, verbs: &[&str]) 
                 .filter(|s| verbs.contains(&s.get_name()))
                 .cloned(),
         );
-    match BlastCommand::from_arg_matches(&cmd.get_matches()) {
+    let argv = hoist_own_flags(std::env::args().collect(), 1);
+    match BlastCommand::from_arg_matches(&cmd.get_matches_from(argv)) {
         Ok(c) => c.run_code(prog),
         Err(e) => e.exit(),
     }
@@ -248,5 +312,60 @@ fn run_nstats(prog: &str, a: &NstatsArgs) -> i32 {
             0
         }
         Err(e) => fail(prog, &e),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::hoist_own_flags;
+
+    fn hoist(v: &[&str], skip: usize) -> Vec<String> {
+        hoist_own_flags(v.iter().map(|s| s.to_string()).collect(), skip)
+    }
+
+    #[test]
+    fn own_flags_leave_the_pass_through() {
+        assert_eq!(
+            hoist(
+                &[
+                    "search", "--store", "s", "-query", "q.fa", "--quiet", "--meta", "m.json"
+                ],
+                0
+            ),
+            [
+                "search", "--store", "s", "--quiet", "--meta", "m.json", "-query", "q.fa"
+            ]
+        );
+        // `--query` is blastn-style on search, own on origin; `--flag=value` moves whole
+        assert_eq!(
+            hoist(&["search", "--query", "q.fa", "--quiet"], 0),
+            ["search", "--quiet", "--query", "q.fa"]
+        );
+        assert_eq!(
+            hoist(
+                &[
+                    "rgblast",
+                    "origin",
+                    "-query",
+                    "q.fa",
+                    "--keep-hits=d",
+                    "--quiet"
+                ],
+                1
+            ),
+            [
+                "rgblast",
+                "origin",
+                "--keep-hits=d",
+                "--quiet",
+                "-query",
+                "q.fa"
+            ]
+        );
+        // after an explicit `--` nothing moves; other verbs are untouched
+        let v = ["search", "--all", "--", "-query", "q.fa", "--quiet"];
+        assert_eq!(hoist(&v, 0), v);
+        let v = ["report", "h.tsv", "--format", "json"];
+        assert_eq!(hoist(&v, 0), v);
     }
 }
