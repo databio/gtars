@@ -1,4 +1,11 @@
+import os
+from pathlib import Path
+
+import pytest
+
 from gtars.models import RegionSet
+
+DATA_DIR = Path(__file__).resolve().parent.parent.parent / "tests" / "data" / "regionset"
 
 
 class TestRegionSet:
@@ -121,5 +128,58 @@ class TestGaps:
         rs = _rs()
         result = rs.gaps({})
         assert len(result) == 0
+
+
+class TestToBigBed:
+    BED = DATA_DIR / "dummy.narrowPeak"
+    CHROM_SIZES_FILE = DATA_DIR / "dummy_chrom_sizes"
+
+    @staticmethod
+    def _sizes_dict(path):
+        sizes = {}
+        with open(path) as fh:
+            for line in fh:
+                parts = line.split()
+                if len(parts) >= 2:
+                    sizes[parts[0]] = int(parts[1])
+        return sizes
+
+    def test_to_bigbed_from_path(self, tmp_path):
+        out = tmp_path / "from_path.bigbed"
+        RegionSet(str(self.BED)).to_bigbed(str(out), str(self.CHROM_SIZES_FILE))
+        assert out.stat().st_size > 0
+
+    def test_to_bigbed_from_dict(self, tmp_path):
+        out = tmp_path / "from_dict.bigbed"
+        RegionSet(str(self.BED)).to_bigbed(str(out), self._sizes_dict(self.CHROM_SIZES_FILE))
+        assert out.stat().st_size > 0
+
+    def test_to_bigbed_from_pathlib(self, tmp_path):
+        """A pathlib.Path (os.PathLike) is accepted as the chrom sizes argument."""
+        out = tmp_path / "from_pathlib.bigbed"
+        RegionSet(str(self.BED)).to_bigbed(str(out), self.CHROM_SIZES_FILE)
+        assert out.stat().st_size > 0
+
+    def test_to_bigbed_path_and_dict_match(self, tmp_path):
+        """File-path and dict inputs for the same sizes produce identical output."""
+        rs = RegionSet(str(self.BED))
+        p_path = tmp_path / "path.bigbed"
+        p_dict = tmp_path / "dict.bigbed"
+        rs.to_bigbed(str(p_path), str(self.CHROM_SIZES_FILE))
+        rs.to_bigbed(str(p_dict), self._sizes_dict(self.CHROM_SIZES_FILE))
+        assert p_path.read_bytes() == p_dict.read_bytes()
+
+    def test_to_bigbed_missing_file_raises(self, tmp_path):
+        """A bad chrom sizes path raises a clean exception, not a panic."""
+        with pytest.raises(Exception):
+            RegionSet(str(self.BED)).to_bigbed(
+                str(tmp_path / "x.bigbed"), str(tmp_path / "does_not_exist.sizes")
+            )
+
+    def test_to_bigbed_bad_dict_value_raises(self, tmp_path):
+        with pytest.raises(Exception):
+            RegionSet(str(self.BED)).to_bigbed(
+                str(tmp_path / "y.bigbed"), {"chr1": "not-an-int"}
+            )
 
 

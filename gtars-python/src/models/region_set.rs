@@ -275,7 +275,9 @@ impl PyRegionSet {
         } else {
             // Treat as a path (str or os.PathLike); `.str()` handles pathlib.Path.
             let path = chrom_size.str()?.to_string();
-            try_get_chrom_sizes(path).map_err(|e| PyValueError::new_err(e.to_string()))?
+            // `{:#}` renders the full anyhow context chain so the underlying OS
+            // cause (e.g. "Operation not permitted", "No such file") is visible.
+            try_get_chrom_sizes(path).map_err(|e| PyValueError::new_err(format!("{e:#}")))?
         };
 
         self.regionset
