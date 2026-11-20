@@ -2,7 +2,7 @@
 //!
 //! Exports stream records in order: a prefetch reads each record's stored
 //! bytes (from RAM, a local `.seq` file, the shared cache, or the remote store,
-//! many at once) ahead of the writer, within a fixed memory budget (1 GiB),
+//! many at once) ahead of the writer, within a fixed memory budget (128 MiB),
 //! and the writer decodes them in chunks. An export never loads sequences into
 //! the store, and writes downloaded `.seq` files to the shared cache only with
 //! [`ExportOptions::write_cache`].
@@ -11,7 +11,11 @@ use super::*;
 use super::label::{invert, label_err, AliasIndex, LabelTemplate};
 use super::readonly::ReadonlyRefgetStore;
 use super::fetch::FetchCounters;
-use super::prefetch::{PrefetchOptions, PrefetchOrder, DEFAULT_MEMORY_BUDGET};
+use super::prefetch::{PrefetchOptions, PrefetchOrder};
+
+/// Read-ahead budget for export: keeps a whole-store export near the
+/// streaming memory of the release instead of the 1 GiB prefetch default.
+const EXPORT_READ_AHEAD: u64 = 128 << 20;
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
@@ -672,7 +676,7 @@ impl ReadonlyRefgetStore {
             write_cache: opts.write_cache,
             progress: remote && !self.quiet,
         };
-        let mut fetch = self.prefetch_keys(&keys, popts, DEFAULT_MEMORY_BUDGET)?;
+        let mut fetch = self.prefetch_keys(&keys, popts, EXPORT_READ_AHEAD)?;
         let total = plan.len();
         for (i, rec) in plan.iter().enumerate() {
             let item = fetch
