@@ -5,6 +5,7 @@ pub const REFGET_BUILD: &str = "build";
 pub const REFGET_EXPORT: &str = "export";
 pub const REFGET_LOCK_STATUS: &str = "lock-status";
 pub const REFGET_VERIFY: &str = "verify";
+pub const REFGET_COMPACT: &str = "compact";
 
 pub fn create_refget_cli() -> Command {
     Command::new(REFGET_CMD)
@@ -65,7 +66,14 @@ pub fn create_refget_cli() -> Command {
                     Arg::new("force")
                         .long("force")
                         .action(ArgAction::SetTrue)
-                        .help("Overwrite existing collections/sequences in the store"),
+                        .help("Overwrite existing collections/sequences in the store. Does not lift --standalone-file-limit."),
+                )
+                .arg(
+                    Arg::new("standalone_file_limit")
+                        .long("standalone-file-limit")
+                        .value_name("N")
+                        .value_parser(clap::value_parser!(usize))
+                        .help("Most .seq files a standalone store may hold after the import (default 500000). The import stops before writing anything if it would go over. 0 is not special; pass a large number to lift the limit. Packed stores ignore it."),
                 )
                 .arg(
                     Arg::new("collection_alias")
@@ -91,11 +99,47 @@ pub fn create_refget_cli() -> Command {
                         .long("force-alias")
                         .action(ArgAction::SetTrue)
                         .help("On commit, overwrite an alias another writer already published under a different collection digest. Without this, such a conflict is an error -- silently picking a winner is how aliases stop resolving."),
+                )
+                .arg(
+                    Arg::new("packed")
+                        .long("packed")
+                        .action(ArgAction::SetTrue)
+                        .help("Use the PACKED sequence layout: sequences are concatenated into sealed, size-capped pack files under packs/ plus a sequences.pack.idx sidecar, instead of one .seq file per digest. Best for genome-scale stores on network filesystems. Only applies when creating a new store."),
+                )
+                .arg(
+                    Arg::new("pack_cap")
+                        .long("pack-cap")
+                        .value_name("BYTES")
+                        .value_parser(clap::value_parser!(u64))
+                        .help("Per-pack size cap in bytes for the packed layout (default 256 MiB). A sequence larger than the cap gets its own pack."),
+                ),
+        )
+        .subcommand(
+            Command::new(REFGET_COMPACT)
+                .about("Reclaim dead bytes in a PACKED RefgetStore by rewriting live spans into fresh sealed packs.")
+                .arg(
+                    Arg::new("store")
+                        .required(true)
+                        .help("Path to an existing packed RefgetStore directory"),
+                )
+                .arg(
+                    Arg::new("prune_unreferenced")
+                        .long("prune-unreferenced")
+                        .action(ArgAction::SetTrue)
+                        .help("Also delete pack files no index entry points to. Only use when no other process is writing to the store."),
                 ),
         )
         .subcommand(
             Command::new(REFGET_EXPORT)
-                .about("Export sequences from a RefgetStore to a FASTA file.")
+                .about("Export sequences from a RefgetStore as FASTA, to a file or to stdout.")
+                .after_help(
+                    "Label fields: {seq} sequence digest (SQ.…), {seq:NS} sequence alias in namespace NS, \
+                     {col} collection digest, {col:NS} collection alias in namespace NS, {name} sequence name.\n\n\
+                     Examples:\n  \
+                     gtars refget export -s store -c ucsc:hg38 -l '{name}' > hg38.fa\n  \
+                     gtars refget export -s store --all | makeblastdb -in - -dbtype nucl -out store\n  \
+                     gtars refget export -s store --all -l '{col:ucsc}/{name}'",
+                )
                 .arg(
                     Arg::new("store")
                         .long("store")
@@ -107,20 +151,40 @@ pub fn create_refget_cli() -> Command {
                     Arg::new("output")
                         .long("output")
                         .short('o')
-                        .required(true)
-                        .help("Output FASTA path ('.gz' extension triggers gzip compression)"),
+                        .help("Output FASTA path ('.gz' extension triggers gzip compression). Default: stdout"),
                 )
                 .arg(
                     Arg::new("collection")
                         .long("collection")
                         .short('c')
-                        .help("Collection to export: a digest, or NAMESPACE:ALIAS as given to `build --collection-alias`. If omitted and the store holds exactly one collection, that one is used."),
+                        .action(ArgAction::Append)
+                        .help("Collection to export: a digest, or NAMESPACE:ALIAS as given to `build --collection-alias`. Repeatable. If omitted (and no --all) and the store holds exactly one collection, that one is used."),
+                )
+                .arg(
+                    Arg::new("all")
+                        .long("all")
+                        .action(ArgAction::SetTrue)
+                        .conflicts_with_all(["collection", "names"])
+                        .help("Export every sequence in the store: all collections, plus sequences in no collection"),
                 )
                 .arg(
                     Arg::new("names")
                         .long("names")
                         .num_args(1..)
-                        .help("Restrict export to these sequence names (default: all sequences in the collection)"),
+                        .help("Restrict export to these sequence names in each collection (default: all sequences)"),
+                )
+                .arg(
+                    Arg::new("label")
+                        .long("label")
+                        .short('l')
+                        .default_value("{seq}")
+                        .help("FASTA label template; see the fields below. Default {seq} labels each record by its digest"),
+                )
+                .arg(
+                    Arg::new("molecule")
+                        .long("molecule")
+                        .value_parser(["dna", "protein"])
+                        .help("Export only sequences of this molecule type"),
                 )
                 .arg(
                     Arg::new("line_width")
@@ -129,6 +193,14 @@ pub fn create_refget_cli() -> Command {
                         .value_parser(clap::value_parser!(usize))
                         .default_value("80")
                         .help("Sequence line width. 0 = unwrapped, one sequence per line (what GGCAT/SSHash expect)"),
+                )
+                .arg(
+                    Arg::new("pack_cache_mb")
+                        .long("pack-cache-mb")
+                        .value_name("N")
+                        .value_parser(clap::value_parser!(usize))
+                        .default_value("0")
+                        .help("Read a PACKED store through a block cache of N megabytes (alpha; 0 = off, the default). Helps clustered reads on a cold network file system; hurts scattered reads on stores larger than the cache."),
                 ),
         )
         .subcommand(

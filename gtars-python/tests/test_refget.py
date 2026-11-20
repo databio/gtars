@@ -275,14 +275,14 @@ class TestRefget:
 
             temp_output_fa_path = os.path.join(temp_dir, "output.fa")
             store.export_fasta_from_regions(
-                collection_digest, temp_bed_path, temp_output_fa_path
+                collection_digest, temp_bed_path, temp_output_fa_path, label="{name}"
             )
 
             with open(temp_output_fa_path, "r") as f:
                 output_fa_content = f.read()
 
             # export_fasta_from_regions writes one record per BED region with a
-            # `>{chrom}:{start}-{end}` header (see gtars-refget export.rs, PR #259).
+            # `>{label}:{start}-{end}` header; label="{name}" gives `>{chrom}:...`.
             expected_fa_content = (
                 ">chr1:0-5\nATGCA\n>chr1:8-12\nATGC\n>chr2:0-4\nGGGG\n"
             )
@@ -609,58 +609,6 @@ class TestRefget:
             assert hasattr(meta, "length")
             assert hasattr(meta, "sha512t24u")
             assert hasattr(meta, "md5")
-
-    def test_export_fasta(self):
-        """Test export_fasta() exports full collection or subset"""
-        store = RefgetStore.in_memory()
-        fasta_path = "../tests/data/fasta/base.fa"
-        store.add_sequence_collection_from_fasta(fasta_path)
-
-        result = digest_fasta(fasta_path)
-        collection_digest = result.digest
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Export all sequences
-            output_path = os.path.join(tmpdir, "all.fa")
-            store.export_fasta(collection_digest, output_path, None, None)
-
-            with open(output_path) as f:
-                content = f.read()
-            assert ">chrX" in content
-            assert ">chr1" in content
-            assert ">chr2" in content
-
-            # Export subset
-            subset_path = os.path.join(tmpdir, "subset.fa")
-            store.export_fasta(collection_digest, subset_path, ["chr1", "chr2"], 60)
-
-            with open(subset_path) as f:
-                subset_content = f.read()
-            assert ">chrX" not in subset_content
-            assert ">chr1" in subset_content
-            assert ">chr2" in subset_content
-
-    def test_export_fasta_by_digests(self):
-        """Test export_fasta_by_digests() exports specific sequences by digest"""
-        store = RefgetStore.in_memory()
-        store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
-
-        # Get digests for chr1 and chr2
-        sha_chr1 = sha512t24u_digest(b"GGAA")  # chr1 sequence
-        sha_chr2 = sha512t24u_digest(b"GCGC")  # chr2 sequence
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            output_path = os.path.join(tmpdir, "by_digest.fa")
-            store.export_fasta_by_digests([sha_chr1, sha_chr2], output_path, None)
-
-            with open(output_path) as f:
-                content = f.read()
-
-            # Should contain chr1 and chr2 sequences
-            assert "GGAA" in content
-            assert "GCGC" in content
-            # chrX sequence should not be present
-            assert "TTGGGGAA" not in content
 
     def test_sequence_collection_write_fasta(self):
         """Test SequenceCollection.write_fasta() method"""

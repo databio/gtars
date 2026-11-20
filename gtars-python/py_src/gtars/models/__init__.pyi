@@ -1,4 +1,4 @@
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Union
 
 class Region:
     chr: str
@@ -91,12 +91,14 @@ class RegionSet:
         """
         ...
 
-    def to_bigbed(self, out_path: str, chrom_size: str) -> None:
+    def to_bigbed(self, out_path: str, chrom_size: Union[str, Dict[str, int]]) -> None:
         """
         Save RegionSet as bigBed file
 
         :param out_path: path bigbed file path
-        :param chrom_size: path to the chrom sizes file
+        :param chrom_size: either a path to a chrom.sizes file (``str`` or
+            ``os.PathLike``), or a dict mapping chromosome name to length,
+            e.g. ``{"chr1": 248956422}``
         """
         ...
 

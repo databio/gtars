@@ -17,7 +17,7 @@ fn test_bamqc_chr22_small() {
         return;
     }
 
-    let result = compute_bam_qc(&bam_path).expect("Failed to compute BAM QC");
+    let result = compute_bam_qc(&bam_path, 0).expect("Failed to compute BAM QC");
 
     assert!(result.total_reads > 0, "Expected reads in BAM file");
     assert!(

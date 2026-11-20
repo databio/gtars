@@ -20,11 +20,12 @@ fn handle_bamqc(matches: &ArgMatches) {
     let threads = *matches
         .get_one::<usize>("threads")
         .unwrap_or(&1);
+    let min_mapq = *matches.get_one::<u8>("min-mapq").unwrap_or(&0);
 
     let result = if threads > 1 {
-        run_bam_qc_parallel(Path::new(input), Path::new(output), threads)
+        run_bam_qc_parallel(Path::new(input), Path::new(output), threads, min_mapq)
     } else {
-        run_bam_qc(Path::new(input), Path::new(output))
+        run_bam_qc(Path::new(input), Path::new(output), min_mapq)
     };
 
     match result {

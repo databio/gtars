@@ -1,0 +1,47 @@
+{
+  "digests": {
+    "a": "QvT5tAQ0B8Vkxd-qFftlzEk2QyfPtgOv",
+    "b": "UNGAdNDmBbQbHihecPPFxwTydTcdFKxL"
+  },
+  "attributes": {
+    "a_only": [],
+    "b_only": [],
+    "a_and_b": [
+      "lengths",
+      "name_length_pairs",
+      "names",
+      "sequences",
+      "sorted_sequences"
+    ]
+  },
+  "array_elements": {
+    "a_count": {
+      "lengths": 3,
+      "name_length_pairs": 3,
+      "names": 3,
+      "sequences": 3,
+      "sorted_sequences": 3
+    },
+    "b_count": {
+      "lengths": 3,
+      "name_length_pairs": 3,
+      "names": 3,
+      "sequences": 3,
+      "sorted_sequences": 3
+    },
+    "a_and_b_count": {
+      "lengths": 3,
+      "name_length_pairs": 0,
+      "names": 0,
+      "sequences": 3,
+      "sorted_sequences": 3
+    },
+    "a_and_b_same_order": {
+      "lengths": true,
+      "name_length_pairs": null,
+      "names": null,
+      "sequences": true,
+      "sorted_sequences": true
+    }
+  }
+}

@@ -479,11 +479,11 @@ pub struct SeqColComparison {
 }
 
 /// The digests of the two compared collections.
-/// `b` is `None` when comparing against an externally-provided level-2 body
-/// (i.e., the external collection has no server-side digest).
+/// Either is `None` when that side is an externally-provided level-2 body
+/// with no known digest (serialized as JSON `null`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComparisonDigests {
-    pub a: String,
+    pub a: Option<String>,
     pub b: Option<String>,
 }
 
@@ -717,7 +717,7 @@ impl SequenceCollection {
         compare_arrays(
             arrays_a,
             arrays_b,
-            self.metadata.digest.clone(),
+            Some(self.metadata.digest.clone()),
             Some(other.metadata.digest.clone()),
         )
     }
@@ -823,7 +823,7 @@ fn compare_elements(a: &[String], b: &[String]) -> (usize, Option<bool>) {
 pub(crate) fn compare_arrays(
     arrays_a: HashMap<String, Vec<String>>,
     arrays_b: HashMap<String, Vec<String>>,
-    digest_a: String,
+    digest_a: Option<String>,
     digest_b: Option<String>,
 ) -> SeqColComparison {
     let a_keys: std::collections::BTreeSet<&str> = arrays_a.keys().map(|s| s.as_str()).collect();
@@ -886,6 +886,57 @@ pub(crate) fn compare_arrays(
     }
 }
 
+/// Turn one attribute of a level-2 JSON body into comparable element strings.
+///
+/// Every element is rendered as canonical JSON (RFC-8785 style, the same
+/// serialization seqcol digests use), so equality matches the refget Python
+/// `compare_seqcols` semantics: `"8"` and `8` differ, objects compare by
+/// content regardless of key order, and `1` equals `1.0`.
+fn level2_json_array(attr: &str, value: &serde_json::Value) -> anyhow::Result<Vec<String>> {
+    let items = value.as_array().ok_or_else(|| {
+        anyhow::anyhow!(
+            "attribute '{}' must be an array in a level-2 seqcol body",
+            attr
+        )
+    })?;
+    Ok(items.iter().map(canonicalize_json).collect())
+}
+
+/// Compare two level-2 sequence collection bodies given as JSON objects.
+///
+/// Neither side needs to be in a store or have a digest: this is the seqcol
+/// spec comparison function applied directly to two level-2 bodies. Every
+/// top-level attribute is compared and must be an array; elements may be
+/// strings, numbers, or objects (e.g. `name_length_pairs`). Elements are
+/// compared by canonical JSON (RFC 8785), so `1` and `1.0` match but `true`
+/// and `1` do not. `digest_a` and
+/// `digest_b` are copied into the result's `digests` field as-is (`None`
+/// becomes JSON `null`).
+///
+/// Returns an error if either body is not a JSON object or holds a
+/// non-array attribute.
+pub fn compare_level2_json(
+    a: &serde_json::Value,
+    b: &serde_json::Value,
+    digest_a: Option<String>,
+    digest_b: Option<String>,
+) -> anyhow::Result<SeqColComparison> {
+    fn to_arrays(
+        side: &str,
+        body: &serde_json::Value,
+    ) -> anyhow::Result<HashMap<String, Vec<String>>> {
+        let obj = body
+            .as_object()
+            .ok_or_else(|| anyhow::anyhow!("seqcol body {} must be a JSON object", side))?;
+        obj.iter()
+            .map(|(k, v)| Ok((k.clone(), level2_json_array(k, v)?)))
+            .collect()
+    }
+    let arrays_a = to_arrays("a", a)?;
+    let arrays_b = to_arrays("b", b)?;
+    Ok(compare_arrays(arrays_a, arrays_b, digest_a, digest_b))
+}
+
 /// Convert a `CollectionLevel2` into the comparison array map format.
 /// Only includes the three core attributes (names, lengths, sequences).
 /// Ancillary attributes are not included because `CollectionLevel2` does not carry them.
@@ -935,83 +986,6 @@ impl IntoIterator for SequenceCollection {
 
     fn into_iter(self) -> Self::IntoIter {
         self.sequences.into_iter()
-    }
-}
-
-/// A collection record that may or may not have its sequence list loaded.
-/// Parallel to SequenceRecord.
-#[derive(Clone, Debug)]
-pub enum SequenceCollectionRecord {
-    /// Collection with only metadata, sequence list not loaded
-    Stub(SequenceCollectionMetadata),
-    /// Collection with metadata and the actual sequence list
-    Full {
-        metadata: SequenceCollectionMetadata,
-        sequences: Vec<SequenceRecord>,
-    },
-}
-
-impl SequenceCollectionRecord {
-    /// Get metadata regardless of variant
-    pub fn metadata(&self) -> &SequenceCollectionMetadata {
-        match self {
-            SequenceCollectionRecord::Stub(meta) => meta,
-            SequenceCollectionRecord::Full { metadata, .. } => metadata,
-        }
-    }
-
-    /// Get sequences if loaded
-    pub fn sequences(&self) -> Option<&[SequenceRecord]> {
-        match self {
-            SequenceCollectionRecord::Stub(_) => None,
-            SequenceCollectionRecord::Full { sequences, .. } => Some(sequences),
-        }
-    }
-
-    /// Check if sequences are loaded
-    pub fn has_sequences(&self) -> bool {
-        matches!(self, SequenceCollectionRecord::Full { .. })
-    }
-
-    /// Load sequences into a Stub record, converting to Full
-    pub fn with_sequences(self, sequences: Vec<SequenceRecord>) -> Self {
-        let metadata = match self {
-            SequenceCollectionRecord::Stub(m) => m,
-            SequenceCollectionRecord::Full { metadata, .. } => metadata,
-        };
-        SequenceCollectionRecord::Full {
-            metadata,
-            sequences,
-        }
-    }
-
-    /// Convert to a SequenceCollection (requires Full variant or empty collection for Stub)
-    pub fn to_collection(&self) -> SequenceCollection {
-        match self {
-            SequenceCollectionRecord::Stub(meta) => {
-                // Create empty collection with metadata
-                SequenceCollection {
-                    metadata: meta.clone(),
-                    sequences: Vec::new(),
-                }
-            }
-            SequenceCollectionRecord::Full {
-                metadata,
-                sequences,
-            } => SequenceCollection {
-                metadata: metadata.clone(),
-                sequences: sequences.clone(),
-            },
-        }
-    }
-}
-
-impl From<SequenceCollection> for SequenceCollectionRecord {
-    fn from(collection: SequenceCollection) -> Self {
-        SequenceCollectionRecord::Full {
-            metadata: collection.metadata,
-            sequences: collection.sequences,
-        }
     }
 }
 
@@ -1094,40 +1068,58 @@ pub fn digest_sequence_with_description(
 ///
 /// Returns None if the line is a comment, empty, or has wrong column count.
 pub fn parse_rgsi_line(line: &str) -> Option<SequenceMetadata> {
-    // Skip empty lines
+    let f = parse_rgsi_fields(line)?;
+    Some(SequenceMetadata {
+        name: f.name.to_string(),
+        description: f.description.map(str::to_string),
+        length: f.length,
+        alphabet: f.alphabet,
+        sha512t24u: f.sha512t24u.to_string(),
+        md5: f.md5.to_string(),
+        fai: None,
+    })
+}
+
+/// The columns of one RGSI line, borrowed from the line (no allocation).
+pub struct RgsiFields<'a> {
+    pub name: &'a str,
+    pub description: Option<&'a str>,
+    pub length: usize,
+    pub alphabet: AlphabetType,
+    pub sha512t24u: &'a str,
+    pub md5: &'a str,
+}
+
+/// Parse one RGSI line into borrowed fields. Same rules as
+/// [`parse_rgsi_line`]: 5 or 6 tab-separated columns, empty lines skipped.
+pub fn parse_rgsi_fields(line: &str) -> Option<RgsiFields<'_>> {
+    let line = line.strip_suffix('\n').unwrap_or(line);
+    let line = line.strip_suffix('\r').unwrap_or(line);
     if line.trim().is_empty() {
         return None;
     }
-
-    let parts: Vec<&str> = line.split('\t').collect();
-
-    match parts.len() {
-        // 5-column format: no description
-        5 => Some(SequenceMetadata {
-            name: parts[0].to_string(),
-            description: None,
-            length: parts[1].parse().ok()?,
-            alphabet: parts[2].parse().unwrap_or(AlphabetType::Unknown),
-            sha512t24u: parts[3].to_string(),
-            md5: parts[4].to_string(),
-            fai: None,
-        }),
-        // 6-column format: description at end
-        6 => Some(SequenceMetadata {
-            name: parts[0].to_string(),
-            description: if parts[5].is_empty() {
-                None
-            } else {
-                Some(parts[5].to_string())
-            },
-            length: parts[1].parse().ok()?,
-            alphabet: parts[2].parse().unwrap_or(AlphabetType::Unknown),
-            sha512t24u: parts[3].to_string(),
-            md5: parts[4].to_string(),
-            fai: None,
-        }),
-        _ => None,
+    let mut it = line.split('\t');
+    let name = it.next()?;
+    let length = it.next()?;
+    let alphabet = it.next()?;
+    let sha512t24u = it.next()?;
+    let md5 = it.next()?;
+    let description = match it.next() {
+        None => None,
+        Some("") => None,
+        Some(d) => Some(d),
+    };
+    if it.next().is_some() {
+        return None;
     }
+    Some(RgsiFields {
+        name,
+        description,
+        length: length.parse().ok()?,
+        alphabet: alphabet.parse().unwrap_or(AlphabetType::Unknown),
+        sha512t24u,
+        md5,
+    })
 }
 
 /// Parse a single line from an RGCI (collection index) file.
@@ -1321,7 +1313,7 @@ mod tests {
         let collection = SequenceCollection::from_records(records);
         let result = collection.compare(&collection);
 
-        assert_eq!(Some(result.digests.a.as_str()), result.digests.b.as_deref());
+        assert_eq!(result.digests.a, result.digests.b);
         assert_eq!(result.attributes.a_and_b.len(), 3); // core only, no ancillary
         for attr in &result.attributes.a_and_b {
             assert_eq!(result.array_elements.a_and_b_same_order[attr], Some(true));

@@ -1,5 +1,7 @@
 # Changelog
 
+Releases after 0.10.0 are in `docs/changelog.md`, which is the changelog to update.
+
 ## 0.10.0 - 2026-09-05
 
 A `gtars-refget` store-safety and store-operations release. Component

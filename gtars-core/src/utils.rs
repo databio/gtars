@@ -281,30 +281,44 @@ pub fn generate_id_to_region_string_map(regions: &[String]) -> HashMap<u32, Stri
     id_to_region
 }
 
-pub fn get_chrom_sizes<T: AsRef<Path>>(path: T) -> HashMap<String, u32> {
+/// Read a chrom sizes file into a `chrom_name -> length` map.
+///
+/// Returns an error (instead of panicking) on I/O or parse failures so callers
+/// can surface a clean message. Blank lines and lines without at least two
+/// whitespace-separated fields are skipped.
+pub fn try_get_chrom_sizes<T: AsRef<Path>>(path: T) -> Result<HashMap<String, u32>> {
     let chrom_sizes_file = File::open(path.as_ref())
-        .with_context(|| "Failed to open chrom sizes file.")
-        .unwrap();
+        .with_context(|| format!("Failed to open chrom sizes file: {:?}", path.as_ref()))?;
 
     let mut chrom_sizes: HashMap<String, u32> = HashMap::new();
 
     let file_buf = BufReader::new(chrom_sizes_file);
 
     for line in file_buf.lines() {
-        let line_string: String = match line {
-            Ok(value) => value,
-            Err(_) => panic!("Error while reading chrom sizes file"),
+        let line_string = line.with_context(|| "Error while reading chrom sizes file")?;
+
+        let mut parts = line_string.split_whitespace();
+        let (Some(name), Some(size)) = (parts.next(), parts.next()) else {
+            // Skip blank or malformed lines rather than panic-indexing.
+            continue;
         };
 
-        let line_parts: Vec<String> = line_string
-            .split_whitespace()
-            .map(|s| s.to_string())
-            .collect();
+        let size = size
+            .parse::<u32>()
+            .with_context(|| format!("Invalid chrom size on line: {line_string:?}"))?;
 
-        chrom_sizes.insert(line_parts[0].clone(), line_parts[1].parse::<u32>().unwrap());
+        chrom_sizes.insert(name.to_string(), size);
     }
 
-    chrom_sizes
+    Ok(chrom_sizes)
+}
+
+/// Read a chrom sizes file into a `chrom_name -> length` map, panicking on error.
+///
+/// Thin wrapper over [`try_get_chrom_sizes`] for callers that treat a bad chrom
+/// sizes file as unrecoverable.
+pub fn get_chrom_sizes<T: AsRef<Path>>(path: T) -> HashMap<String, u32> {
+    try_get_chrom_sizes(path).expect("Failed to read chrom sizes file")
 }
 
 ///

@@ -14,7 +14,10 @@ use std::io::{Read, Write};
 use std::path::Path;
 
 use gtars_refget::digest::{SequenceMetadata, md5, sha512t24u};
-use gtars_refget::store::{FastaImportOptions, ReadonlyRefgetStore, RefgetStore, StorageMode};
+use gtars_refget::store::{
+    ExportOptions, ExportSelection, FastaImportOptions, LabelTemplate, ReadonlyRefgetStore,
+    RefgetStore, StorageMode,
+};
 
 // =========================================================================
 // Fixture data
@@ -279,7 +282,7 @@ fn read_paths(
 /// Run `read_paths` for every sequence in `store`.
 fn run_all(store: &ReadonlyRefgetStore, label: &str, failures: &mut Vec<String>) {
     let expected_map = expected_sequences();
-    let metas: Vec<SequenceMetadata> = store.sequence_metadata().cloned().collect();
+    let metas: Vec<SequenceMetadata> = store.sequence_metadata().collect();
     assert_eq!(
         metas.len(),
         fixture_records().len(),
@@ -441,7 +444,7 @@ fn check_on_disk_reopen(store_dir: &Path, mode: StorageMode, label: &str, failur
     );
 
     let expected_map = expected_sequences();
-    let metas: Vec<SequenceMetadata> = ro.sequence_metadata().cloned().collect();
+    let metas: Vec<SequenceMetadata> = ro.sequence_metadata().collect();
     for meta in &metas {
         assert!(
             !ro.is_sequence_loaded(&meta.sha512t24u),
@@ -550,7 +553,15 @@ fn export_fasta_is_lossless() {
         // Line width of 7 so records wrap at odd lengths.
         let out_path = dir.path().join("exported.fa");
         store
-            .export_fasta(&collection_digest, &out_path, None, Some(7))
+            .export_fasta(
+                &ExportSelection::Collections { digests: vec![collection_digest.clone()], names: None },
+                &out_path,
+                &ExportOptions {
+                    label: LabelTemplate::parse("{name}").unwrap(),
+                    molecule: None,
+                    line_width: 7,
+                },
+            )
             .expect("export_fasta");
 
         // Import the exported FASTA into a fresh Raw store and check that
@@ -571,10 +582,9 @@ fn export_fasta_is_lossless() {
             ));
         }
 
-        let orig_metas: Vec<SequenceMetadata> = store.sequence_metadata().cloned().collect();
+        let orig_metas: Vec<SequenceMetadata> = store.sequence_metadata().collect();
         let new_metas: HashMap<String, SequenceMetadata> = reimported
             .sequence_metadata()
-            .cloned()
             .map(|m| (m.name.clone(), m))
             .collect();
         for m in &orig_metas {

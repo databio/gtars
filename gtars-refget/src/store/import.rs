@@ -25,14 +25,15 @@
 //! a decompress/read thread, a digest thread, and an encode step on the build
 //! thread. Records flow through the chain in FASTA order; the build thread
 //! forwards each finished sequence onto the cross-file output channel instead of
-//! pushing into a `Vec`. This keeps `name_lookup` (and therefore the collection
-//! digest) deterministic and identical to a single-threaded build.
+//! pushing into a `Vec`. This keeps each collection's member order (and
+//! therefore the collection digest) deterministic and identical to a
+//! single-threaded build.
 //!
 //! ### File-level parallelism (across files)
 //!
 //! The build half (decode + parse + digest + encode) touches NO shared store
 //! state and runs concurrently across files; the insert half (`&mut self`
-//! registration of sequences/collections/aliases/name_lookup) runs on a single
+//! registration of sequences, collections and aliases) runs on a single
 //! owner. Because the on-disk indexes are written once at the end, sorted by
 //! content/collection digest, the resulting store is byte-identical to a serial
 //! build regardless of which builder finishes first or how `Seq`/`End` messages
@@ -49,12 +50,11 @@ use std::time::Instant;
 
 use anyhow::{anyhow, Context, Result};
 use crossbeam_channel::{bounded, Receiver, Sender};
-use indexmap::IndexMap;
 
 use crate::collection::SequenceCollectionExt;
 use crate::digest::{
     SequenceCollection, SequenceCollectionMetadata,
-    SequenceCollectionRecord, SequenceEncoder, SequenceMetadata, SequenceRecord,
+    SequenceEncoder, SequenceMetadata, SequenceRecord,
 };
 use crate::hashkeyable::{DigestKey, HashKeyable};
 
@@ -75,13 +75,11 @@ const CHANNEL_DEPTH: usize = 4;
 /// depth x avg encoded seq size), independent of collection size).
 const WRITER_CHANNEL_DEPTH: usize = 8;
 
-/// A unit of work for the writer pool: write `bytes` to `full_path` (a `.seq`
-/// file). The inserter has already committed the dedup decision + in-memory
-/// metadata; only the (race-free, per-digest) byte write is offloaded here.
-struct WriteJob {
-    full_path: PathBuf,
-    bytes: Vec<u8>,
-}
+/// A unit of work for the writer pool: one standalone `.seq` file, written to
+/// its full path. The inserter has already committed the dedup decision and
+/// the in-memory metadata; only the byte write is offloaded here. Per-digest
+/// files are independent, so the writes are race-free.
+type WriteJob = (PathBuf, Vec<u8>);
 
 /// A fully-built sequence ready for the single inserter, in FASTA order.
 ///
@@ -628,6 +626,48 @@ fn build_collection_from_cached_metadata(
     Ok(())
 }
 
+/// Count FASTA records (`>` header lines) in a possibly-gzipped file, without
+/// digesting or encoding. Used by the standalone pre-flight count gate.
+fn count_fasta_records(path: &Path) -> Result<usize> {
+    use std::io::BufRead;
+    let mut reader = gtars_core::utils::get_dynamic_reader(path)
+        .with_context(|| format!("opening {} for a pre-flight count", path.display()))?;
+    let mut n = 0usize;
+    let mut buf = Vec::new();
+    loop {
+        buf.clear();
+        let read = reader.read_until(b'\n', &mut buf)?;
+        if read == 0 {
+            break;
+        }
+        if buf.first() == Some(&b'>') {
+            n += 1;
+        }
+    }
+    Ok(n)
+}
+
+/// Count the `.rgsi` sidecar rows whose sequence is NOT already in the store.
+/// Used by the pre-flight count gate, so re-importing a FASTA the store
+/// already holds adds nothing to the count.
+fn count_new_rgsi_rows(path: &Path, is_present: impl Fn(&str) -> bool) -> Result<usize> {
+    use std::io::BufRead;
+    let file = std::fs::File::open(path)?;
+    let mut n = 0usize;
+    for line in std::io::BufReader::new(file).lines() {
+        let line = line?;
+        if line.starts_with('#') {
+            continue;
+        }
+        if let Some(f) = crate::digest::types::parse_rgsi_fields(&line) {
+            if !is_present(f.sha512t24u) {
+                n += 1;
+            }
+        }
+    }
+    Ok(n)
+}
+
 // ============================================================================
 // Per-in-flight collection scratch held by the inserter
 // ============================================================================
@@ -637,8 +677,6 @@ fn build_collection_from_cached_metadata(
 /// (those are written to disk as each `Seq` arrives, then dropped). At most
 /// `jobs` of these are live at once.
 struct InFlight {
-    /// Ordered (name -> sha512 digest key) in FASTA order; becomes name_lookup.
-    name_to_digest: IndexMap<String, DigestKey>,
     /// (namespace, alias_value, sha512t24u) alias triples in FASTA order.
     aliases: Vec<(String, String, String)>,
 }
@@ -646,7 +684,6 @@ struct InFlight {
 impl InFlight {
     fn new() -> Self {
         InFlight {
-            name_to_digest: IndexMap::new(),
             aliases: Vec::new(),
         }
     }
@@ -679,14 +716,14 @@ impl ReadonlyRefgetStore {
     ///
     /// This function is NOT fully transactional. On a build or writer error, any
     /// sequences already emitted (as `InsertMsg::Seq`) before the failure may have
-    /// been written to disk (as `.seq` files) and inserted into the in-memory
-    /// `sequence_store`, but the corresponding collection will NOT be in
-    /// `self.collections` (it never received an `End`). These are orphan sequences:
+    /// been written to disk (as `.seq` files or into a pack) and inserted into
+    /// the in-memory catalog, but the corresponding collection will NOT be
+    /// registered (it never received an `End`). These are orphan sequences:
     /// referenced by no surviving collection.
     ///
     /// On error this function calls [`Self::remove_orphan_seq_files`] which
-    /// performs a best-effort cleanup: it removes any sequence from `sequence_store`
-    /// (and its `.seq` file) that is not referenced by any surviving collection.
+    /// performs a best-effort cleanup: it removes every sequence this import
+    /// staged (and its `.seq` file) that no surviving collection references.
     /// The in-memory store is left consistent (no dangling references), but if
     /// you require a fully clean store on error, discard the store and rebuild.
     pub fn add_sequence_collections_from_fastas(
@@ -726,13 +763,51 @@ impl ReadonlyRefgetStore {
         };
         let jobs = jobs.min(files.len()).max(1);
 
+        // Pre-flight count gate (STANDALONE disk imports only). Packed stores
+        // bypass it; `standalone_file_limit` sets the ceiling. Checked BEFORE
+        // any bytes are written, via a cheap counting pass (no digesting, no
+        // encoding).
+        if self.persist_to_disk && self.layout == Layout::Standalone {
+            use crate::utils::PathExtension;
+            let existing = self.catalog.n_sequences();
+            let limit = opts.standalone_file_limit;
+            let mut counted = 0usize;
+            for file in files {
+                let rgsi = file.replace_exts_with("rgsi");
+                // The sidecar lists digests, so count only sequences the store
+                // lacks. Without it we cannot tell, so count every record.
+                let n = if self.local_path.is_some() && rgsi.exists() {
+                    count_new_rgsi_rows(&rgsi, |d| self.seq_row(d).is_some()).unwrap_or(0)
+                } else {
+                    count_fasta_records(file)?
+                };
+                counted += n;
+                if existing + counted > limit {
+                    return Err(anyhow!(
+                        "importing {} sequences would put the store at {} standalone .seq \
+                         files, over the limit of {}. Re-create the store with the packed \
+                         layout (CLI `--packed`, Python `RefgetStore.on_disk(path, \
+                         packed=True)`, R `refget_store_on_disk(path, packed = TRUE)`), \
+                         or raise standalone_file_limit.",
+                        counted,
+                        existing + counted,
+                        limit
+                    ));
+                }
+            }
+        }
+
         // Snapshot the digest keys of collections already present in the store,
         // taken ONCE here (before any builder spawns). The build half has no
         // `&self`, so this read-only set is how it learns which collections can
         // be skipped before opening their FASTAs. New collections added during
         // this run are NOT in the snapshot, so they are never wrongly skipped;
         // duplicates within the same batch are still deduped by the inserter.
-        let present_collections: HashSet<DigestKey> = self.collections.keys().copied().collect();
+        let present_collections: HashSet<DigestKey> = self
+            .catalog
+            .coll_rows()
+            .map(|c| self.catalog.coll_meta(c).digest.to_key())
+            .collect();
 
         let cfg = BuildConfig {
             mode: self.mode,
@@ -763,16 +838,20 @@ impl ReadonlyRefgetStore {
         let build_err: std::sync::Mutex<Option<anyhow::Error>> = std::sync::Mutex::new(None);
         let build_err_ref = &build_err;
 
-        // --- Writer pool (disk-backed stores only) ---------------------------
+        // --- Writer pool (disk-backed standalone stores only) ----------------
         // The single inserter does the FAST in-memory work (dedup decision,
-        // name_lookup/alias buffering, collection finalization) and DISPATCHES
+        // alias buffering, collection finalization) and DISPATCHES
         // the actual `.seq` byte write for each NEW sequence to a bounded pool
         // of `jobs` writer threads. Per-digest `.seq` files are independent, so
         // these writes are race-free. A BOUNDED channel provides back-pressure
         // so memory stays O(jobs x channel depth x avg seq size). In-memory mode
         // never dispatches (the writer pool is effectively unused). The shard-dir
         // cache lets writers skip a `create_dir_all` syscall per (tiny) sequence.
+        // A packed store appends each new sequence to its session pack on the
+        // inserter thread instead, in arrival order, so the packs and the
+        // sidecar are the same for any job count.
         let writer_disk_backed = self.persist_to_disk && self.local_path.is_some();
+        let packed = self.layout == Layout::Packed;
         let (write_tx, write_rx) = bounded::<WriteJob>(jobs * WRITER_CHANNEL_DEPTH);
         let created_shards: Mutex<HashSet<PathBuf>> = Mutex::new(HashSet::new());
         let created_shards_ref = &created_shards;
@@ -790,16 +869,17 @@ impl ReadonlyRefgetStore {
             // Spawn the writer pool. Each writer drains `WriteJob`s and writes
             // the `.seq` bytes; the first error is stashed and stops the writer.
             let mut writer_handles = Vec::with_capacity(jobs);
-            if writer_disk_backed {
+            if writer_disk_backed && !packed {
                 for _ in 0..jobs {
                     let write_rx: Receiver<WriteJob> = write_rx.clone();
                     let handle = scope.spawn(move || {
-                        for job in write_rx.iter() {
-                            if let Err(e) = ReadonlyRefgetStore::write_seq_bytes_to_full_path(
-                                &job.full_path,
-                                &job.bytes,
+                        for (full_path, bytes) in write_rx.iter() {
+                            let result = ReadonlyRefgetStore::write_seq_bytes_to_full_path(
+                                &full_path,
+                                &bytes,
                                 created_shards_ref,
-                            ) {
+                            );
+                            if let Err(e) = result {
                                 let mut slot = write_err_ref.lock().unwrap();
                                 if slot.is_none() {
                                     *slot = Some(e);
@@ -865,12 +945,12 @@ impl ReadonlyRefgetStore {
             let mut in_flight: HashMap<usize, InFlight> = HashMap::new();
 
             // For each unique sequence digest, the input file_idx whose name
-            // currently "owns" the global `sequence_store` metadata entry. The
-            // global RGSI row for a shared digest carries one (arbitrary but
-            // DETERMINISTIC) name; we make the highest-file-index name win,
-            // matching the serial build's fixed-file-order, last-writer-wins
-            // behavior so parallel == serial byte-identical. (Per-collection
-            // names are always correct via the per-collection name_lookup.)
+            // currently "owns" the store-wide sequence label. The global RGSI
+            // row for a shared digest carries one (arbitrary but DETERMINISTIC)
+            // name; we make the highest-file-index name win, matching the
+            // serial build's fixed-file-order, last-writer-wins behavior so
+            // parallel == serial byte-identical. (Per-collection names are
+            // always correct in each collection's members.)
             let mut seq_name_owner: HashMap<DigestKey, usize> = HashMap::new();
 
             // Move ownership of out_rx into the inserter block so we can
@@ -903,14 +983,11 @@ impl ReadonlyRefgetStore {
                         let ReadySequence { metadata, sequence_data, aliases } = ready;
                         let seq_key = metadata.sha512t24u.to_key();
 
-                        // Record name -> digest in FASTA order for this file's
-                        // name_lookup, and stash alias triples.
+                        // Stash alias triples (members come from the End
+                        // message's stub records, already in FASTA order).
                         let scratch = in_flight
                             .get_mut(&file_idx)
                             .expect("Seq before Begin");
-                        scratch
-                            .name_to_digest
-                            .insert(metadata.name.clone(), seq_key);
                         for (ns, alias_value) in &aliases {
                             scratch.aliases.push((
                                 ns.clone(),
@@ -930,10 +1007,9 @@ impl ReadonlyRefgetStore {
                         // (matching the serial fixed-file-order build). The bytes
                         // are identical (same digest) on such an overwrite, so we
                         // do NOT re-dispatch the disk write -- the on-disk `.seq`
-                        // is already correct (byte-identical). For disk-backed
-                        // stores the in-memory record is a Stub (no bytes
-                        // retained); for in-memory stores the Full record is
-                        // retained and no write is dispatched.
+                        // is already correct (byte-identical). A disk-backed
+                        // store does not keep the bytes in memory; an in-memory
+                        // store keeps them and dispatches no write.
                         let force = match seq_name_owner.get(&seq_key) {
                             None => {
                                 seq_name_owner.insert(seq_key, file_idx);
@@ -962,7 +1038,8 @@ impl ReadonlyRefgetStore {
                         // and the `!writer_disk_backed` short-circuit keeps that
                         // lookup out of the disk path entirely.
                         let mem_is_new =
-                            !writer_disk_backed && !self.sequence_store.contains_key(&seq_key);
+                            !writer_disk_backed && self.catalog.find_sha(&metadata.sha512t24u).is_none();
+                        let digest = packed.then(|| metadata.sha512t24u.clone());
                         match self.add_sequence_record_deferred_write(
                             SequenceRecord::Full {
                                 metadata,
@@ -973,14 +1050,17 @@ impl ReadonlyRefgetStore {
                             Some((full_path, bytes)) => {
                                 if !already_written {
                                     n_seqs_written += 1;
-                                    // BOUNDED send: blocks (back-pressure) when the
-                                    // writer pool is saturated, capping in-flight RAM.
-                                    if write_tx
-                                        .send(WriteJob { full_path, bytes })
-                                        .is_err()
-                                    {
-                                        // Writers all hung up (an earlier write error);
-                                        // stop feeding and let the error propagate.
+                                    if let Some(digest) = &digest {
+                                        if let Err(e) = self.session_pack_append(digest, &bytes) {
+                                            write_err_ref.lock().unwrap().get_or_insert(e);
+                                            break;
+                                        }
+                                    } else if write_tx.send((full_path, bytes)).is_err() {
+                                        // BOUNDED send: blocks (back-pressure) when
+                                        // the writer pool is saturated. An error
+                                        // means the writers all hung up (an earlier
+                                        // write error); stop feeding and let the
+                                        // error propagate.
                                         break;
                                     }
                                 } else {
@@ -1051,12 +1131,89 @@ impl ReadonlyRefgetStore {
                     .join()
                     .map_err(|e| anyhow!("Writer thread panicked: {:?}", e))?;
             }
+
             Ok(())
         });
 
-        // Helper: clean up orphan sequences on any failure path below.
+        // Seal the session pack and stage a sidecar row for every new sequence
+        // in a sealed pack. This runs before the error returns below: a
+        // collection that finalized stays staged after a later file fails, and
+        // a later commit on this handle must publish its pack rows with it.
+        // After a write error the open pack is dropped, temp file and all,
+        // instead of sealed: the failed sequence's bytes are not in it, and a
+        // failed import does not seal a partial pack. The rows of a pack that
+        // was not sealed point at bytes that are not on disk; their keys are
+        // kept so the error path can drop the sequence and every collection
+        // using it.
+        let mut unwritten: HashSet<DigestKey> = HashSet::new();
+        let mut seal_err: Option<anyhow::Error> = None;
+        // Packs the session created. Taken out of the session so dropping it
+        // does not delete them: on success their staged rows go to the next
+        // commit, and the error path deletes those no staged row uses.
+        let mut created: Vec<String> = Vec::new();
+        let session = self.open_session_pack.get_mut().unwrap().take();
+        if let Some(mut session) = session {
+            let not_sealed = if write_err.lock().unwrap().is_some() {
+                true
+            } else if let Err(e) = session.seal() {
+                seal_err = Some(e);
+                true
+            } else {
+                false
+            };
+            if not_sealed {
+                unwritten.extend(session.rows.iter().map(|(digest, _, _)| digest.to_key()));
+            }
+            let mut pending = self.pending.lock().unwrap();
+            for (digest, row) in session.sealed.drain(..) {
+                pending.pack_rows.insert(digest.to_key(), row);
+            }
+            created = std::mem::take(&mut session.created);
+        }
+        if !packed
+            && writer_disk_backed
+            && (scope_result.is_err() || write_err.lock().unwrap().is_some())
+        {
+            // Standalone: a write that failed, or was still queued when the
+            // writers stopped, left no `.seq` file (writes are temp + rename),
+            // yet a collection naming that sequence may have finalized. A file
+            // present under the digest's path holds the right bytes, so only
+            // missing files count.
+            let staged: Vec<DigestKey> =
+                self.pending.lock().unwrap().sequences.iter().copied().collect();
+            for key in staged {
+                let digest = crate::hashkeyable::key_to_digest_string(&key);
+                if self.sequence_file_path(&digest).is_some_and(|p| !p.exists()) {
+                    unwritten.insert(key);
+                }
+            }
+        }
+
+        // Helper: clean up orphan sequences on any failure path. Sequences of a
+        // file that never finalized, and sequences whose bytes never reached
+        // disk (with the collections that use them), are dropped along with
+        // their staged pack rows and aliases. Then each pack this import
+        // created that no staged row uses any more is deleted. Such a pack
+        // cannot be in the on-disk index yet (nothing was committed), so the
+        // staged rows are this handle's only references to it; see
+        // `remove_uncommitted_packs` for the risk from other writers.
+        let packs_dir = self.local_path.as_ref().map(|p| p.join("packs"));
         let cleanup_on_err = |store: &mut ReadonlyRefgetStore| {
+            if !unwritten.is_empty() {
+                store.forget_collections_using(&unwritten);
+            }
             store.remove_orphan_seq_files();
+            if let Some(packs_dir) = &packs_dir {
+                let still_staged: HashSet<String> = store
+                    .pending
+                    .lock()
+                    .unwrap()
+                    .pack_rows
+                    .values()
+                    .map(|r| r.pack.to_string())
+                    .collect();
+                super::readonly::remove_uncommitted_packs(packs_dir, &created, &still_staged);
+            }
         };
 
         // Surface scope errors (e.g. feeder/writer panics), then builder/writer errors.
@@ -1074,6 +1231,12 @@ impl ReadonlyRefgetStore {
         // Propagate the first writer error, if any (every `.seq` must be on disk
         // before the index files reference it).
         if let Some(e) = write_err.into_inner().unwrap() {
+            cleanup_on_err(self);
+            return Err(e);
+        }
+
+        // Propagate a failed seal of the session pack.
+        if let Some(e) = seal_err {
             cleanup_on_err(self);
             return Err(e);
         }
@@ -1140,7 +1303,7 @@ impl ReadonlyRefgetStore {
     }
 
     /// Finalize one collection at `End`: register the collection record, install
-    /// the buffered name_lookup (FASTA order) and aliases. Sequence bytes were
+    /// its members (FASTA order) and aliases. Sequence bytes were
     /// already written to disk as each `Seq` arrived. Does NOT write the global
     /// index files (the import owner does that ONCE at the end).
     #[allow(clippy::too_many_arguments)]
@@ -1161,7 +1324,7 @@ impl ReadonlyRefgetStore {
         // Validate the requested collection alias BEFORE touching any state.
         // A conflicting alias is a hard error, and it must be raised while the
         // store is still untouched: everything below this point (the collection
-        // record, its on-disk `.rgsi`, name_lookup, sequence aliases) is
+        // record, its on-disk `.rgsi`, its members, sequence aliases) is
         // committed immediately, but the top-level index is only written once
         // at the very end of the import. Erroring after those mutations would
         // report a failed import while leaving the collection in the store --
@@ -1169,8 +1332,11 @@ impl ReadonlyRefgetStore {
         // ever references. The actual alias registration still happens below,
         // once the collection is registered, and is published with it.
         self.check_import_collection_alias(collection_alias, &metadata.digest, force)?;
+        // Same for the header-tag sequence aliases: a clash within this file,
+        // or with an existing binding, must fail before anything is touched.
+        self.check_import_sequence_aliases(&scratch.aliases, source_path)?;
 
-        if !force && self.collections.contains_key(&coll_key) {
+        if !force && self.catalog.find_coll(&metadata.digest).is_some() {
             // Register the name even on the in-run duplicate path: the
             // collection IS in the store and the caller DID ask for it to be
             // named. Skipping here would mean a re-import silently drops the
@@ -1198,24 +1364,24 @@ impl ReadonlyRefgetStore {
             }
         }
 
-        // Register the collection record (stub sequences only).
-        let record = SequenceCollectionRecord::Full {
-            metadata: metadata.clone(),
-            sequences: stub_records,
-        };
+        // Register the collection (members in FASTA order) in one call.
+        let members: Vec<SequenceMetadata> = stub_records
+            .into_iter()
+            .map(|s| match s {
+                SequenceRecord::Stub(m) => m,
+                SequenceRecord::Full { metadata, .. } => metadata,
+            })
+            .collect();
         if self.persist_to_disk && self.local_path.is_some() {
-            self.write_collection_to_disk_single(&record)?;
+            self.write_collection_to_disk_single(&metadata, &members)?;
         }
-        self.collections.insert(coll_key, record);
+        self.insert_collection(metadata.clone(), &members)?;
         self.record(|p| p.add_collection(coll_key));
-
-        // Install the buffered name_lookup in FASTA order.
-        self.name_lookup.insert(coll_key, scratch.name_to_digest);
 
         // Register aliases in FASTA order. Pending only: they are published
         // with the indexes in the final commit, not one TSV rewrite per header.
         for (ns, alias_value, sha512t24u) in &scratch.aliases {
-            self.add_sequence_alias_pending(ns, alias_value, sha512t24u);
+            self.add_sequence_alias_pending(ns, alias_value, sha512t24u)?;
         }
 
         // Register the collection alias (if requested). Conflicts were already

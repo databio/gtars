@@ -19,21 +19,28 @@ use crate::fasta::digest_fasta;
 use crate::utils::PathExtension;
 
 use crate::digest::types::{
-    SeqColDigestLvl1, SequenceCollection, SequenceCollectionMetadata, SequenceCollectionRecord,
+    SeqColDigestLvl1, SequenceCollection, SequenceCollectionMetadata,
     SequenceMetadata, SequenceRecord, parse_rgsi_line,
 };
 
-/// Shared implementation for writing RGSI (Refget Sequence Index) files.
+/// Write a collection's RGSI (Refget Sequence Index) file: level-1 header
+/// lines, then one row per member.
 ///
 /// Published atomically (temp + `rename(2)`): a `collections/<digest>.rgsi` is a
 /// content-addressed per-item file that concurrent writers may produce
 /// simultaneously, and the orphan-GC live-set computation reads these files, so a
 /// torn one would be read as "this collection references nothing".
-fn write_rgsi_impl<P: AsRef<Path>>(
+pub fn write_collection_rgsi_rows<P, I>(
     file_path: P,
     metadata: &SequenceCollectionMetadata,
-    sequences: Option<&[SequenceRecord]>,
-) -> Result<()> {
+    rows: I,
+) -> Result<()>
+where
+    P: AsRef<Path>,
+    I: IntoIterator,
+    I::Item: std::borrow::Borrow<SequenceMetadata>,
+{
+    use std::borrow::Borrow;
     crate::store::atomic::atomic_write(file_path.as_ref(), |file| {
         // Write collection digest headers
         writeln!(file, "##seqcol_digest={}", metadata.digest)?;
@@ -54,21 +61,18 @@ fn write_rgsi_impl<P: AsRef<Path>>(
             "#name\tlength\talphabet\tsha512t24u\tmd5\tdescription"
         )?;
 
-        // Write sequence metadata if available
-        if let Some(seqs) = sequences {
-            for seq_record in seqs {
-                let seq_meta = seq_record.metadata();
-                writeln!(
-                    file,
-                    "{}\t{}\t{}\t{}\t{}\t{}",
-                    seq_meta.name,
-                    seq_meta.length,
-                    seq_meta.alphabet,
-                    seq_meta.sha512t24u,
-                    seq_meta.md5,
-                    seq_meta.description.as_deref().unwrap_or("")
-                )?;
-            }
+        for row in rows {
+            let seq_meta: &SequenceMetadata = row.borrow();
+            writeln!(
+                file,
+                "{}\t{}\t{}\t{}\t{}\t{}",
+                seq_meta.name,
+                seq_meta.length,
+                seq_meta.alphabet,
+                seq_meta.sha512t24u,
+                seq_meta.md5,
+                seq_meta.description.as_deref().unwrap_or("")
+            )?;
         }
         Ok(())
     })
@@ -137,21 +141,6 @@ impl SequenceRecordExt for SequenceRecord {
 }
 
 // ============================================================================
-// Extensions to SequenceCollectionRecord for filesystem operations
-// ============================================================================
-
-/// Extension trait for SequenceCollectionRecord with filesystem-dependent methods.
-pub trait SequenceCollectionRecordExt {
-    fn write_collection_rgsi<P: AsRef<Path>>(&self, file_path: P) -> Result<()>;
-}
-
-impl SequenceCollectionRecordExt for SequenceCollectionRecord {
-    /// Write the collection to an RGSI file.
-    fn write_collection_rgsi<P: AsRef<Path>>(&self, file_path: P) -> Result<()> {
-        write_rgsi_impl(file_path, self.metadata(), self.sequences())
-    }
-}
-
 // ============================================================================
 // Extensions to SequenceCollection for filesystem operations
 // ============================================================================
@@ -169,7 +158,6 @@ pub trait SequenceCollectionExt {
     ) -> Result<SequenceCollection>;
     fn write_collection_rgsi<P: AsRef<Path>>(&self, file_path: P) -> Result<()>;
     fn write_rgsi(&self) -> Result<()>;
-    fn to_record(&self) -> SequenceCollectionRecord;
     fn write_fasta<P: AsRef<Path>>(&self, file_path: P, line_width: Option<usize>) -> Result<()>;
 }
 
@@ -228,7 +216,7 @@ impl SequenceCollectionExt for SequenceCollection {
 
     /// Write the SequenceCollection to an RGSI file.
     fn write_collection_rgsi<P: AsRef<Path>>(&self, file_path: P) -> Result<()> {
-        write_rgsi_impl(file_path, &self.metadata, Some(&self.sequences))
+        write_collection_rgsi_rows(file_path, &self.metadata, self.sequences.iter().map(|s| s.metadata()))
     }
 
     /// Write the SequenceCollection to an RGSI file using the stored file path.
@@ -241,11 +229,6 @@ impl SequenceCollectionExt for SequenceCollection {
                 "No file path specified for RGSI output. Use `write_collection_rgsi` to specify a file path."
             ))
         }
-    }
-
-    /// Convert to a SequenceCollectionRecord for storage.
-    fn to_record(&self) -> SequenceCollectionRecord {
-        SequenceCollectionRecord::from(self.clone())
     }
 
     /// Write the SequenceCollection to a FASTA file.
@@ -290,6 +273,80 @@ impl SequenceCollectionExt for SequenceCollection {
 // RGSI File I/O
 // ============================================================================
 
+/// The `##key=value` header lines of a collection RGSI file.
+#[derive(Default)]
+pub(crate) struct RgsiHeader {
+    seqcol_digest: String,
+    names_digest: String,
+    sequences_digest: String,
+    lengths_digest: String,
+    name_length_pairs_digest: Option<String>,
+    sorted_name_length_pairs_digest: Option<String>,
+    sorted_sequences_digest: Option<String>,
+}
+
+impl RgsiHeader {
+    /// Record `line` if it is a `##` header line; returns whether it was one.
+    /// Unknown keys are ignored.
+    pub(crate) fn read_line(&mut self, line: &str) -> bool {
+        let Some(stripped) = line.strip_prefix("##") else {
+            return false;
+        };
+        if let Some((key, value)) = stripped.split_once('=') {
+            match key {
+                "seqcol_digest" => self.seqcol_digest = value.to_string(),
+                "names_digest" => self.names_digest = value.to_string(),
+                "sequences_digest" => self.sequences_digest = value.to_string(),
+                "lengths_digest" => self.lengths_digest = value.to_string(),
+                "name_length_pairs_digest" => self.name_length_pairs_digest = Some(value.to_string()),
+                "sorted_name_length_pairs_digest" => {
+                    self.sorted_name_length_pairs_digest = Some(value.to_string())
+                }
+                "sorted_sequences_digest" => self.sorted_sequences_digest = Some(value.to_string()),
+                _ => {}
+            }
+        }
+        true
+    }
+
+    /// The collection metadata the header describes, or `None` if it lacks
+    /// one of the level-1 digests (files from older writers), in which case
+    /// the digests must be computed from the rows.
+    pub(crate) fn into_metadata(
+        self,
+        n_sequences: usize,
+        file_path: &Path,
+    ) -> Option<SequenceCollectionMetadata> {
+        if self.sequences_digest.is_empty()
+            || self.names_digest.is_empty()
+            || self.lengths_digest.is_empty()
+        {
+            return None;
+        }
+        let lvl1 = SeqColDigestLvl1 {
+            sequences_digest: self.sequences_digest,
+            names_digest: self.names_digest,
+            lengths_digest: self.lengths_digest,
+        };
+        let digest = if self.seqcol_digest.is_empty() {
+            lvl1.to_digest()
+        } else {
+            self.seqcol_digest
+        };
+        Some(SequenceCollectionMetadata {
+            digest,
+            n_sequences,
+            names_digest: lvl1.names_digest,
+            sequences_digest: lvl1.sequences_digest,
+            lengths_digest: lvl1.lengths_digest,
+            name_length_pairs_digest: self.name_length_pairs_digest,
+            sorted_name_length_pairs_digest: self.sorted_name_length_pairs_digest,
+            sorted_sequences_digest: self.sorted_sequences_digest,
+            file_path: Some(file_path.to_path_buf()),
+        })
+    }
+}
+
 /// Read an RGSI file and return a SequenceCollection.
 pub fn read_rgsi_file<T: AsRef<Path>>(file_path: T) -> Result<SequenceCollection> {
     use std::io::BufRead;
@@ -297,80 +354,22 @@ pub fn read_rgsi_file<T: AsRef<Path>>(file_path: T) -> Result<SequenceCollection
     let file = std::fs::File::open(&file_path)?;
     let reader = std::io::BufReader::new(file);
     let mut results = Vec::new();
-
-    // Variables to store header metadata
-    let mut seqcol_digest = String::new();
-    let mut names_digest = String::new();
-    let mut sequences_digest = String::new();
-    let mut lengths_digest = String::new();
-    let mut name_length_pairs_digest: Option<String> = None;
-    let mut sorted_name_length_pairs_digest: Option<String> = None;
-    let mut sorted_sequences_digest: Option<String> = None;
+    let mut header = RgsiHeader::default();
     for line in reader.lines() {
         let line = line?;
-
-        // Parse header metadata lines
-        if line.starts_with("##") {
-            if let Some(stripped) = line.strip_prefix("##") {
-                if let Some((key, value)) = stripped.split_once('=') {
-                    match key {
-                        "seqcol_digest" => seqcol_digest = value.to_string(),
-                        "names_digest" => names_digest = value.to_string(),
-                        "sequences_digest" => sequences_digest = value.to_string(),
-                        "lengths_digest" => lengths_digest = value.to_string(),
-                        "name_length_pairs_digest" => name_length_pairs_digest = Some(value.to_string()),
-                        "sorted_name_length_pairs_digest" => sorted_name_length_pairs_digest = Some(value.to_string()),
-                        "sorted_sequences_digest" => sorted_sequences_digest = Some(value.to_string()),
-                        _ => {} // Ignore unknown metadata keys
-                    }
-                }
-            }
+        // Header metadata lines, then other comment lines.
+        if header.read_line(&line) || line.starts_with('#') {
             continue;
         }
-
-        // Skip other comment lines
-        if line.starts_with('#') {
-            continue;
-        }
-
-        // Parse sequence data line
         if let Some(metadata) = parse_rgsi_line(&line) {
             results.push(SequenceRecord::Stub(metadata));
         }
     }
 
-    // Build collection metadata
-    let collection_metadata = if sequences_digest.is_empty()
-        || names_digest.is_empty()
-        || lengths_digest.is_empty()
-    {
-        // Compute from sequence records
-        SequenceCollectionMetadata::from_sequences(&results, Some(file_path.as_ref().to_path_buf()))
-    } else {
-        // Use digests from file header
-        let lvl1 = SeqColDigestLvl1 {
-            sequences_digest,
-            names_digest,
-            lengths_digest,
-        };
-
-        let digest = if seqcol_digest.is_empty() {
-            lvl1.to_digest()
-        } else {
-            seqcol_digest
-        };
-
-        SequenceCollectionMetadata {
-            digest,
-            n_sequences: results.len(),
-            names_digest: lvl1.names_digest,
-            sequences_digest: lvl1.sequences_digest,
-            lengths_digest: lvl1.lengths_digest,
-            name_length_pairs_digest,
-            sorted_name_length_pairs_digest,
-            sorted_sequences_digest,
-            file_path: Some(file_path.as_ref().to_path_buf()),
-        }
+    let path = file_path.as_ref();
+    let collection_metadata = match header.into_metadata(results.len(), path) {
+        Some(metadata) => metadata,
+        None => SequenceCollectionMetadata::from_sequences(&results, Some(path.to_path_buf())),
     };
 
     Ok(SequenceCollection {

@@ -19,19 +19,19 @@
 //!
 //! 1. **Partial read** — `get_substring` / `get_substrings`. Returns the bases
 //!    for `[start, end)` as a `String`, reading only the bytes that cover the
-//!    region. Source resolution: resident `Full` bytes -> local `.seq`
+//!    region. Source resolution: loaded or resident bytes -> local `.seq`
 //!    (positioned read; the whole sequence never enters RAM) -> remote
 //!    byte-range (HTTP `Range:` via `open_remote_range`). The whole sequence
 //!    never enters RAM and nothing is persisted, so this is the smart default
 //!    for sparse, random-access extraction regardless of where the data lives.
-//!    A remote-only `Stub` is served by fetching just the covering bytes; it
+//!    A remote-only sequence is served by fetching just the covering bytes; it
 //!    does NOT trigger a whole-chromosome download (use flow 3 for that).
 //!    Repeated remote reads re-fetch, so promote to flow 3 for repeat-heavy
 //!    workloads.
 //!
 //! 2. **Streaming** — `stream_sequence`. Returns a `Read`er over `[start, end)`
 //!    and decodes on the fly, so peak memory stays O(1) in the region length.
-//!    Source resolution: resident `Full` bytes -> local `.seq` (seek) -> remote
+//!    Source resolution: loaded bytes -> local `.seq` (seek) -> remote
 //!    byte-range (HTTP `Range:` via `open_remote_range`). This is the only flow
 //!    that pulls a *region* straight from a remote store, fetching just the
 //!    covering bytes; nothing is persisted, so repeated remote reads re-fetch.
@@ -44,8 +44,8 @@
 //!    full-sequence download + allocation up front (a whole chromosome can be
 //!    tens of MB encoded), so avoid it for one-off region pulls.
 //!
-//! Flows 1 and 2 need only metadata loaded (a `Stub`); flow 3 promotes a `Stub`
-//! to a `Full` record. Remote byte-range (flows 1-2) requires the `http`
+//! Flows 1 and 2 need only metadata loaded; flow 3 loads the sequence's
+//! bytes. Remote byte-range (flows 1-2) requires the `http`
 //! feature; without it, only resident and local sources are available.
 //!
 //! ## Write discipline (concurrency)
@@ -90,6 +90,9 @@ mod readonly;
 mod core;
 mod alias;
 pub(crate) mod atomic;
+mod catalog;
+mod packidx;
+mod packcache;
 mod fhr_metadata;
 mod lock;
 // FASTA import (crossbeam-channel) and export (gtars-core) are filesystem-only.
@@ -98,6 +101,7 @@ mod import;
 mod persistence;
 #[cfg(feature = "filesystem")]
 mod export;
+mod label;
 mod verify;
 
 // The bulk of the store tests import FASTA via the filesystem-only API.
@@ -163,8 +167,12 @@ mod nofs_tests {
 
 // Re-export public types from submodules
 pub use self::readonly::{PendingChanges, ReadonlyRefgetStore};
+pub use self::readonly::{CompactOptions, CompactReport};
 pub use self::core::RefgetStore;
 pub use self::alias::{AliasKind, AliasManager};
+#[cfg(feature = "filesystem")]
+pub use self::export::{ExportOptions, ExportSelection, ExportSummary, Molecule};
+pub use self::label::{LabelError, LabelTemplate};
 pub use self::atomic::is_transient_store_file;
 pub use self::lock::{LockInfo, LockOptions, StoreLock, force_unlock, lock_status};
 pub use self::fhr_metadata::{
@@ -237,6 +245,23 @@ pub enum StorageMode {
     Zstd,
 }
 
+/// Store-level physical layout of sequence bytes. A sibling axis to
+/// [`StorageMode`] (encoding): all four mode x layout combinations are legal.
+///
+/// Store-level, not per-sequence, because a pack offset is only meaningful
+/// relative to a shared pack file — unlike encoding, which is computable per
+/// sequence. One store is uniformly packed or uniformly standalone.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Layout {
+    /// One `.seq` file per digest via the path template (the default).
+    #[default]
+    Standalone,
+    /// Sequences concatenated into sealed, size-capped pack files under
+    /// `packs/`, resolved via the `sequences.pack.idx` sidecar.
+    Packed,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RetrievedSequence {
     pub sequence: String,
@@ -286,6 +311,11 @@ pub struct FastaImportOptions<'a> {
     /// alias cannot name N collections. When unset, nothing is registered and
     /// nothing is derived from the filename.
     pub(crate) collection_alias: Option<(&'a str, &'a str)>,
+    /// Pre-flight ceiling on the number of `.seq` files a STANDALONE store may
+    /// hold after this import. Checked before any bytes are written; a store
+    /// that would exceed it errors, pointing the caller at the packed layout.
+    /// Packed stores bypass the gate; `force` does not. Default 500,000.
+    pub(crate) standalone_file_limit: usize,
 }
 
 impl<'a> Default for FastaImportOptions<'a> {
@@ -295,6 +325,7 @@ impl<'a> Default for FastaImportOptions<'a> {
             namespaces: &[],
             jobs: 0,
             collection_alias: None,
+            standalone_file_limit: 500_000,
         }
     }
 }
@@ -347,6 +378,15 @@ impl<'a> FastaImportOptions<'a> {
         self.collection_alias = Some((namespace, alias));
         self
     }
+
+    /// Set the pre-flight ceiling on `.seq` file count for STANDALONE imports.
+    /// Packed stores bypass this gate; `force` does not. 0 is not special: to
+    /// lift the limit, pass a large number.
+    #[must_use]
+    pub fn standalone_file_limit(mut self, limit: usize) -> Self {
+        self.standalone_file_limit = limit;
+        self
+    }
 }
 
 /// Metadata for the entire store.
@@ -366,12 +406,17 @@ pub(crate) struct StoreMetadata {
     pub(crate) collection_index: Option<String>,
     /// Storage mode (Raw or Encoded)
     pub(crate) mode: StorageMode,
+    /// Physical layout of sequence bytes (Standalone or Packed). Old manifests
+    /// without this field deserialize as `Standalone` — the entire migration
+    /// story.
+    #[serde(default)]
+    pub(crate) layout: Layout,
     /// Creation timestamp
     pub(crate) created_at: String,
     /// Whether ancillary digests are computed and stored
     #[serde(default = "default_true")]
     pub(crate) ancillary_digests: bool,
-    /// Whether on-disk attribute index is maintained (Part 2)
+    /// Whether the on-disk attribute index is maintained
     #[serde(default)]
     pub(crate) attribute_index: bool,
     /// Available sequence alias namespaces (for remote discovery)
@@ -414,19 +459,19 @@ pub(crate) fn default_true() -> bool {
 /// returned by `add_sequence_collections_from_fastas`.
 #[derive(Debug, Clone)]
 pub struct StoreStats {
-    /// Total number of sequences (Stub + Full)
+    /// Total number of sequences (loaded or not)
     pub n_sequences: usize,
-    /// Number of sequences whose bytes are currently held in RAM (`Full`
-    /// records). Structurally always 0 for a disk-backed store: importing
-    /// downgrades every record to a `Stub` after handing its bytes to the
-    /// writer pool (see `add_sequence_record_deferred_write`). Only an
-    /// on-demand remote fetch ever makes a record `Full` again.
+    /// Number of sequences whose bytes are currently held in RAM (loaded).
+    /// Structurally always 0 for a disk-backed store: importing drops each
+    /// sequence's bytes after handing them off to be written (see
+    /// `add_sequence_record_deferred_write`). Only an on-demand fetch loads
+    /// them again.
     pub n_sequences_in_memory: usize,
-    /// Total number of collections (Stub + Full)
+    /// Total number of collections (loaded or not)
     pub n_collections: usize,
-    /// Number of collections whose sequence list is currently held in RAM
-    /// (`Full` records). Collections finalized by this process are `Full`;
-    /// collections rehydrated from `collections.rgci` are `Stub`. This is a
+    /// Number of collections whose member list is currently held in RAM
+    /// (loaded). Collections finalized by this process are loaded; collections
+    /// read from `collections.rgci` are not. This is a
     /// residency gauge, NOT a count of collections added by this run — it
     /// resets on process start and also counts collections merely touched by
     /// a read.
@@ -437,6 +482,10 @@ pub struct StoreStats {
     /// encoding). Excludes index/sidecar/manifest overhead. For the exact full
     /// on-disk footprint use `ReadonlyRefgetStore::actual_disk_usage()`.
     pub logical_sequence_bytes: u64,
+    /// Dead (unreferenced) bytes inside pack files for a PACKED store:
+    /// `sum(pack sizes) - sum(live sidecar lengths)`. `None` for a standalone
+    /// store, where per-sequence `.seq` files are unlinked eagerly.
+    pub packed_dead_bytes: Option<u64>,
 }
 
 /// Result of importing one or more FASTA files.
@@ -452,8 +501,8 @@ pub struct StoreStats {
 pub struct ImportReport {
     /// Per-file results in input order: `(metadata, was_new)`.
     pub collections: Vec<(SequenceCollectionMetadata, bool)>,
-    /// Sequences whose bytes were dispatched to the writer pool this run
-    /// (i.e. genuinely new content). For in-memory stores, sequences newly
+    /// Sequences whose bytes were written this run (i.e. genuinely new
+    /// content). For in-memory stores, sequences newly
     /// inserted into the in-memory map.
     pub n_sequences_written: usize,
     /// Sequences already present (by content digest), so no bytes were written.

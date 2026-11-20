@@ -46,6 +46,46 @@ store.write_store_to_dir(store_path, "sequences/%s2/%s.seq")
 loaded_store = RefgetStore.open_local(store_path)
 ```
 
+## Packed layout (alpha)
+
+A standard on-disk store writes one `.seq` file per sequence. A store with
+hundreds of thousands of sequences then means hundreds of thousands of files,
+which is slow on network filesystems. The packed layout writes sequences into
+a few large pack files under `packs/` instead, and finds each sequence through
+an index file, `sequences.pack.idx`.
+
+```python
+# Create a packed store
+store = RefgetStore.on_disk("my_packed_store", packed=True)
+store.add_sequence_collection_from_fasta("genome.fa")
+print(store.layout)  # "packed"
+
+# Removing collections leaves dead bytes in the packs; compact() reclaims them
+store.compact()  # {"packs_before": ..., "packs_after": ..., "bytes_reclaimed": ..., "packs_pruned": 0}
+```
+
+`store.compact(prune_unreferenced=True)` also deletes pack files that no index
+entry points to, such as packs left by a writer that crashed. Use it only when
+no other process is writing to the store: a pack another writer has sealed but
+not yet committed looks the same, and would be deleted too.
+
+A store's layout is fixed when it is created. Opening an existing standard
+store with `packed=True` raises an error; `open_local` opens either kind.
+
+A standard store refuses an import that would leave it with more than
+500,000 `.seq` files. To go past that, use the packed layout, or raise the
+limit with `standalone_file_limit=` on `add_sequence_collection_from_fasta`
+or `add_sequence_collections_from_fastas`. `force=True` does not skip the
+limit.
+
+Reads from a packed store can go through a block cache, which is off by
+default. `store.set_pack_cache(128)` turns it on with 128 MB; `0` turns it
+off. It helps clustered reads (for example a sorted BED) on a cold network
+file system, and hurts scattered reads on stores larger than the cache.
+
+The packed layout is alpha: its on-disk format may change before it is
+declared stable.
+
 ## Loading Remote Stores
 
 You can open stores from remote URLs (HTTP/HTTPS). The small index files are
@@ -89,20 +129,16 @@ record = store.get_sequence_by_name(
     "chr1"
 )
 
-# Export entire collection to FASTA
-store.export_fasta(
-    collection.digest,
-    "output.fa",
-    sequence_names=None,  # None = all sequences
-    line_width=80
-)
+# Export an entire collection to FASTA. The default label is the sequence
+# digest (SQ....); label="{name}" writes chromosome names instead.
+store.export_fasta("output.fa", collections=[collection.digest], label="{name}")
 
 # Export specific sequences from a collection
 store.export_fasta(
-    collection.digest,
     "chr1_and_chr2.fa",
-    sequence_names=["chr1", "chr2"],
-    line_width=80
+    collections=[collection.digest],
+    names=["chr1", "chr2"],
+    label="{name}",
 )
 ```
 
@@ -118,7 +154,8 @@ retrieved_seqs = store.substrings_from_regions(
 for seq in retrieved_seqs:
     print(f"{seq.chrom_name}:{seq.start}-{seq.end} = {seq.sequence}")
 
-# Export BED regions to a FASTA file
+# Export BED regions to a FASTA file. Headers look like >chr1:0-10 by
+# default; pass label="{seq}" to use sequence digests instead.
 store.export_fasta_from_regions(
     collection.digest,
     "regions.bed",

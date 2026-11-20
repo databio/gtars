@@ -55,6 +55,70 @@ test_that("refget_store_on_disk creates disk-backed store", {
   expect_s4_class(store, "RefgetStore")
 })
 
+test_that("packed store round-trips and compacts", {
+  skip_if_no_fasta()
+  store_dir <- file.path(tempdir(), "test_packed_store")
+  on.exit(unlink(store_dir, recursive = TRUE))
+
+  store <- refget_store_on_disk(store_dir, packed = TRUE)
+  set_quiet(store, TRUE)
+  import_fasta(store, fasta_path)
+  expect_length(list.files(store_dir, pattern = "\\.seq$", recursive = TRUE), 0)
+  expect_true(length(list.files(file.path(store_dir, "packs"), pattern = "\\.pack$")) > 0)
+
+  bases <- c(chrX = "TTGGGGAA", chr1 = "GGAA", chr2 = "GCGC")
+  expected <- digest_fasta(fasta_path)
+  reopened <- refget_store_open_local(store_dir)
+  for (rec in expected@sequences) {
+    meta <- rec@metadata
+    expect_equal(get_substring(reopened, meta@sha512t24u, 0, meta@length), bases[[meta@name]])
+  }
+
+  report <- compact(reopened)
+  expect_setequal(names(report), c("packs_before", "packs_after", "bytes_reclaimed", "packs_pruned"))
+  expect_equal(report$packs_pruned, 0L)
+  for (rec in expected@sequences) {
+    meta <- rec@metadata
+    expect_equal(get_substring(reopened, meta@sha512t24u, 0, meta@length), bases[[meta@name]])
+  }
+
+  # The pack block cache, on and then off, reads the same bases.
+  for (megabytes in c(16, 0)) {
+    set_pack_cache(reopened, megabytes)
+    for (rec in expected@sequences) {
+      meta <- rec@metadata
+      expect_equal(get_substring(reopened, meta@sha512t24u, 0, meta@length), bases[[meta@name]])
+    }
+  }
+})
+
+test_that("compact prunes unreferenced packs only on request", {
+  skip_if_no_fasta()
+  store_dir <- file.path(tempdir(), "test_packed_prune")
+  on.exit(unlink(store_dir, recursive = TRUE))
+
+  store <- refget_store_on_disk(store_dir, packed = TRUE)
+  set_quiet(store, TRUE)
+  import_fasta(store, fasta_path)
+  packs <- list.files(file.path(store_dir, "packs"), pattern = "\\.pack$", full.names = TRUE)
+  expect_length(packs, 1)
+  unlisted <- file.path(store_dir, "packs", "0123456789abcdef0123456789abcdef.pack")
+  expect_true(file.copy(packs[[1]], unlisted))
+
+  reopened <- refget_store_open_local(store_dir)
+  expect_equal(compact(reopened)$packs_pruned, 0L)
+  expect_true(file.exists(unlisted))
+
+  report <- compact(reopened, prune_unreferenced = TRUE)
+  expect_equal(report$packs_pruned, 1L)
+  expect_false(file.exists(unlisted))
+  bases <- c(chrX = "TTGGGGAA", chr1 = "GGAA", chr2 = "GCGC")
+  for (rec in digest_fasta(fasta_path)@sequences) {
+    meta <- rec@metadata
+    expect_equal(get_substring(reopened, meta@sha512t24u, 0, meta@length), bases[[meta@name]])
+  }
+})
+
 # =========================================================================
 # Store configuration
 # =========================================================================
@@ -435,7 +499,7 @@ test_that("verify_store detects a corrupted sequence", {
   expect_equal(result2$n_failed, 1)
 })
 
-test_that("export_fasta creates valid FASTA", {
+test_that("export_fasta creates valid FASTA with digest labels", {
   skip_if_no_fasta()
   store <- refget_store()
   set_quiet(store, TRUE)
@@ -445,13 +509,13 @@ test_that("export_fasta creates valid FASTA", {
   export_path <- file.path(tempdir(), "refget_export.fa")
   on.exit(unlink(export_path))
 
-  export_fasta(store, result@digest, export_path)
-  expect_true(file.exists(export_path))
-  lines <- readLines(export_path)
-  expect_true(any(grepl("^>", lines)))
+  summary <- export_fasta(store, export_path, collections = result@digest)
+  expect_equal(summary$n_records, length(result@sequences))
+  headers <- grep("^>", readLines(export_path), value = TRUE)
+  expect_true(all(startsWith(headers, ">SQ.")))
 })
 
-test_that("export_fasta with sequence_names subset works", {
+test_that("export_fasta with names subset and name labels works", {
   skip_if_no_fasta()
   store <- refget_store()
   set_quiet(store, TRUE)
@@ -462,12 +526,33 @@ test_that("export_fasta with sequence_names subset works", {
   on.exit(unlink(export_path))
 
   seq_names <- sapply(result@sequences[1:2], function(s) s@metadata@name)
-  export_fasta(store, result@digest, export_path,
-               sequence_names = seq_names, line_width = 60L)
-  expect_true(file.exists(export_path))
+  export_fasta(store, export_path, collections = result@digest,
+               names = seq_names, label = "{name}", line_width = 60L)
+  headers <- grep("^>", readLines(export_path), value = TRUE)
+  expect_equal(headers, paste0(">", seq_names))
 })
 
-test_that("export_fasta_by_digests works", {
+test_that("export_fasta labels with {col}/{name} and all = TRUE", {
+  skip_if_no_fasta()
+  store <- refget_store()
+  set_quiet(store, TRUE)
+  result <- digest_fasta(fasta_path)
+  import_fasta(store, fasta_path)
+
+  export_path <- file.path(tempdir(), "refget_export_col.fa")
+  on.exit(unlink(export_path))
+
+  export_fasta(store, export_path, all = TRUE, label = "{col}/{name}")
+  headers <- grep("^>", readLines(export_path), value = TRUE)
+  seq_names <- sapply(result@sequences, function(s) s@metadata@name)
+  expect_equal(headers, paste0(">", result@digest, "/", seq_names))
+
+  summary <- export_fasta(store, export_path, all = TRUE)
+  expect_equal(summary$n_records, length(unique(
+    sapply(result@sequences, function(s) s@metadata@sha512t24u))))
+})
+
+test_that("export_fasta by seq_digests works", {
   skip_if_no_fasta()
   store <- refget_store()
   set_quiet(store, TRUE)
@@ -478,8 +563,25 @@ test_that("export_fasta_by_digests works", {
   on.exit(unlink(export_path))
 
   digests <- sapply(result@sequences[1:2], function(s) s@metadata@sha512t24u)
-  export_fasta_by_digests(store, digests, export_path, line_width = 70L)
-  expect_true(file.exists(export_path))
+  export_fasta(store, export_path, seq_digests = digests, line_width = 70L)
+  headers <- grep("^>", readLines(export_path), value = TRUE)
+  expect_equal(headers, paste0(">SQ.", digests))
+})
+
+test_that("export_fasta rejects bad templates and selections", {
+  skip_if_no_fasta()
+  store <- refget_store()
+  set_quiet(store, TRUE)
+  result <- digest_fasta(fasta_path)
+  import_fasta(store, fasta_path)
+  out <- file.path(tempdir(), "refget_export_bad.fa")
+  on.exit(unlink(out))
+
+  expect_error(export_fasta(store, out, collections = result@digest, label = "{nope}"),
+               "unknown field")
+  expect_error(export_fasta(store, out), "exactly one")
+  expect_error(export_fasta(store, out, collections = result@digest, molecule = "rna"),
+               "molecule")
 })
 
 # =========================================================================
@@ -498,10 +600,31 @@ test_that("BED file sequence extraction to FASTA works", {
 
   writeLines(c("chr1\t0\t4", "chr2\t0\t4"), temp_bed)
 
+  # The default label is the sequence name.
   get_seqs_bed_file(store, result@digest, temp_bed, temp_out)
   expect_true(file.exists(temp_out))
   output_content <- readLines(temp_out)
-  expect_true(length(output_content) > 0)
+  expect_equal(output_content[1], ">chr1:0-4")
+
+  chr1 <- Filter(function(s) s@metadata@name == "chr1", result@sequences)[[1]]
+  get_seqs_bed_file(store, result@digest, temp_bed, temp_out, label = "{seq}")
+  output_content <- readLines(temp_out)
+  expect_equal(output_content[1], paste0(">SQ.", chr1@metadata@sha512t24u, ":0-4"))
+})
+
+test_that("add_fasta honors standalone_file_limit, and force does not skip it", {
+  skip_if_no_fasta()
+  store_dir <- file.path(tempdir(), "test_file_limit_store")
+  on.exit(unlink(store_dir, recursive = TRUE))
+
+  store <- refget_store_on_disk(store_dir)
+  set_quiet(store, TRUE)
+  expect_error(
+    add_fasta(store, fasta_path, force = TRUE, standalone_file_limit = 2),
+    "standalone_file_limit"
+  )
+  result <- add_fasta(store, fasta_path, standalone_file_limit = 3)
+  expect_true(result$was_new)
 })
 
 test_that("BED file sequence extraction to vector works", {

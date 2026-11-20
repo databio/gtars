@@ -25,6 +25,11 @@
 //!     successful within-chromosome read1/read2 joins, so the denominator
 //!     counts the SAME population as the numerator. The test below asserts the
 //!     corrected invariant (split pairs do not change `total_reads` or NRF).
+//!
+//! The `min_mapq` tests at the end check the MAPQ prefilter: the default 0
+//! counts every read (as PEPATAC's `bamQC.py` does), and 30 gives the ENCODE
+//! "uniquely mapping" prefilter. MAPQ 255 ("not available") always passes.
+//! The other tests leave MAPQ unset (255), so their reads pass any filter.
 
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
@@ -34,7 +39,7 @@ use noodles::bam::bai;
 use noodles::core::Position;
 use noodles::csi::binning_index::Indexer;
 use noodles::sam::alignment::record::cigar::{op::Kind, Op};
-use noodles::sam::alignment::record::Flags;
+use noodles::sam::alignment::record::{Flags, MappingQuality};
 use noodles::sam::alignment::io::Write as AlignmentWrite;
 // `Record` trait brings `alignment_end()`/`alignment_start()`/etc. into scope
 // for the concrete `bam::Record` used while building the BAI index.
@@ -193,7 +198,7 @@ fn test_harness_indexed_bam_is_queryable() {
     ];
 
     let (_dir, bam_path) = write_indexed_bam(&header, &records);
-    let result = compute_bam_qc(&bam_path).expect("compute_bam_qc on indexed BAM");
+    let result = compute_bam_qc(&bam_path, 0).expect("compute_bam_qc on indexed BAM");
     assert!(
         result.total_reads > 0,
         "harness produced an unreadable/empty BAM: {result:?}"
@@ -234,7 +239,7 @@ fn test_bug1_m2_forced_to_one_serial() {
     let (header, records) = no_multiplicity_two_records();
     let (_dir, bam_path) = write_indexed_bam(&header, &records);
 
-    let result = compute_bam_qc(&bam_path).expect("compute_bam_qc");
+    let result = compute_bam_qc(&bam_path, 0).expect("compute_bam_qc");
     eprintln!("[bug1 serial] result = {result:?}");
 
     // Sanity: we engineered distinct positions {pos=10 (x1), pos=100 (x3)}.
@@ -257,7 +262,7 @@ fn test_bug1_m2_forced_to_one_parallel() {
     let (header, records) = no_multiplicity_two_records();
     let (_dir, bam_path) = write_indexed_bam(&header, &records);
 
-    let result = compute_bam_qc_parallel(&bam_path, 2).expect("compute_bam_qc_parallel");
+    let result = compute_bam_qc_parallel(&bam_path, 2, 0).expect("compute_bam_qc_parallel");
     eprintln!("[bug1 parallel] result = {result:?}");
 
     assert_eq!(result.distinct, 2, "expected 2 distinct positions");
@@ -356,14 +361,14 @@ fn test_bug4_interchromosomal_pair_excluded_from_denominator() {
     // Control: 2 within-chromosome pairs, no split pairs.
     let (h_ctrl, r_ctrl) = paired_records(2, 0);
     let (_d1, p_ctrl) = write_indexed_bam(&h_ctrl, &r_ctrl);
-    let ctrl = compute_bam_qc(&p_ctrl).expect("ctrl qc");
+    let ctrl = compute_bam_qc(&p_ctrl, 0).expect("ctrl qc");
     eprintln!("[bug4 control]   = {ctrl:?}");
 
     // Treatment: same 2 within-chromosome pairs PLUS two inter-chromosomal
     // pairs (even per-chromosome so the old `/2` truncation didn't mask them).
     let (h_tx, r_tx) = paired_records(2, 2);
     let (_d2, p_tx) = write_indexed_bam(&h_tx, &r_tx);
-    let tx = compute_bam_qc(&p_tx).expect("tx qc");
+    let tx = compute_bam_qc(&p_tx, 0).expect("tx qc");
     eprintln!("[bug4 treatment] = {tx:?}");
 
     // The within-chromosome joins are identical between control and treatment,
@@ -403,4 +408,127 @@ fn test_bug4_interchromosomal_pair_excluded_from_denominator() {
         ctrl.nrf,
         tx.nrf
     );
+}
+
+/// Like `build_record`, but with MAPQ set to `mapq` (255 means "not
+/// available", which noodles stores as `None`).
+fn build_record_with_mapq(spec: &ReadSpec, mapq: u8) -> RecordBuf {
+    let mut record = build_record(spec);
+    *record.mapping_quality_mut() = MappingQuality::new(mapq);
+    record
+}
+
+/// Header with one nuclear chromosome (sq0) and a mitochondrial one (chrM).
+fn nuclear_and_mito_header() -> Header {
+    Header::builder()
+        .add_reference_sequence(
+            "sq0",
+            Map::<ReferenceSequence>::new(NonZeroUsize::try_from(1000).unwrap()),
+        )
+        .add_reference_sequence(
+            "chrM",
+            Map::<ReferenceSequence>::new(NonZeroUsize::try_from(1000).unwrap()),
+        )
+        .build()
+}
+
+/// Single-end reads, each at its own position. On sq0 the MAPQs are
+/// 0, 10, 29, 30, 60 and 255; on chrM they are 5 and 40.
+fn mixed_mapq_single_end() -> (Header, Vec<RecordBuf>) {
+    let header = nuclear_and_mito_header();
+    let reads: [(usize, usize, u8); 8] = [
+        (0, 10, 0),
+        (0, 20, 10),
+        (0, 30, 29),
+        (0, 40, 30),
+        (0, 50, 60),
+        (0, 60, 255),
+        (1, 10, 5),
+        (1, 20, 40),
+    ];
+    let records = reads
+        .iter()
+        .enumerate()
+        .map(|(i, &(ref_id, pos, mapq))| {
+            let spec = ReadSpec {
+                name: leak_name(&format!("se{i}")),
+                ref_id,
+                pos,
+                flags: 0,
+                mate: None,
+                template_length: 0,
+            };
+            build_record_with_mapq(&spec, mapq)
+        })
+        .collect();
+    (header, records)
+}
+
+/// Three proper pairs on sq0, each at its own position. In pair "low" the
+/// read2 mate has MAPQ 5; every other read has MAPQ 60.
+fn mixed_mapq_pairs() -> (Header, Vec<RecordBuf>) {
+    let header = two_chrom_header();
+    let pairs: [(&str, usize, u8); 3] = [("a", 10, 60), ("low", 200, 5), ("b", 400, 60)];
+    let mut records = Vec::new();
+    for (name, p1, read2_mapq) in pairs {
+        let p2 = p1 + 50;
+        let read1 = ReadSpec {
+            name,
+            ref_id: 0,
+            pos: p1,
+            flags: FLAG_PAIRED | FLAG_READ1,
+            mate: Some((0, p2)),
+            template_length: 54,
+        };
+        let read2 = ReadSpec {
+            name,
+            ref_id: 0,
+            pos: p2,
+            flags: FLAG_PAIRED | FLAG_READ2,
+            mate: Some((0, p1)),
+            template_length: -54,
+        };
+        records.push(build_record_with_mapq(&read1, 60));
+        records.push(build_record_with_mapq(&read2, read2_mapq));
+    }
+    // Pairs are 200bp apart and each spans 50bp, so this order is sorted.
+    (header, records)
+}
+
+/// The default `min_mapq = 0` counts every read, matching PEPATAC's
+/// bamQC.py. `min_mapq = 30` is the ENCODE "uniquely mapping" prefilter:
+/// MAPQ 0, 10 and 29 are dropped; 30, 60 and 255 pass. The filter applies to
+/// chrM reads too. Single-end total = all reads minus chrM reads.
+#[test]
+fn test_min_mapq_single_end() {
+    let (header, records) = mixed_mapq_single_end();
+    let (_dir, bam_path) = write_indexed_bam(&header, &records);
+
+    for (min_mapq, total, mito) in [(0, 6, 2), (30, 3, 1)] {
+        let serial = compute_bam_qc(&bam_path, min_mapq).expect("compute_bam_qc");
+        let parallel =
+            compute_bam_qc_parallel(&bam_path, 2, min_mapq).expect("compute_bam_qc_parallel");
+        for result in [serial, parallel] {
+            assert_eq!(result.total_reads, total, "min_mapq={min_mapq}: {result:?}");
+            assert_eq!(result.distinct, total, "min_mapq={min_mapq}: {result:?}");
+            assert_eq!(result.m1, total, "min_mapq={min_mapq}: {result:?}");
+            assert_eq!(result.mito_reads, mito, "min_mapq={min_mapq}: {result:?}");
+        }
+    }
+}
+
+/// In paired-end data a pair counts only when both mates pass. With
+/// `min_mapq = 30` the low-MAPQ mate is dropped, so its pair no longer joins.
+#[test]
+fn test_min_mapq_paired_end() {
+    let (header, records) = mixed_mapq_pairs();
+    let (_dir, bam_path) = write_indexed_bam(&header, &records);
+
+    let all = compute_bam_qc(&bam_path, 0).expect("compute_bam_qc");
+    assert_eq!(all.total_reads, 3, "{all:?}");
+    assert_eq!(all.m1, 3, "{all:?}");
+
+    let encode = compute_bam_qc(&bam_path, 30).expect("compute_bam_qc");
+    assert_eq!(encode.total_reads, 2, "{encode:?}");
+    assert_eq!(encode.m1, 2, "{encode:?}");
 }

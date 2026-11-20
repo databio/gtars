@@ -49,23 +49,53 @@ impl RefgetStore {
 
     /// Create a disk-backed RefgetStore.
     pub fn on_disk<P: AsRef<Path>>(cache_path: P) -> Result<Self> {
-        let cache_path = cache_path.as_ref();
-        let index_path = cache_path.join("rgstore.json");
+        Self::create_or_open(cache_path.as_ref(), Layout::Standalone)
+    }
 
-        if index_path.exists() {
-            Self::open_local(cache_path)
-        } else {
-            let mode = StorageMode::Encoded;
-            create_dir_all(cache_path)?;
-            let mut inner = ReadonlyRefgetStore::new(mode);
-            inner.local_path = Some(cache_path.to_path_buf());
-            inner.seqdata_path_template = Some(DEFAULT_SEQDATA_PATH_TEMPLATE.to_string());
-            inner.persist_to_disk = true;
-            create_dir_all(cache_path.join("sequences"))?;
-            create_dir_all(cache_path.join("collections"))?;
-            create_dir_all(cache_path.join("fhr"))?;
-            Ok(Self { inner })
+    /// Create a disk-backed RefgetStore with the PACKED sequence layout.
+    ///
+    /// Sequences are concatenated into sealed, size-capped pack files under
+    /// `packs/`, resolved via the `sequences.pack.idx` sidecar, instead of one
+    /// `.seq` file per digest. Mirrors [`Self::on_disk`] but sets
+    /// `layout = Packed` and creates `packs/`.
+    ///
+    /// Opening an EXISTING store: the layout always comes from its manifest.
+    /// Calling `on_disk_packed` on an existing STANDALONE store is an error,
+    /// since there is no in-place conversion (export a standalone image
+    /// instead). Calling it on an existing packed store just opens it.
+    pub fn on_disk_packed<P: AsRef<Path>>(cache_path: P) -> Result<Self> {
+        let cache_path = cache_path.as_ref();
+        let store = Self::create_or_open(cache_path, Layout::Packed)?;
+        if store.inner.layout != Layout::Packed {
+            return Err(anyhow::anyhow!(
+                "store at {} already exists with a standalone layout; \
+                 on_disk_packed cannot convert it in place. Create a fresh \
+                 packed store and export/re-import, or open it with on_disk.",
+                cache_path.display()
+            ));
         }
+        Ok(store)
+    }
+
+    /// Open the store at `cache_path`, or create an empty Encoded store with
+    /// `layout` there if it has no `rgstore.json`.
+    fn create_or_open(cache_path: &Path, layout: Layout) -> Result<Self> {
+        if cache_path.join("rgstore.json").exists() {
+            return Self::open_local(cache_path);
+        }
+        create_dir_all(cache_path)?;
+        let mut inner = ReadonlyRefgetStore::new(StorageMode::Encoded);
+        inner.local_path = Some(cache_path.to_path_buf());
+        inner.seqdata_path_template = Some(DEFAULT_SEQDATA_PATH_TEMPLATE.to_string());
+        inner.persist_to_disk = true;
+        inner.layout = layout;
+        create_dir_all(cache_path.join("sequences"))?;
+        create_dir_all(cache_path.join("collections"))?;
+        create_dir_all(cache_path.join("fhr"))?;
+        if layout == Layout::Packed {
+            create_dir_all(cache_path.join("packs"))?;
+        }
+        Ok(Self { inner })
     }
 
     /// Create an in-memory RefgetStore.
@@ -189,7 +219,7 @@ impl RefgetStore {
         if !self.inner.is_sequence_loaded(&canonical_digest) {
             self.inner.load_sequence(&canonical_digest)?;
         }
-        Ok(self.inner.get_sequence(&canonical_digest)?.clone())
+        self.inner.get_sequence(&canonical_digest)
     }
 
     /// Retrieve a named sequence from a collection, loading only that
@@ -268,76 +298,93 @@ impl RefgetStore {
         collection_digest: &str,
         opts: &VerifyOptions,
     ) -> Result<VerifyReport> {
-        use crate::hashkeyable::HashKeyable;
-
         self.inner.ensure_sequence_index_loaded()?;
-        let collection_key = collection_digest.to_key();
-        self.inner.ensure_collection_loaded(&collection_key)?;
+        self.inner.ensure_collection_loaded(collection_digest)?;
         let mut digests: Vec<String> = self
             .inner
-            .collection_sequence_metadata(&collection_key)?
-            .iter()
-            .map(|record| record.metadata().sha512t24u.clone())
+            .collection_members(collection_digest)?
+            .map(|m| m.seq().sha512t24u().to_string())
             .collect();
         digests.sort();
         digests.dedup();
         self.inner.verify_sequences(Some(&digests), opts)
     }
 
-    /// Lazy-loading export_fasta. Loads the collection and only the sequence
-    /// bodies it will write (every record whose name is requested, or all of
-    /// the collection's when `sequence_names` is `None`), never the whole
-    /// store. Name validation is left to the readonly implementation.
+    /// Export sequences to FASTA (or stdout with `"-"`), loading only the
+    /// metadata the export needs: the sequence index, the selected collections
+    /// (every collection for `All` when the label uses a collection field),
+    /// and, for a remote store, the alias namespaces the label uses.
+    ///
+    /// Exports stream one sequence at a time and leave the store's loaded
+    /// state unchanged. See [`ReadonlyRefgetStore::export_fasta`].
     #[cfg(feature = "filesystem")]
-    pub fn export_fasta<K: AsRef<[u8]>, P: AsRef<Path>>(
+    pub fn export_fasta<P: AsRef<Path>>(
         &mut self,
-        collection_digest: K,
+        selection: &ExportSelection,
         output_path: P,
-        sequence_names: Option<Vec<&str>>,
-        line_width: Option<usize>,
-    ) -> Result<()> {
-        use crate::hashkeyable::HashKeyable;
-
-        let collection_key = collection_digest.as_ref().to_key();
-        self.inner.ensure_collection_loaded(&collection_key)?;
-        let wanted: Option<std::collections::HashSet<&str>> =
-            sequence_names.as_ref().map(|names| names.iter().copied().collect());
-        let to_load: Vec<String> = self
-            .inner
-            .collection_sequence_metadata(&collection_key)?
-            .iter()
-            .map(|record| record.metadata())
-            .filter(|meta| wanted.as_ref().is_none_or(|w| w.contains(meta.name.as_str())))
-            .map(|meta| meta.sha512t24u.clone())
-            .collect();
-        for digest in &to_load {
-            self.inner.load_sequence(digest)?;
-        }
-
-        self.inner
-            .export_fasta(collection_digest, output_path, sequence_names, line_width)
+        opts: &ExportOptions,
+    ) -> Result<ExportSummary> {
+        self.prepare_export(selection, &opts.label)?;
+        self.inner.export_fasta(selection, output_path, opts)
     }
 
-    /// Lazy-loading export_fasta_by_digests. Loads any requested sequence
-    /// digest that is not yet [`Self::is_sequence_loaded`], then delegates to
-    /// the readonly implementation. There is no collection context here, so
-    /// each digest is loaded directly (no name resolution needed).
+    /// Export BED regions to FASTA, loading the collection and any alias
+    /// namespaces the label uses first.
     #[cfg(feature = "filesystem")]
-    pub fn export_fasta_by_digests<P: AsRef<Path>>(
+    pub fn export_fasta_from_regions(
         &mut self,
-        seq_digests: Vec<&str>,
-        output_path: P,
-        line_width: Option<usize>,
-    ) -> Result<()> {
+        collection_digest: &str,
+        bed_file_path: &str,
+        output_file_path: &str,
+        label: &LabelTemplate,
+    ) -> Result<ExportSummary> {
+        let selection = ExportSelection::Collections {
+            digests: vec![collection_digest.to_string()],
+            names: None,
+        };
+        self.prepare_export(&selection, label)?;
+        self.inner
+            .export_fasta_from_regions(collection_digest, bed_file_path, output_file_path, label)
+    }
+
+    #[cfg(feature = "filesystem")]
+    fn prepare_export(&mut self, selection: &ExportSelection, label: &LabelTemplate) -> Result<()> {
         self.inner.ensure_sequence_index_loaded()?;
-        for digest in seq_digests.iter() {
-            if !self.inner.is_sequence_loaded(*digest) {
-                self.inner.load_sequence(digest)?;
+        match selection {
+            ExportSelection::Collections { digests, .. } => {
+                for d in digests {
+                    self.inner.ensure_collection_loaded(d)?;
+                }
             }
+            ExportSelection::All if label.needs_collection() => self.inner.load_all_collections()?,
+            _ => {}
         }
 
-        self.inner
-            .export_fasta_by_digests(seq_digests, output_path, line_width)
+        // A remote store lists alias namespaces it has not downloaded yet.
+        if self.inner.remote_source.is_some() {
+            let loaded_seq = self.inner.list_sequence_alias_namespaces();
+            let loaded_col = self.inner.list_collection_alias_namespaces();
+            let mut to_pull: Vec<String> = Vec::new();
+            for ns in label.namespaces(AliasKind::Sequence) {
+                if !loaded_seq.contains(&ns)
+                    && self.inner.available_sequence_alias_namespaces.contains(&ns)
+                {
+                    to_pull.push(ns);
+                }
+            }
+            for ns in label.namespaces(AliasKind::Collection) {
+                if !loaded_col.contains(&ns)
+                    && self.inner.available_collection_alias_namespaces.contains(&ns)
+                    && !to_pull.contains(&ns)
+                {
+                    to_pull.push(ns);
+                }
+            }
+            for ns in to_pull {
+                self.pull_aliases(Some(&ns), SyncStrategy::KeepOurs)?;
+            }
+        }
+        Ok(())
     }
 
     // =====================================================================
@@ -358,6 +405,28 @@ impl RefgetStore {
         self.inner.set_encoding_mode(new_mode)
     }
 
+    /// Set the per-pack size cap in bytes (packed layout).
+    pub fn set_pack_cap_bytes(&mut self, cap: u64) {
+        self.inner.set_pack_cap_bytes(cap);
+    }
+
+    /// Turn the pack block cache on with room for `mb` megabytes, or off with
+    /// 0 (the default). See [`ReadonlyRefgetStore::set_pack_cache_mb`].
+    pub fn set_pack_cache_mb(&mut self, mb: usize) {
+        self.inner.set_pack_cache_mb(mb);
+    }
+
+    /// Reclaim dead bytes in a packed store by rewriting live spans into fresh
+    /// sealed packs. Byte-identical retrieval before and after.
+    pub fn compact(&mut self) -> Result<super::CompactReport> {
+        self.inner.compact()
+    }
+
+    /// [`Self::compact`] with options. See [`super::CompactOptions`].
+    pub fn compact_with(&mut self, opts: super::CompactOptions) -> Result<super::CompactReport> {
+        self.inner.compact_with(opts)
+    }
+
     /// Enable 2-bit encoding for space efficiency.
     pub fn enable_encoding(&mut self) -> Result<()> {
         self.inner.enable_encoding()
@@ -376,16 +445,6 @@ impl RefgetStore {
     /// Disable disk persistence for this store.
     pub fn disable_persistence(&mut self) {
         self.inner.disable_persistence();
-    }
-
-    /// Add a sequence to the store.
-    pub fn add_sequence<T: Into<Option<DigestKey>>>(
-        &mut self,
-        sequence_record: SequenceRecord,
-        collection_digest: T,
-        force: bool,
-    ) -> Result<()> {
-        self.inner.add_sequence(sequence_record, collection_digest, force)
     }
 
     /// Digest and insert raw sequence bytes without a collection association.
@@ -464,7 +523,7 @@ impl RefgetStore {
         self.inner.set_lock_options(options);
     }
 
-    /// Allow a commit to overwrite an alias another writer already published.
+    /// Allow re-pointing an existing alias to a different digest.
     pub fn set_force_alias(&mut self, force: bool) {
         self.inner.set_force_alias(force);
     }
@@ -488,7 +547,7 @@ impl RefgetStore {
         self.inner.clear();
     }
 
-    /// Check whether a sequence is loaded (Full).
+    /// Check whether a sequence's bytes are loaded.
     pub fn is_sequence_loaded<K: AsRef<[u8]>>(&self, seq_digest: K) -> bool {
         self.inner.is_sequence_loaded(seq_digest)
     }

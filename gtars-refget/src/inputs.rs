@@ -113,7 +113,7 @@ fn read_file_list(file_list: &Path) -> Result<Vec<PathBuf>, anyhow::Error> {
 /// Order is: explicit paths first (in argv order), then `file_list` lines (in
 /// file order); within each directory or glob the matches are sorted
 /// lexicographically; duplicates are removed keeping the first occurrence. This
-/// order is what feeds collection insertion and `name_lookup`, so it is stable
+/// order is what feeds collection insertion and member order, so it is stable
 /// and identical across the CLI and Python entry points.
 ///
 /// # Expansion rules
