@@ -11,7 +11,8 @@
 
 use super::gapalign::{MAX_SUBJECT_OFFSET, MAX_TOTAL_GAPS, adjust_subject_range};
 use super::hsp::{
-    Hsp, HspList, HspResults, reevaluate_with_ambiguities_gapped, test_identity_and_length,
+    Hsp, HspList, HspResults, calc_length_and_gaps, reevaluate_with_ambiguities_gapped,
+    test_identity_and_length,
 };
 use super::itree::IntervalTree;
 use super::prelim::{GapAligner, SearchContext};
@@ -368,6 +369,20 @@ pub fn traceback_from_hsp_list(
     hsp_list.get_evalues(&ctx.sbp.kbp_gap_std, &ctx.eff_searchsp, ctx.sbp.round_down);
     hsp_list.reap_by_evalue(ctx.options.expect_value);
     hsp_list.get_bit_scores(&ctx.sbp.kbp_gap_std);
+    // the lists of a whole query batch are held until the batch is done: drop the edit
+    // scripts the output does not read, else the slack the aligners' growth left in them
+    // (often more than the script itself)
+    hsp_list.hsps.shrink_to_fit();
+    for h in &mut hsp_list.hsps {
+        if ctx.drop_edit_scripts {
+            if h.gap_info.is_some() {
+                h.length_gaps = Some(calc_length_and_gaps(h));
+                h.gap_info = None;
+            }
+        } else if let Some(e) = h.gap_info.as_mut() {
+            e.ops.shrink_to_fit();
+        }
+    }
 }
 
 /// Subjects at least this long are decoded per HSP list, only around its HSPs

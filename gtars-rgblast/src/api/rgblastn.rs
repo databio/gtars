@@ -6,7 +6,7 @@
 //! output with `format::tabular::write`.
 
 use crate::engine::query::QuerySet;
-use crate::engine::search::{SearchParams, SearchResults, search};
+use crate::engine::search::{QueryResult, SearchParams, SearchResults, search_each};
 use crate::engine::subject::StoreSubjects;
 use crate::error::Error;
 use crate::format::tabular::TabularSpec;
@@ -104,6 +104,41 @@ pub fn run_planned(
     req: &RgblastnRequest,
     progress: &mut dyn FnMut(&ProgressEvent) -> bool,
 ) -> Result<RgblastnOutcome, Error> {
+    let mut all = Vec::new();
+    let mut out = run_planned_each(store, plan, req, progress, &mut |_, _, q| {
+        all.push(q);
+        Ok(())
+    })?;
+    out.results.queries = all;
+    Ok(out)
+}
+
+/// A query's finished result, with the plan and output spec of its search.
+pub type QuerySink<'a> =
+    dyn FnMut(&SubjectPlan, &TabularSpec, QueryResult) -> Result<(), Error> + 'a;
+
+/// `run_resolved`, handing each query's result to `sink` as it is done
+/// (`engine::search::search_each`); the outcome's `results.queries` is empty.
+pub fn run_resolved_each(
+    store: &mut OpenedStore,
+    sel: &ResolvedSelection,
+    req: &RgblastnRequest,
+    progress: &mut dyn FnMut(&ProgressEvent) -> bool,
+    sink: &mut QuerySink,
+) -> Result<RgblastnOutcome, Error> {
+    let plan = super::plan_for_selection(store, sel, &PlanOptions::default())?;
+    run_planned_each(store, Arc::new(plan), req, progress, sink)
+}
+
+/// `run_planned`, handing each query's result to `sink` as it is done
+/// (`engine::search::search_each`); the outcome's `results.queries` is empty.
+pub fn run_planned_each(
+    store: &mut OpenedStore,
+    plan: Arc<SubjectPlan>,
+    req: &RgblastnRequest,
+    progress: &mut dyn FnMut(&ProgressEvent) -> bool,
+    sink: &mut QuerySink,
+) -> Result<RgblastnOutcome, Error> {
     let spec = TabularSpec::parse_outfmt(&req.outfmt)?;
     let label = store.label();
     if plan.subjects.is_empty() {
@@ -119,10 +154,17 @@ pub fn run_planned(
         QuerySource::Bytes(b) => QuerySet::from_fasta_bytes(b)?,
     };
     let totals = plan.totals;
-    let mut results = search(&req.params, &queries, &subjects, progress)?;
-    if spec.needs_sequences() {
-        crate::format::alignment::fill(&mut results, &queries, &subjects)?;
-    }
+    let mut params = req.params.clone();
+    params.drop_edit_scripts |= !spec.needs_edit_scripts();
+    let fill = spec.needs_sequences();
+    let mut window = Vec::new();
+    let results = search_each(&params, &queries, &subjects, progress, &mut |qi, mut q| {
+        if fill {
+            let plus = &queries.queries[qi].seq;
+            crate::format::alignment::fill_query(&mut q, plus, &subjects, &mut window)?;
+        }
+        sink(&plan, &spec, q)
+    })?;
     Ok(RgblastnOutcome {
         results,
         plan,

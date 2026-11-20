@@ -9,7 +9,9 @@
 //! `Error::InvalidOptions` with rgblastn's wording.
 
 use super::{BlastRunner, EngineInfo, EngineOutput, RunOutcome, RunSpec, SearchTarget};
-use crate::api::rgblastn::{RgblastnRequest, run_planned, run_resolved, write_tabular};
+use crate::api::rgblastn::{
+    QuerySink, RgblastnRequest, run_planned_each, run_resolved_each, write_tabular,
+};
 use crate::cli::RgblastnArgs;
 use crate::cli::rgblastn::normalize_argv;
 use crate::engine::subject::DbStatsOverride;
@@ -108,6 +110,30 @@ impl BlastRunner for RgblastnRunner {
         if let Some(d) = subjects {
             sel.sequences = Some(d.clone());
         }
+        // report hits: each query's HSPs reduced as its batch finishes, never all held
+        let mut reducer = spec
+            .report_hits
+            .as_ref()
+            .map(crate::report::reduce::HitReducer::new);
+        let mut all = Vec::new();
+        let mut sink = |plan: &crate::plan::SubjectPlan,
+                        tab: &crate::format::tabular::TabularSpec,
+                        q: crate::engine::search::QueryResult|
+         -> Result<(), Error> {
+            match reducer.as_mut() {
+                Some(r) => crate::format::tabular::report_hits_each(
+                    std::slice::from_ref(&q),
+                    plan,
+                    tab,
+                    |h| r.push(h),
+                ),
+                None => {
+                    all.push(q);
+                    Ok(())
+                }
+            }
+        };
+        let sink: &mut QuerySink = &mut sink;
         let outcome = {
             let mut relay = |e: &ProgressEvent| -> bool {
                 if let ProgressEvent::SearchWarning(w) = e {
@@ -128,19 +154,14 @@ impl BlastRunner for RgblastnRunner {
                         }
                         None => Arc::clone(p),
                     };
-                    run_planned(store, p, &req, &mut relay)?
+                    run_planned_each(store, p, &req, &mut relay, sink)?
                 }
-                None => run_resolved(store, &sel, &req, &mut relay)?,
+                None => run_resolved_each(store, &sel, &req, &mut relay, sink)?,
             }
         };
-        if let Some(opts) = &spec.report_hits {
-            let mut r = crate::report::reduce::HitReducer::new(opts);
-            crate::format::tabular::report_hits_each(
-                &outcome.results,
-                &outcome.plan,
-                &outcome.spec,
-                |h| r.push(h),
-            )?;
+        let mut outcome = outcome;
+        outcome.results.queries = all;
+        if let Some(r) = reducer {
             drop(outcome);
             let hits = r.finish();
             return Ok(RunOutcome {

@@ -9,7 +9,7 @@
 use crate::engine::encoding::{BLASTNA_COMPLEMENT, BLASTNA_TO_IUPAC, reverse_complement};
 use crate::engine::hsp::EditOp;
 use crate::engine::query::QuerySet;
-use crate::engine::search::{Hsp, SearchResults};
+use crate::engine::search::{Hsp, QueryResult, SearchResults};
 use crate::engine::subject::StoreSubjects;
 use crate::error::Error;
 
@@ -105,20 +105,26 @@ pub fn fill(
 ) -> Result<(), Error> {
     let mut window = Vec::new();
     for (qi, q) in results.queries.iter_mut().enumerate() {
-        let plus = &queries.queries[qi].seq;
-        let minus = reverse_complement(plus);
-        for hit in &mut q.hits {
-            for h in &mut hit.hsps {
-                subjects.blastna_window(
-                    hit.oid as i32,
-                    h.subject_offset..h.subject_end,
-                    &mut window,
-                )?;
-                let ctx: &[u8] = if h.minus { &minus } else { plus };
-                let (qs, ss) = strings(h, ctx, &window, h.subject_offset);
-                h.qseq = Some(qs);
-                h.sseq = Some(ss);
-            }
+        fill_query(q, &queries.queries[qi].seq, subjects, &mut window)?;
+    }
+    Ok(())
+}
+
+/// `fill` for one query's result; `plus` is the query's letters.
+pub fn fill_query(
+    q: &mut QueryResult,
+    plus: &[u8],
+    subjects: &StoreSubjects,
+    window: &mut Vec<u8>,
+) -> Result<(), Error> {
+    let minus = reverse_complement(plus);
+    for hit in &mut q.hits {
+        for h in &mut hit.hsps {
+            subjects.blastna_window(hit.oid as i32, h.subject_offset..h.subject_end, window)?;
+            let ctx: &[u8] = if h.minus { &minus } else { plus };
+            let (qs, ss) = strings(h, ctx, window, h.subject_offset);
+            h.qseq = Some(qs);
+            h.sseq = Some(ss);
         }
     }
     Ok(())

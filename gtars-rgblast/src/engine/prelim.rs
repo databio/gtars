@@ -26,6 +26,9 @@ pub struct SearchContext<'a> {
     pub options: &'a BlastOptions,
     /// `eff_searchsp` per context.
     pub eff_searchsp: Vec<i64>,
+    /// Drop each HSP's edit script once its list's traceback is done, keeping only
+    /// `calc_length_and_gaps` (`SearchParams::drop_edit_scripts`).
+    pub drop_edit_scripts: bool,
 }
 
 impl SearchContext<'_> {

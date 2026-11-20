@@ -10,7 +10,7 @@ use crate::origin::{self, ModeChoice, OriginMeta, OriginOptions, OriginRun, Sour
 use crate::plan::ResolvedSelection;
 use crate::progress::ProgressEvent;
 use crate::report::fanout::DbMeta;
-use crate::report::parse::{fasta_names, read_hits_file};
+use crate::report::parse::{fasta_names, read_hits_file_each};
 use crate::report::rank::{QueryInput, RankOptions, Report, ReportMeta, StageHits, build_report};
 use crate::report::taxonomy::{Taxonomy, taxdump_dir};
 use crate::run::outfmt;
@@ -238,13 +238,14 @@ pub fn report(req: &ReportRequest) -> Result<Report, Error> {
             "report needs at least one hits file".into(),
         ));
     }
-    let mut hits = Vec::new();
+    // reduced as read (`report::reduce`): one reducer over the files in order, so the report
+    // is the one on every HSP without holding them all
+    let mut reducer = crate::report::reduce::HitReducer::new(&req.rank);
     let mut listed: Vec<String> = Vec::new();
     for h in &req.hits {
-        let r = read_hits_file(h, &req.fields)?;
-        hits.extend(r.hits);
-        listed.extend(r.queries);
+        listed.extend(read_hits_file_each(h, &req.fields, |x| reducer.push(x))?);
     }
+    let hits = reducer.finish();
     let meta_path = req.meta.clone().or_else(|| {
         let first = req.hits[0].display().to_string();
         let p = PathBuf::from(format!("{first}.meta.json"));

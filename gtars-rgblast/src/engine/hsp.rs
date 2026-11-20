@@ -67,6 +67,10 @@ pub struct Hsp {
     pub subject: Seg,
     pub context: i32,
     pub gap_info: Option<EditScript>,
+    /// `calc_length_and_gaps`, kept when `gap_info` is dropped after the traceback
+    /// (`SearchContext::drop_edit_scripts`).
+    #[serde(skip)]
+    pub length_gaps: Option<(i32, i32, i32)>,
 }
 
 impl Hsp {
@@ -104,6 +108,7 @@ impl Hsp {
             },
             context,
             gap_info,
+            length_gaps: None,
         }
     }
 }
@@ -698,6 +703,9 @@ pub fn prelim_hitlist_size(hitlist_size: i32, gapped: bool) -> i32 {
 
 /// `Blast_HSPCalcLengthAndGaps`: (length, gaps, gap_opens).
 pub fn calc_length_and_gaps(h: &Hsp) -> (i32, i32, i32) {
+    if let Some(x) = h.length_gaps {
+        return x;
+    }
     let mut length = h.query.end - h.query.offset;
     let s_length = h.subject.end - h.subject.offset;
     let mut gap_opens = 0;

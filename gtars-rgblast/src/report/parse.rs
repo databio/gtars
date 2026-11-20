@@ -216,6 +216,21 @@ pub fn read_hits_file(path: &Path, fields: &str) -> Result<HitsInput, Error> {
     read_hits(std::io::BufReader::new(f), fields, &name)
 }
 
+/// `read_hits_file`, handing each hit to `sink` as it is read; returns the `# Query:` names.
+pub fn read_hits_file_each(
+    path: &Path,
+    fields: &str,
+    sink: impl FnMut(Hit),
+) -> Result<Vec<String>, Error> {
+    let name = path.display().to_string();
+    if name == "-" {
+        let stdin = std::io::stdin();
+        return read_hits_each(stdin.lock(), fields, "<stdin>", sink);
+    }
+    let f = std::fs::File::open(path).map_err(|e| Error::io(path, e))?;
+    read_hits_each(std::io::BufReader::new(f), fields, &name, sink)
+}
+
 /// A hits file's hits, reduced as they are read to what a report under `opts` can use
 /// (`reduce::HitReducer`).
 pub fn read_hits_file_reduced(

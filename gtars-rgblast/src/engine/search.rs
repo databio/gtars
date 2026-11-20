@@ -81,6 +81,11 @@ pub struct SearchParams {
     /// the memory (`memory_limit`). Output does not depend on it.
     #[serde(default)]
     pub decode_cache_bytes: Option<u64>,
+    /// Leave `Hsp::edit_script` empty in the results (the output needs no alignment
+    /// strings, BTOP or `qcovus`): a gapped HSP's script often takes more memory than the
+    /// HSP. Output does not depend on it otherwise.
+    #[serde(default)]
+    pub drop_edit_scripts: bool,
 }
 
 impl Default for SearchParams {
@@ -101,6 +106,7 @@ impl Default for SearchParams {
             query_batch_size: None,
             batch_letters: None,
             decode_cache_bytes: None,
+            drop_edit_scripts: false,
         }
     }
 }
@@ -717,9 +723,9 @@ struct RunProgress<'a> {
     progress: &'a mut dyn FnMut(&ProgressEvent) -> bool,
 }
 
-/// One query batch's results (`CLocalBlast::Run` + the formatter's per-batch output).
+/// One query batch's results (`CLocalBlast::Run` + the formatter's per-batch output; the
+/// per-query results went to the sink).
 struct BatchResults {
-    queries: Vec<QueryResult>,
     stats: Vec<ContextStats>,
     prelim_s: f64,
     traceback_s: f64,
@@ -746,6 +752,26 @@ pub fn search(
     subjects: &StoreSubjects,
     progress: &mut dyn FnMut(&ProgressEvent) -> bool,
 ) -> Result<SearchResults, Error> {
+    let mut all = Vec::with_capacity(queries.queries.len());
+    let mut out = search_each(params, queries, subjects, progress, &mut |_, q| {
+        all.push(q);
+        Ok(())
+    })?;
+    out.queries = all;
+    Ok(out)
+}
+
+/// `search`, handing each query's result to `sink` (with its index in `queries`) as soon as
+/// its batch is done, in query order, instead of keeping them: the returned
+/// `SearchResults::queries` is empty. A search with many HSPs then never holds a second copy
+/// of them (the caller can reduce each query's HSPs as they arrive).
+pub fn search_each(
+    params: &SearchParams,
+    queries: &QuerySet,
+    subjects: &StoreSubjects,
+    progress: &mut dyn FnMut(&ProgressEvent) -> bool,
+    sink: &mut dyn FnMut(usize, QueryResult) -> Result<(), Error>,
+) -> Result<SearchResults, Error> {
     let t0 = Instant::now();
     // validate the options once, before any batch (CBlastOptionsHandle::Validate)
     params.to_options()?;
@@ -771,7 +797,7 @@ pub fn search(
     let lengths: Vec<usize> = queries.queries.iter().map(|q| q.seq.len()).collect();
     let (mut sizing, mut batch_size) = BatchSizing::new(params, subjects.total_length());
     let mut out = SearchResults {
-        queries: Vec::with_capacity(nq),
+        queries: Vec::new(),
         stats: Vec::with_capacity(nq * 2),
         summary: SearchSummary {
             queries: nq as u32,
@@ -788,8 +814,15 @@ pub fn search(
         let batch = QuerySet {
             queries: queries.queries[start..end].to_vec(),
         };
-        let r = search_batch(params, &batch, start, subjects, decoded.as_ref(), &mut rp)?;
-        out.queries.extend(r.queries);
+        let r = search_batch(
+            params,
+            &batch,
+            start,
+            subjects,
+            decoded.as_ref(),
+            &mut rp,
+            sink,
+        )?;
         out.stats.extend(r.stats);
         out.summary.hits += r.hits;
         out.summary.hsps += r.hsps;
@@ -871,6 +904,7 @@ fn search_batch(
     subjects: &StoreSubjects,
     decoded: Option<&DecodedSubjects>,
     rp: &mut RunProgress,
+    sink: &mut dyn FnMut(usize, QueryResult) -> Result<(), Error>,
 ) -> Result<BatchResults, Error> {
     let t0 = Instant::now();
     let st = match setup(params, queries, subjects) {
@@ -887,17 +921,18 @@ fn search_batch(
                 }
             }
             let qb = QueryBlock::build(queries, &params.to_options()?);
-            return Ok(BatchResults {
-                queries: queries
-                    .queries
-                    .iter()
-                    .map(|q| QueryResult {
+            for (qi, q) in queries.queries.iter().enumerate() {
+                sink(
+                    qstart + qi,
+                    QueryResult {
                         id: q.id.clone(),
                         defline: q.defline.clone(),
                         length: q.seq.len() as u32,
                         hits: Vec::new(),
-                    })
-                    .collect(),
+                    },
+                )?;
+            }
+            return Ok(BatchResults {
                 stats: qb
                     .contexts
                     .iter()
@@ -929,8 +964,8 @@ fn search_batch(
         params: &st.params,
         options: &st.options,
         eff_searchsp: eff,
+        drop_edit_scripts: params.drop_edit_scripts,
     };
-    let nq = queries.queries.len();
     let prelim_size =
         super::hsp::prelim_hitlist_size(st.options.hitlist_size, st.options.gapped_calculation);
     let threads = params.threads.max(1);
@@ -960,7 +995,6 @@ fn search_batch(
         c.query_index += qstart as u32;
     }
     let mut out = BatchResults {
-        queries: Vec::with_capacity(nq),
         stats,
         prelim_s,
         traceback_s,
@@ -974,17 +1008,18 @@ fn search_batch(
         db_num_seqs_used: Some(st.params.db_num_seqs),
         good_init_extends,
     };
+    // consumed list by list (each freed once converted), the edit scripts moved, not copied
+    let mut hitlists = results.hitlists.into_iter();
     for (qi, q) in queries.queries.iter().enumerate() {
         let qlen = q.seq.len() as i32;
         let mut hits = Vec::new();
-        if let Some(hl) = &results.hitlists[qi] {
-            for l in &hl.hsplists {
+        if let Some(hl) = hitlists.next().flatten() {
+            for mut l in hl.hsplists {
                 // blast_seqalign.cpp sorts each list by e-value before building Seq-aligns
-                let mut hsps: Vec<&super::hsp::Hsp> = l.hsps.iter().collect();
-                hsps.sort_by(|a, b| evalue_compare_hsps(a, b));
-                let mut outh = Vec::with_capacity(hsps.len());
-                for h in hsps {
-                    let (align_length, gaps, gap_opens) = calc_length_and_gaps(h);
+                l.hsps.sort_by(evalue_compare_hsps);
+                let mut outh = Vec::with_capacity(l.hsps.len());
+                for h in l.hsps {
+                    let (align_length, gaps, gap_opens) = calc_length_and_gaps(&h);
                     let minus = h.query.frame < 0;
                     let (q_start, q_end, s_start, s_end) = if minus {
                         (
@@ -1019,7 +1054,11 @@ fn search_batch(
                         subject_offset: h.subject.offset,
                         subject_end: h.subject.end,
                         context: h.context,
-                        edit_script: h.gap_info.clone(),
+                        edit_script: if params.drop_edit_scripts {
+                            None
+                        } else {
+                            h.gap_info
+                        },
                         qseq: None,
                         sseq: None,
                     });
@@ -1032,12 +1071,15 @@ fn search_batch(
                 });
             }
         }
-        out.queries.push(QueryResult {
-            id: q.id.clone(),
-            defline: q.defline.clone(),
-            length: qlen as u32,
-            hits,
-        });
+        sink(
+            qstart + qi,
+            QueryResult {
+                id: q.id.clone(),
+                defline: q.defline.clone(),
+                length: qlen as u32,
+                hits,
+            },
+        )?;
     }
     Ok(out)
 }

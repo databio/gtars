@@ -205,6 +205,12 @@ impl TabularSpec {
 
     /// `qseq`/`sseq` must be filled (`format::alignment::fill`): blastn builds the alignment
     /// strings for these fields and then recounts identities from them.
+    /// Whether the output reads `Hsp::edit_script`: the alignment strings (`needs_sequences`)
+    /// and `qcovus`, which maps subject positions back to the query through it.
+    pub fn needs_edit_scripts(&self) -> bool {
+        self.needs_sequences() || self.has(Field::Qcovus)
+    }
+
     pub fn needs_sequences(&self) -> bool {
         [
             Field::Qseq,
@@ -650,13 +656,13 @@ fn field_value(f: Field, r: &Row) -> String {
 
 /// Every row `write` prints, in blastn's hit and HSP order.
 fn for_each_row(
-    results: &SearchResults,
+    results: &[QueryResult],
     plan: &SubjectPlan,
     spec: &TabularSpec,
     mut f: impl FnMut(&Row) -> Result<(), Error>,
 ) -> Result<(), Error> {
     let need_recount = spec.needs_sequences();
-    for q in &results.queries {
+    for q in results {
         for hit in &q.hits {
             let cov = hit_coverage(spec, q, hit);
             let subj = &plan.subjects[hit.oid as usize];
@@ -690,7 +696,7 @@ pub fn write(
     out: &mut dyn Write,
 ) -> Result<(), Error> {
     let mut text = String::new();
-    for_each_row(results, plan, spec, |row| {
+    for_each_row(&results.queries, plan, spec, |row| {
         for (i, f) in spec.fields.iter().enumerate() {
             if i > 0 {
                 text.push('\t');
@@ -718,13 +724,13 @@ pub fn report_hits(
     spec: &TabularSpec,
 ) -> Result<Vec<ReportHit>, Error> {
     let mut out = Vec::new();
-    report_hits_each(results, plan, spec, |h| out.push(h))?;
+    report_hits_each(&results.queries, plan, spec, |h| out.push(h))?;
     Ok(out)
 }
 
 /// `report_hits`, handing each hit to `sink` in order instead of collecting them.
 pub fn report_hits_each(
-    results: &SearchResults,
+    results: &[QueryResult],
     plan: &SubjectPlan,
     spec: &TabularSpec,
     mut sink: impl FnMut(ReportHit),

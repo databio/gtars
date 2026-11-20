@@ -6,6 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- `rgblast origin` and `report` use much less memory: hits are trimmed while searching and alignment details are dropped when the output does not need them.
 - CI (untested): install ncbi-blast+ for BLAST tests; add a `blast` test job and feature checks.
 
 ### Breaking
