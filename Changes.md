@@ -19,6 +19,12 @@
   and CLI (`gtars refget export`) interfaces.
 - `gtars-refget`: `export_fasta_from_regions` takes a label template and
   appends `:start-end` to each label. It now returns an `ExportSummary`.
+- `gtars uniwig bamqc` no longer drops reads with MAPQ below 30 by default.
+  The new `--min-mapq` option defaults to 0 (count every read), which matches
+  PEPATAC's `bamQC.py`; use `--min-mapq 30` for the old ENCODE "uniquely
+  mapping" prefilter. In `gtars-uniwig`, `compute_bam_qc`,
+  `compute_bam_qc_parallel`, `run_bam_qc` and `run_bam_qc_parallel` take a
+  new `min_mapq` argument.
 
 ### Added
 
