@@ -14,7 +14,10 @@ use std::io::{Read, Write};
 use std::path::Path;
 
 use gtars_refget::digest::{SequenceMetadata, md5, sha512t24u};
-use gtars_refget::store::{FastaImportOptions, ReadonlyRefgetStore, RefgetStore, StorageMode};
+use gtars_refget::store::{
+    ExportOptions, ExportSelection, FastaImportOptions, LabelTemplate, ReadonlyRefgetStore,
+    RefgetStore, StorageMode,
+};
 
 // =========================================================================
 // Fixture data
@@ -550,7 +553,15 @@ fn export_fasta_is_lossless() {
         // Line width of 7 so records wrap at odd lengths.
         let out_path = dir.path().join("exported.fa");
         store
-            .export_fasta(&collection_digest, &out_path, None, Some(7))
+            .export_fasta(
+                &ExportSelection::Collections { digests: vec![collection_digest.clone()], names: None },
+                &out_path,
+                &ExportOptions {
+                    label: LabelTemplate::parse("{name}").unwrap(),
+                    molecule: None,
+                    line_width: Some(7),
+                },
+            )
             .expect("export_fasta");
 
         // Import the exported FASTA into a fresh Raw store and check that

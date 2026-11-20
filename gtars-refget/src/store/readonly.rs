@@ -291,6 +291,22 @@ fn open_remote_range(
     ))
 }
 
+/// The stored bytes of one sequence, from wherever they live. See
+/// [`ReadonlyRefgetStore::sequence_bytes`].
+pub(crate) enum SeqBytes {
+    Shared(Arc<Vec<u8>>),
+    Owned(Vec<u8>),
+}
+
+impl SeqBytes {
+    pub(crate) fn as_slice(&self) -> &[u8] {
+        match self {
+            SeqBytes::Shared(a) => a.as_slice(),
+            SeqBytes::Owned(v) => v.as_slice(),
+        }
+    }
+}
+
 /// Core refget store with `&self` read methods, suitable for `Arc` sharing in servers.
 ///
 /// Mutating methods are used during the setup/loading phase; once wrapped in `Arc`,
@@ -3923,22 +3939,7 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
 
         #[cfg(feature = "http")]
         if let Some(remote_url) = remote_source {
-            let full_remote_url = if remote_url.ends_with('/') {
-                format!("{}{}", remote_url, relative_path)
-            } else {
-                format!("{}/{}", remote_url, relative_path)
-            };
-
-            let response = ureq::get(&full_remote_url)
-                .call()
-                .map_err(|e| anyhow!("Failed to fetch from remote: {}", e))?;
-
-            let mut data = Vec::new();
-            response
-                .into_body()
-                .into_reader()
-                .read_to_end(&mut data)
-                .context("Failed to read response body")?;
+            let data = Self::fetch_remote(remote_url, relative_path)?;
 
             if persist_to_disk {
                 if let Some(local_path) = local_path {
@@ -3962,6 +3963,85 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
         Err(anyhow!(
             "File not found locally and no remote source configured: {}",
             relative_path
+        ))
+    }
+
+    /// GET one file from a remote store into memory. Writes nothing to disk.
+    #[cfg(feature = "http")]
+    pub(crate) fn fetch_remote(remote_url: &str, relative_path: &str) -> Result<Vec<u8>> {
+        Self::sanitize_relative_path(relative_path)?;
+        let full_remote_url = if remote_url.ends_with('/') {
+            format!("{}{}", remote_url, relative_path)
+        } else {
+            format!("{}/{}", remote_url, relative_path)
+        };
+
+        let response = ureq::get(&full_remote_url)
+            .call()
+            .map_err(|e| anyhow!("Failed to fetch from remote: {}", e))?;
+
+        let mut data = Vec::new();
+        response
+            .into_body()
+            .into_reader()
+            .read_to_end(&mut data)
+            .context("Failed to read response body")?;
+        Ok(data)
+    }
+
+    /// Stored bytes (packed, raw or zstd, as on disk) of one sequence, for a
+    /// single streaming pass. Never adds the sequence to the loaded set, and
+    /// never writes a downloaded file to the local cache.
+    ///
+    /// Lookup order: loaded bytes, the resident overlay, a pack (local packs
+    /// or a byte range of a remote pack), a local `.seq` file, then the remote
+    /// store's `.seq` file.
+    pub(crate) fn sequence_bytes(&self, row: SeqRow) -> Result<SeqBytes> {
+        if let Some(bytes) = self.seq_bytes(row) {
+            return Ok(SeqBytes::Shared(bytes));
+        }
+        if let Some(arc) = self
+            .resident
+            .read()
+            .map_err(|_| anyhow!("resident overlay lock poisoned"))?
+            .get(&row)
+        {
+            return Ok(SeqBytes::Shared(Arc::clone(arc)));
+        }
+
+        let digest = self.catalog.seq(row).sha512t24u();
+        let digest_str = digest.as_str();
+        if let Some(bytes) = self.read_packed_record_bytes(digest_str)? {
+            return Ok(SeqBytes::Owned(bytes));
+        }
+
+        let template = self
+            .seqdata_path_template
+            .as_ref()
+            .ok_or_else(|| anyhow!("No sequence data path template configured"))?;
+        let relative_path = Self::expand_template(digest_str, template)
+            .to_string_lossy()
+            .into_owned();
+
+        if let Some(local_path) = &self.local_path {
+            let full = local_path.join(&relative_path);
+            match fs::read(&full) {
+                Ok(data) => return Ok(SeqBytes::Owned(data)),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => {
+                    return Err(anyhow!("Failed to read seq file {}: {}", full.display(), e))
+                }
+            }
+        }
+
+        #[cfg(feature = "http")]
+        if let Some(remote_url) = &self.remote_source {
+            return Ok(SeqBytes::Owned(Self::fetch_remote(remote_url, &relative_path)?));
+        }
+
+        Err(anyhow!(
+            "Sequence data for {} not found locally and no remote source configured",
+            digest_str
         ))
     }
 
