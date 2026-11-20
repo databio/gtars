@@ -27,7 +27,7 @@ use super::cache::SeqCache;
 #[cfg(feature = "http")]
 use super::fetch::Fetcher;
 use super::fetch::{AtomicCounters, FetchCounters, Field};
-use super::readonly::{Location, ReadonlyRefgetStore, StoreSide};
+use super::readonly::{ReadonlyRefgetStore, StoreSide, pack_relpath};
 use crate::digest::{SequenceMetadata, lookup_alphabet};
 use crate::hashkeyable::{DigestKey, key_to_digest_string};
 
@@ -94,15 +94,7 @@ impl PrefetchItem {
         }
     }
 
-    /// The bytes as an owned vector (copied only when shared with the store).
-    pub(crate) fn into_vec(self) -> Vec<u8> {
-        match self.buf.data {
-            BufData::Owned(v) => v,
-            BufData::Shared(a) => Arc::try_unwrap(a).unwrap_or_else(|a| a.as_ref().clone()),
-        }
-    }
-
-    /// The bytes as a shared buffer (for the resident overlay).
+    /// The bytes as a shared buffer (for the resident overlay and loads).
     pub(crate) fn into_shared(self) -> Arc<Vec<u8>> {
         match self.buf.data {
             BufData::Owned(v) => Arc::new(v),
@@ -576,26 +568,26 @@ impl ReadonlyRefgetStore {
             let (local, local_span) = match (memory.is_some(), self.layout) {
                 (true, _) => (None, None),
                 (false, Layout::Packed) => {
-                    match self.resolve_location(&meta.sha512t24u, StoreSide::Local)? {
-                        Location::Packed { pack, offset, len } => (
-                            self.local_path
-                                .as_ref()
-                                .map(|p| p.join("packs").join(format!("{}.pack", pack))),
-                            Some((offset, len)),
+                    match self.pack_row(&meta.sha512t24u, StoreSide::Local)? {
+                        Some(row) => (
+                            self.local_path.as_ref().map(|p| p.join(pack_relpath(&row.pack))),
+                            Some((row.offset, row.len)),
                         ),
-                        Location::Standalone { .. } => (self.local_seq_path(&meta), None),
+                        None => (self.local_seq_path(&meta), None),
                     }
                 }
                 (false, Layout::Standalone) => (self.local_seq_path(&meta), None),
             };
             let (rel, remote_span) = if remote && memory.is_none() {
-                match self.resolve_location(&meta.sha512t24u, StoreSide::Remote)? {
-                    Location::Standalone { relpath } => {
-                        (Some(relpath.to_string_lossy().into_owned()), None)
-                    }
-                    Location::Packed { pack, offset, len } => {
-                        (Some(format!("packs/{}.pack", pack)), Some((offset, len)))
-                    }
+                match self.pack_row(&meta.sha512t24u, StoreSide::Remote)? {
+                    None => (
+                        Some(self.sequence_relative_path(&meta.sha512t24u)?.to_string_lossy().into_owned()),
+                        None,
+                    ),
+                    Some(row) => (
+                        Some(pack_relpath(&row.pack).to_string_lossy().into_owned()),
+                        Some((row.offset, row.len)),
+                    ),
                 }
             } else {
                 (None, None)

@@ -139,7 +139,7 @@ pub fn create_refget_cli() -> Command {
                      gtars refget export -s store -c ucsc:hg38 -l '{name}' > hg38.fa\n  \
                      gtars refget export -s store --all | makeblastdb -in - -dbtype nucl -out store\n  \
                      gtars refget export -s store --all -l '{col:ucsc}/{name}'\n  \
-                     gtars refget export --remote https://refgenie.s3.us-east-1.amazonaws.com/refget-store/jungle/ -c name:hg38-refgenie -l name --resume > hg38.fa\n\n\
+                     gtars refget export --remote https://refgenie.s3.us-east-1.amazonaws.com/refget-store/jungle/ -c name:hg38-refgenie -l '{name}' --resume > hg38.fa\n\n\
                      Remote stores download sequences in parallel into a shared cache \
                      (REFGET_CACHE_DIR, else ~/.cache/refget).",
                 )
