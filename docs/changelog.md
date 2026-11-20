@@ -6,14 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.12.0] -- 2026-11-19
+## [0.12.0] -- 2026-11-20
 
 Component versions: `gtars-refget` 0.12.0, `gtars` Python package 0.12.0, `gtars-wasm` 0.10.0, `gtars-cli` 0.11.0, `gtars` crate 0.11.0, `gtars-uniwig` 0.10.0, `gtars-vrs` 0.7.3, `gtars-core` 0.5.8, R `gtars` 0.11.0. The `gtars-refget` crate changes its Rust API, and it also ships the encoding fixes listed under 0.11.2 for the first time.
 
 ### RefgetStore (`gtars-refget`)
 - Keep sequence and collection metadata in a compact columnar catalog. An open store uses about 6 times less memory (about 175 bytes per sequence instead of about 1,000). Existing stores open as they are, with no rebuild.
 - Add a packed on-disk layout: sequences go into size-capped pack files with an index, instead of one `.seq` file per sequence (`RefgetStore::on_disk_packed`). `compact()` reclaims the space of removed sequences in a packed store.
-- Importing into a standard on-disk store (one `.seq` file per sequence) now stops before writing anything if the store would hold more than 500,000 files. Use the packed layout, or pass `force`.
+- Importing into a standard on-disk store (one `.seq` file per sequence) now stops before writing anything if the store would hold more than 500,000 files. Re-importing a FASTA the store already holds does not count toward the limit. Use the packed layout, or pass `force`.
 - Add `compare_level2_json`: the seqcol comparison of two level-2 collections given as JSON, with no store or digest needed.
 - The streaming FASTA hasher reads multi-member gzip, including bgzip and concatenated `.gz` files. It used to read only the first member.
 - Loading aliases that map one alias to two digests now errors. Re-pointing an alias needs `force`.
