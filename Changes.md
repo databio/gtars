@@ -1,30 +1,6 @@
 # Changelog
 
-## Unreleased
-
-### Breaking
-
-- `gtars-refget`: `ComparisonDigests.a` is now `Option<String>` (was
-  `String`), matching `b`. A side compared from a level-2 body has no known
-  digest, so either digest can be `None` (JSON `null`).
-- `gtars uniwig bamqc` no longer drops reads with MAPQ below 30 by default.
-  The new `--min-mapq` option defaults to 0 (count every read), which matches
-  PEPATAC's `bamQC.py`; use `--min-mapq 30` for the old ENCODE "uniquely
-  mapping" prefilter. In `gtars-uniwig`, `compute_bam_qc`,
-  `compute_bam_qc_parallel`, `run_bam_qc` and `run_bam_qc_parallel` take a
-  new `min_mapq` argument.
-
-### Added
-
-- `gtars-refget`: new `compare_level2_json` compares two level-2 sequence
-  collection bodies given as JSON, with no store or digest needed. Exposed as
-  `compare_seqcols` in Python (`gtars.refget`) and `compareSeqcols` in WASM.
-
-### Fixed
-
-- `gtars-refget`: the streaming FASTA hasher (`FastaStreamHasher`) now reads
-  multi-member gzip, including bgzip (BGZF) and concatenated `.gz` files. It
-  used to decode only the first member.
+Releases after 0.10.0 are in `docs/changelog.md`, which is the changelog to update.
 
 ## 0.10.0 - 2026-09-05
 
