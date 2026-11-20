@@ -12,6 +12,8 @@ Component versions: `gtars-refget` 0.12.0, `gtars` Python package 0.12.0, `gtars
 
 ### RefgetStore (`gtars-refget`)
 - Keep sequence and collection metadata in a compact columnar catalog. An open store uses about 6 times less memory (about 175 bytes per sequence instead of about 1,000). Existing stores open as they are, with no rebuild.
+- FASTA export streams one sequence at a time and decodes in small chunks. Exporting all of remote hg38 peaks at about 188 MB, instead of holding every exported sequence in memory. Exports leave the store's loaded state unchanged and never copy a remote store's sequences into the local cache.
+- Export is one method, `export_fasta(selection, output, opts)`. The selection picks records (collections with optional names, sequence digests, or the whole store), and a label template picks the FASTA header: `{seq}` (sequence digest, the default), `{seq:NS}` (sequence alias), `{col}` (collection digest), `{col:NS}` (collection alias) or `{name}` (sequence name), for example `{col:ucsc}/{name}`. Two different sequences with the same label are an error raised before any output. Export can write to stdout (`-`) and filter by molecule (`dna` or `protein`).
 - Add a packed on-disk layout: sequences go into size-capped pack files with an index, instead of one `.seq` file per sequence (`RefgetStore::on_disk_packed`). `compact()` reclaims the space of removed sequences in a packed store.
 - Importing into a standard on-disk store (one `.seq` file per sequence) now stops before writing anything if the store would hold more than 500,000 files. Re-importing a FASTA the store already holds does not count toward the limit. Use the packed layout, or pass `force`.
 - Add `compare_level2_json`: the seqcol comparison of two level-2 collections given as JSON, with no store or digest needed.
@@ -19,12 +21,14 @@ Component versions: `gtars-refget` 0.12.0, `gtars` Python package 0.12.0, `gtars
 - Loading aliases that map one alias to two digests now errors. Re-pointing an alias needs `force`.
 - Breaking Rust API changes:
   - `ComparisonDigests.a` is now `Option<String>`, like `b`.
+  - `export_fasta` replaces both `export_fasta` and `export_fasta_by_digests`. The default label is the sequence digest (`SQ.…`), so pass `{name}` to get chromosome names. FASTA descriptions are no longer written. `export_fasta_from_regions` takes a label template and returns an `ExportSummary`.
   - The alias `add_sequence`, `add_collection`, `load_sequence_tsv` and `load_collection_tsv` take a `force` argument, and the `add_*` methods return `Result`.
   - `get_sequence`, `get_sequence_by_alias`, `get_sequence_metadata_by_alias` and `sequence_metadata` return owned values instead of references.
   - `SequenceCollectionRecord` is removed. Read members through `sequence_view`, `collection_members` and `member_by_name`, which return the new `SeqView` and `MemberView`.
 
 ### Python bindings (`gtars` PyPI package)
-- Built on the compact catalog, so open stores use much less memory. Existing code needs no changes.
+- Built on the compact catalog, so open stores use much less memory.
+- `export_fasta(output_path, collections=..., names=..., seq_digests=..., all=..., label=..., molecule=...)` replaces `export_fasta` and `export_fasta_by_digests`, streams, and returns summary counts. The default label is the sequence digest; pass `label="name"` for chromosome names. `get_seqs_bed_file` takes `label` too. This breaks old calls.
 - Add `gtars.refget.compare_seqcols(a, b, digest_a=None, digest_b=None)`, which compares two level-2 collections given as dicts, with no store needed.
 - `RegionSet.to_bigbed` takes chromosome sizes as a dict or a path-like object, as well as a path string. An unreadable chrom.sizes file raises `ValueError` instead of crashing.
 - Loading aliases that map one alias to two digests raises an error.
@@ -36,6 +40,7 @@ Component versions: `gtars-refget` 0.12.0, `gtars` Python package 0.12.0, `gtars
 
 ### CLI (`gtars-cli`)
 - `gtars refget build --packed [--pack-cap BYTES]` creates a packed store, and the new `gtars refget compact` reclaims space in one.
+- `gtars refget export` streams, writes to stdout by default, takes `--all`, a repeatable `--collection`, `-l/--label` (default `{seq}`) and `--molecule`. For example `gtars refget export -s store --all | makeblastdb -in - -dbtype nucl`.
 - New `gtars refget verify` checks that every stored sequence still matches its digest. Encoding errors are reported instead of being stored wrongly.
 - `gtars uniwig bamqc` no longer drops reads with MAPQ below 30 by default. The new `--min-mapq` option defaults to 0 (count every read), which matches PEPATAC's `bamQC.py`. Use `--min-mapq 30` for the old behavior.
 
@@ -44,6 +49,7 @@ Component versions: `gtars-refget` 0.12.0, `gtars` Python package 0.12.0, `gtars
 - `gtars-core` 0.5.8: add `try_get_chrom_sizes`, which returns an error instead of panicking. Malformed lines are skipped.
 - `gtars` crate 0.11.0 and `gtars-vrs` 0.7.3: depend on `gtars-refget` 0.12 (and `gtars-uniwig` 0.10).
 - R `gtars` 0.11.0: add `verify_store()`. Encoding errors are reported as R errors.
+- R `gtars` 0.11.0: `export_fasta` replaces `export_fasta_by_digests_store` and takes `label`, like Python.
 
 ## [0.11.2] -- 2026-11-03
 
