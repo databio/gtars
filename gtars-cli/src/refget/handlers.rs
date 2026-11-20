@@ -286,9 +286,11 @@ fn run_export(matches: &ArgMatches) -> Result<()> {
         .map(|m| m.parse())
         .transpose()?;
     let line_width = *matches.get_one::<usize>("line_width").unwrap_or(&80);
+    let pack_cache_mb = *matches.get_one::<usize>("pack_cache_mb").unwrap_or(&0);
 
     let mut store = RefgetStore::open_local(store_path)
         .map_err(|e| anyhow::anyhow!("Failed to open store at {}: {}", store_path, e))?;
+    store.set_pack_cache_mb(pack_cache_mb);
 
     let selection = if matches.get_flag("all") {
         ExportSelection::All
@@ -333,7 +335,7 @@ fn run_export(matches: &ArgMatches) -> Result<()> {
         ExportSelection::Collections { digests, names }
     };
 
-    let opts = ExportOptions { label, molecule, line_width: Some(line_width) };
+    let opts = ExportOptions { label, molecule, line_width };
     let summary = match store.export_fasta(&selection, output, &opts) {
         Ok(s) => s,
         Err(e) if is_broken_pipe(&e) => return Ok(()),

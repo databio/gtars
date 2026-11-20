@@ -495,38 +495,25 @@ fn mixed_mapq_pairs() -> (Header, Vec<RecordBuf>) {
     (header, records)
 }
 
-/// Default `min_mapq = 0`: every read counts, matching PEPATAC's bamQC.py.
+/// The default `min_mapq = 0` counts every read, matching PEPATAC's
+/// bamQC.py. `min_mapq = 30` is the ENCODE "uniquely mapping" prefilter:
+/// MAPQ 0, 10 and 29 are dropped; 30, 60 and 255 pass. The filter applies to
+/// chrM reads too. Single-end total = all reads minus chrM reads.
 #[test]
-fn test_min_mapq_default_counts_every_read() {
+fn test_min_mapq_single_end() {
     let (header, records) = mixed_mapq_single_end();
     let (_dir, bam_path) = write_indexed_bam(&header, &records);
 
-    let serial = compute_bam_qc(&bam_path, 0).expect("compute_bam_qc");
-    let parallel = compute_bam_qc_parallel(&bam_path, 2, 0).expect("compute_bam_qc_parallel");
-    for result in [serial, parallel] {
-        // Single-end total = all reads minus chrM reads.
-        assert_eq!(result.total_reads, 6, "{result:?}");
-        assert_eq!(result.distinct, 6, "{result:?}");
-        assert_eq!(result.m1, 6, "{result:?}");
-        assert_eq!(result.mito_reads, 2, "{result:?}");
-    }
-}
-
-/// `min_mapq = 30` is the ENCODE "uniquely mapping" prefilter (the old fixed
-/// behavior): MAPQ 0, 10 and 29 are dropped; 30, 60 and 255 pass. The filter
-/// applies to chrM reads too.
-#[test]
-fn test_min_mapq_30_encode_prefilter() {
-    let (header, records) = mixed_mapq_single_end();
-    let (_dir, bam_path) = write_indexed_bam(&header, &records);
-
-    let serial = compute_bam_qc(&bam_path, 30).expect("compute_bam_qc");
-    let parallel = compute_bam_qc_parallel(&bam_path, 2, 30).expect("compute_bam_qc_parallel");
-    for result in [serial, parallel] {
-        assert_eq!(result.total_reads, 3, "{result:?}");
-        assert_eq!(result.distinct, 3, "{result:?}");
-        assert_eq!(result.m1, 3, "{result:?}");
-        assert_eq!(result.mito_reads, 1, "{result:?}");
+    for (min_mapq, total, mito) in [(0, 6, 2), (30, 3, 1)] {
+        let serial = compute_bam_qc(&bam_path, min_mapq).expect("compute_bam_qc");
+        let parallel =
+            compute_bam_qc_parallel(&bam_path, 2, min_mapq).expect("compute_bam_qc_parallel");
+        for result in [serial, parallel] {
+            assert_eq!(result.total_reads, total, "min_mapq={min_mapq}: {result:?}");
+            assert_eq!(result.distinct, total, "min_mapq={min_mapq}: {result:?}");
+            assert_eq!(result.m1, total, "min_mapq={min_mapq}: {result:?}");
+            assert_eq!(result.mito_reads, mito, "min_mapq={min_mapq}: {result:?}");
+        }
     }
 }
 

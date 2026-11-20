@@ -13,6 +13,7 @@ Component versions: `gtars-refget` 0.12.0, `gtars` Python package 0.12.0, `gtars
 ### RefgetStore (`gtars-refget`)
 - Store sequence and collection metadata in a compact columnar catalog; an open store uses about 6x less memory, and existing stores open without a rebuild
 - Add a packed on-disk layout (alpha: the format may change) that writes sequences into size-capped pack files (`RefgetStore::on_disk_packed`), and `compact()` to reclaim space after removals
+- Add an opt-in block cache for packed-store reads, off by default (`set_pack_cache_mb`; Python and R `set_pack_cache`, CLI `gtars refget export --pack-cache-mb`); it helps clustered reads on a cold network file system
 - A packed import that fails part way leaves the store readable, and two writers on one packed store no longer share temp pack files
 - `compact()` keeps a batch lock the caller already holds; orphan cleanup in `remove_collection` no longer removes sequences that another loaded collection uses
 - Stream FASTA export one sequence at a time; exporting all of remote hg38 peaks at about 188 MB and no longer copies sequences into the local cache
@@ -28,7 +29,7 @@ Component versions: `gtars-refget` 0.12.0, `gtars` Python package 0.12.0, `gtars
 ### Python bindings (`gtars` PyPI package)
 - Use the compact catalog, so open stores use much less memory
 - Release the GIL during slow calls (FASTA digesting, store import and export, remote loading, extraction, verify, VRS), so other Python threads keep running; threads that share one `RefgetStore` take turns instead of raising "Already borrowed"
-- Replace `export_fasta` and `export_fasta_by_digests` with one streaming `export_fasta(output_path, collections=..., seq_digests=..., all=..., label=..., molecule=...)` (breaking; the default label is the digest, so pass `label="name"` for chromosome names)
+- Replace `export_fasta` and `export_fasta_by_digests` with one streaming `export_fasta(output_path, collections=..., seq_digests=..., all=..., label=..., molecule=...)` (breaking; the default label is the digest, so pass `label="{name}"` for chromosome names)
 - Add `label` to `export_fasta_from_regions`; headers keep sequence names (`>chr1:0-10`) by default
 - Add `RefgetStore.on_disk(path, packed=True)` for the packed layout (alpha), `compact()`, and the `layout` property
 - Add `standalone_file_limit` to `add_sequence_collection_from_fasta` and `add_sequence_collections_from_fastas`; `force` does not skip the limit

@@ -81,7 +81,7 @@ def test_digest_import_and_export_release_gil(big_fasta, tmp_path):
 
     out = tmp_path / "out.fa"
     assert_releases_gil(
-        lambda: store.export_fasta(str(out), collections=meta.digest, label="name")
+        lambda: store.export_fasta(str(out), collections=meta.digest, label="{name}")
     )
     assert digest_fasta(str(out)).digest == coll.digest
 

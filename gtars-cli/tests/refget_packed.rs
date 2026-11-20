@@ -68,21 +68,27 @@ fn compact_existing_packed_store() {
     let compact = run_refget(&["compact", store.to_str().unwrap()]);
     assert!(compact.status.success(), "{}", String::from_utf8_lossy(&compact.stderr));
 
-    let out = scratch.path().join("out.fa");
-    let export = run_refget(&[
-        "export",
-        "-s",
-        store.to_str().unwrap(),
-        "-o",
-        out.to_str().unwrap(),
-        "-l",
-        "{name}",
-    ]);
-    assert!(export.status.success(), "{}", String::from_utf8_lossy(&export.stderr));
-    assert_eq!(
-        std::fs::read_to_string(&out).unwrap(),
-        ">chr1\nAAAACCCC\n>chr2\nGGGGTTTT\n"
-    );
+    // Pack block cache off (the default), then on.
+    for cache_mb in ["0", "4"] {
+        let out = scratch.path().join(format!("out{cache_mb}.fa"));
+        let export = run_refget(&[
+            "export",
+            "-s",
+            store.to_str().unwrap(),
+            "-o",
+            out.to_str().unwrap(),
+            "-l",
+            "{name}",
+            "--pack-cache-mb",
+            cache_mb,
+        ]);
+        assert!(export.status.success(), "{}", String::from_utf8_lossy(&export.stderr));
+        assert_eq!(
+            std::fs::read_to_string(&out).unwrap(),
+            ">chr1\nAAAACCCC\n>chr2\nGGGGTTTT\n",
+            "--pack-cache-mb {cache_mb}"
+        );
+    }
 }
 
 /// `--standalone-file-limit` stops a standalone build that would go over it,

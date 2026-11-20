@@ -597,6 +597,24 @@ class RefgetStore:
         """
         ...
 
+    def set_pack_cache(self, megabytes: int) -> None:
+        """Turn the pack block cache on or off (alpha).
+
+        Off by default. When on, reads from a packed store's local pack files
+        go through a cache of 1 MiB blocks. It helps clustered reads (for
+        example a sorted BED) on a cold network file system, and hurts
+        scattered reads on stores larger than the cache.
+
+        Args:
+            megabytes: Cache size in megabytes; 0 turns the cache off.
+
+        Example::
+
+            store = RefgetStore.open_local("/scratch/packed_store")
+            store.set_pack_cache(128)
+        """
+        ...
+
     @classmethod
     def open_local(cls, path: Union[str, PathLike]) -> "RefgetStore":
         """Open a local RefgetStore from a directory.
@@ -1459,7 +1477,7 @@ class RefgetStore:
         all: bool = False,
         label: str = "{seq}",
         molecule: Optional[Literal["dna", "protein"]] = None,
-        line_width: Optional[int] = None,
+        line_width: int = 80,
     ) -> Dict[str, int]:
         """Export sequences as FASTA, to a file or to stdout.
 
@@ -1472,10 +1490,10 @@ class RefgetStore:
         default), ``{seq:NS}`` the sequence's alias in namespace NS, ``{col}``
         collection digest, ``{col:NS}`` the collection's alias in namespace
         NS, ``{name}`` the sequence's name in its collection. Literal text is
-        copied as-is; a single field may drop its braces (``"name"``). A
-        missing alias falls back to the digest; records with no collection get
-        ``{seq}``. The same label for the same sequence is written once; the
-        same label for different sequences raises ValueError before any output.
+        copied as-is. A missing alias falls back to the digest; records with
+        no collection get ``{seq}``. The same label for the same sequence is
+        written once; the same label for different sequences raises ValueError
+        before any output.
 
         Args:
             output_path: FASTA path ('.gz' compresses); "-" writes to stdout.
@@ -1497,7 +1515,7 @@ class RefgetStore:
 
         Example::
 
-            store.export_fasta("hg38.fa", collections=[digest], label="name")
+            store.export_fasta("hg38.fa", collections=[digest], label="{name}")
             store.export_fasta("-", all=True)
             store.export_fasta("all.fa", all=True, label="{col:ucsc}/{name}")
         """

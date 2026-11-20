@@ -128,10 +128,9 @@ pub fn create_refget_cli() -> Command {
                 .about("Export sequences from a RefgetStore as FASTA, to a file or to stdout.")
                 .after_help(
                     "Label fields: {seq} sequence digest (SQ.…), {seq:NS} sequence alias in namespace NS, \
-                     {col} collection digest, {col:NS} collection alias in namespace NS, {name} sequence name.\n\
-                     A single field may drop its braces.\n\n\
+                     {col} collection digest, {col:NS} collection alias in namespace NS, {name} sequence name.\n\n\
                      Examples:\n  \
-                     gtars refget export -s store -c ucsc:hg38 -l name > hg38.fa\n  \
+                     gtars refget export -s store -c ucsc:hg38 -l '{name}' > hg38.fa\n  \
                      gtars refget export -s store --all | makeblastdb -in - -dbtype nucl -out store\n  \
                      gtars refget export -s store --all -l '{col:ucsc}/{name}'",
                 )
@@ -188,6 +187,14 @@ pub fn create_refget_cli() -> Command {
                         .value_parser(clap::value_parser!(usize))
                         .default_value("80")
                         .help("Sequence line width. 0 = unwrapped, one sequence per line (what GGCAT/SSHash expect)"),
+                )
+                .arg(
+                    Arg::new("pack_cache_mb")
+                        .long("pack-cache-mb")
+                        .value_name("N")
+                        .value_parser(clap::value_parser!(usize))
+                        .default_value("0")
+                        .help("Read a PACKED store through a block cache of N megabytes (alpha; 0 = off, the default). Helps clustered reads on a cold network file system; hurts scattered reads on stores larger than the cache."),
                 ),
         )
         .subcommand(

@@ -11,16 +11,17 @@
 //! | `{col:NS}` | the collection's alias in collection-alias namespace `NS` |
 //! | `{name}`   | the sequence's name in its collection                  |
 //!
-//! Literal text is copied as-is (`{col:ucsc}/{name}`, `{col:pansn}#{name}`);
-//! `{{` and `}}` write literal braces. A template that is exactly one field may
-//! drop its braces: `name` means `{name}`, `seq:refseq` means `{seq:refseq}`.
+//! Literal text is copied as-is (`{col:ucsc}/{name}`, `{col:pansn}#{name}`).
+//! Every field is written with its braces, and a template cannot contain a
+//! literal brace.
 
 use std::collections::HashMap;
 use std::fmt;
 
 use anyhow::Result;
 
-use crate::hashkeyable::DigestKey;
+use super::alias::AliasKind;
+use crate::hashkeyable::{DigestKey, HashKeyable};
 
 /// A problem with a label template or with the labels it produces: a parse
 /// error, an unknown namespace, a whitespace label or a label clash. Bindings
@@ -45,18 +46,14 @@ pub(crate) use label_err;
 const VALID_FIELDS: &str =
     "valid fields are {seq}, {seq:NS}, {col}, {col:NS} and {name}, where NS is an alias namespace";
 
-/// The object a label field refers to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum LabelObject {
-    Seq,
-    Col,
-    Name,
-}
-
+/// One piece of a template: literal text, or a field with its alias
+/// namespace, if any.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Part {
-    Literal(String),
-    Field { object: LabelObject, namespace: Option<String> },
+    Lit(String),
+    Seq(Option<String>),
+    Col(Option<String>),
+    Name,
 }
 
 /// A parsed FASTA label template. See the module docs for the syntax.
@@ -69,7 +66,7 @@ pub struct LabelTemplate {
 impl Default for LabelTemplate {
     fn default() -> Self {
         Self {
-            parts: vec![Part::Field { object: LabelObject::Seq, namespace: None }],
+            parts: vec![Part::Seq(None)],
             source: "{seq}".to_string(),
         }
     }
@@ -82,26 +79,21 @@ impl fmt::Display for LabelTemplate {
 }
 
 fn parse_field(body: &str, template: &str) -> Result<Part> {
-    let (object_str, namespace) = match body.split_once(':') {
+    let (object, namespace) = match body.split_once(':') {
         Some((o, ns)) => (o, Some(ns)),
         None => (body, None),
     };
-    let object = match object_str {
-        "seq" => LabelObject::Seq,
-        "col" => LabelObject::Col,
-        "name" => LabelObject::Name,
-        other => {
-            return Err(label_err!(
-                "Invalid label template '{}': unknown field '{{{}}}'; {}",
-                template,
-                other,
-                VALID_FIELDS
-            ))
-        }
-    };
+    if !matches!(object, "seq" | "col" | "name") {
+        return Err(label_err!(
+            "Invalid label template '{}': unknown field '{{{}}}'; {}",
+            template,
+            object,
+            VALID_FIELDS
+        ));
+    }
     let namespace = match namespace {
         None => None,
-        Some(_) if object == LabelObject::Name => {
+        Some(_) if object == "name" => {
             return Err(label_err!(
                 "Invalid label template '{}': {{name}} takes no namespace (names have no aliases); {}",
                 template,
@@ -126,13 +118,30 @@ fn parse_field(body: &str, template: &str) -> Result<Part> {
         }
         Some(ns) => Some(ns.to_string()),
     };
-    Ok(Part::Field { object, namespace })
+    Ok(match object {
+        "seq" => Part::Seq(namespace),
+        "col" => Part::Col(namespace),
+        _ => Part::Name,
+    })
 }
 
-/// Is `s` a single field written without braces (`name`, `seq:refseq`)?
-fn is_shorthand(s: &str) -> bool {
-    let object = s.split_once(':').map_or(s, |(o, _)| o);
-    matches!(object, "seq" | "col" | "name") && !s.contains(['{', '}'])
+/// For each alias namespace a template uses: digest -> the alias it labels
+/// with. Built once before planning so labeling a whole store stays linear.
+pub(crate) type AliasIndex = HashMap<String, HashMap<DigestKey, String>>;
+
+/// Invert `alias -> digest`, keeping the first alias in sorted order per digest.
+pub(crate) fn invert(map: HashMap<String, DigestKey>) -> HashMap<DigestKey, String> {
+    let mut pairs: Vec<(String, DigestKey)> = map.into_iter().collect();
+    pairs.sort();
+    let mut out: HashMap<DigestKey, String> = HashMap::new();
+    for (alias, key) in pairs {
+        out.entry(key).or_insert(alias);
+    }
+    out
+}
+
+fn alias<'a>(index: &'a AliasIndex, ns: &str, digest: &str) -> Option<&'a str> {
+    index.get(ns)?.get(&digest.to_key()).map(String::as_str)
 }
 
 impl LabelTemplate {
@@ -141,63 +150,30 @@ impl LabelTemplate {
         if template.is_empty() {
             return Err(label_err!("Invalid label template: it is empty; {}", VALID_FIELDS));
         }
-        if is_shorthand(template) {
-            let part = parse_field(template, template)?;
-            return Ok(Self { parts: vec![part], source: template.to_string() });
-        }
-
+        let unbalanced = || {
+            label_err!("Invalid label template '{}': unbalanced braces; {}", template, VALID_FIELDS)
+        };
         let mut parts: Vec<Part> = Vec::new();
-        let mut literal = String::new();
-        let mut chars = template.chars().peekable();
-        while let Some(c) = chars.next() {
-            match c {
-                '{' if chars.peek() == Some(&'{') => {
-                    chars.next();
-                    literal.push('{');
-                }
-                '}' if chars.peek() == Some(&'}') => {
-                    chars.next();
-                    literal.push('}');
-                }
-                '{' => {
-                    let mut body = String::new();
-                    let mut closed = false;
-                    for c in chars.by_ref() {
-                        match c {
-                            '}' => {
-                                closed = true;
-                                break;
-                            }
-                            '{' => break,
-                            c => body.push(c),
-                        }
-                    }
-                    if !closed {
-                        return Err(label_err!(
-                            "Invalid label template '{}': unbalanced braces; {}",
-                            template,
-                            VALID_FIELDS
-                        ));
-                    }
-                    if !literal.is_empty() {
-                        parts.push(Part::Literal(std::mem::take(&mut literal)));
-                    }
-                    parts.push(parse_field(&body, template)?);
-                }
-                '}' => {
-                    return Err(label_err!(
-                        "Invalid label template '{}': unbalanced braces (write '}}}}' for a literal brace); {}",
-                        template,
-                        VALID_FIELDS
-                    ))
-                }
-                c => literal.push(c),
+        let mut rest = template;
+        while let Some(open) = rest.find(['{', '}']) {
+            if rest[open..].starts_with('}') {
+                return Err(unbalanced());
             }
+            if open > 0 {
+                parts.push(Part::Lit(rest[..open].to_string()));
+            }
+            let field = &rest[open + 1..];
+            let close = match field.find(['{', '}']) {
+                Some(i) if field[i..].starts_with('}') => i,
+                _ => return Err(unbalanced()),
+            };
+            parts.push(parse_field(&field[..close], template)?);
+            rest = &field[close + 1..];
         }
-        if !literal.is_empty() {
-            parts.push(Part::Literal(literal));
+        if !rest.is_empty() {
+            parts.push(Part::Lit(rest.to_string()));
         }
-        if !parts.iter().any(|p| matches!(p, Part::Field { .. })) {
+        if parts.iter().all(|p| matches!(p, Part::Lit(_))) {
             return Err(label_err!(
                 "Invalid label template '{}': it has no fields, so every label would be the same; {}",
                 template,
@@ -207,14 +183,18 @@ impl LabelTemplate {
         Ok(Self { parts, source: template.to_string() })
     }
 
-    /// Namespaces used with an object, deduplicated, in order of first use.
-    pub(crate) fn namespaces(&self, which: LabelObject) -> Vec<String> {
+    /// Alias namespaces of `kind` the template uses, deduplicated, in order
+    /// of first use.
+    pub(crate) fn namespaces(&self, kind: AliasKind) -> Vec<String> {
         let mut out: Vec<String> = Vec::new();
         for p in &self.parts {
-            if let Part::Field { object, namespace: Some(ns) } = p {
-                if *object == which && !out.contains(ns) {
-                    out.push(ns.clone());
-                }
+            let ns = match (kind, p) {
+                (AliasKind::Sequence, Part::Seq(Some(ns))) => ns,
+                (AliasKind::Collection, Part::Col(Some(ns))) => ns,
+                _ => continue,
+            };
+            if !out.contains(ns) {
+                out.push(ns.clone());
             }
         }
         out
@@ -222,9 +202,7 @@ impl LabelTemplate {
 
     /// Does the template use `{col}`, `{col:NS}` or `{name}`?
     pub(crate) fn needs_collection(&self) -> bool {
-        self.parts.iter().any(|p| {
-            matches!(p, Part::Field { object: LabelObject::Col | LabelObject::Name, .. })
-        })
+        self.parts.iter().any(|p| matches!(p, Part::Col(_) | Part::Name))
     }
 
     /// Fill in the template for one record.
@@ -237,7 +215,8 @@ impl LabelTemplate {
         &self,
         seq_digest: &str,
         collection: Option<(&str, &str)>,
-        maps: &AliasMaps,
+        seq_aliases: &AliasIndex,
+        col_aliases: &AliasIndex,
     ) -> (String, bool) {
         let seq_id = || format!("SQ.{}", seq_digest);
         if collection.is_none() && self.needs_collection() {
@@ -247,23 +226,21 @@ impl LabelTemplate {
         let mut out = String::new();
         for p in &self.parts {
             match p {
-                Part::Literal(s) => out.push_str(s),
-                Part::Field { object: LabelObject::Seq, namespace: None } => out.push_str(&seq_id()),
-                Part::Field { object: LabelObject::Seq, namespace: Some(ns) } => {
-                    match maps.sequence(ns, seq_digest) {
-                        Some(alias) => out.push_str(alias),
-                        None => {
-                            fallback = true;
-                            out.push_str(&seq_id());
-                        }
+                Part::Lit(s) => out.push_str(s),
+                Part::Seq(None) => out.push_str(&seq_id()),
+                Part::Seq(Some(ns)) => match alias(seq_aliases, ns, seq_digest) {
+                    Some(a) => out.push_str(a),
+                    None => {
+                        fallback = true;
+                        out.push_str(&seq_id());
                     }
-                }
-                Part::Field { object: LabelObject::Col, namespace } => {
+                },
+                Part::Col(namespace) => {
                     let col = collection.map(|c| c.0).unwrap_or_default();
                     match namespace {
                         None => out.push_str(col),
-                        Some(ns) => match maps.collection(ns, col) {
-                            Some(alias) => out.push_str(alias),
+                        Some(ns) => match alias(col_aliases, ns, col) {
+                            Some(a) => out.push_str(a),
                             None => {
                                 fallback = true;
                                 out.push_str(col);
@@ -271,69 +248,26 @@ impl LabelTemplate {
                         },
                     }
                 }
-                Part::Field { object: LabelObject::Name, .. } => {
-                    out.push_str(collection.map(|c| c.1).unwrap_or_default())
-                }
+                Part::Name => out.push_str(collection.map(|c| c.1).unwrap_or_default()),
             }
         }
         (out, fallback)
     }
 }
 
-/// Digest -> chosen alias maps for the namespaces a template uses, built once
-/// before planning so labeling a whole store stays linear.
-#[derive(Debug, Default)]
-pub(crate) struct AliasMaps {
-    sequence: HashMap<String, HashMap<DigestKey, String>>,
-    collection: HashMap<String, HashMap<DigestKey, String>>,
-}
-
-/// Invert `alias -> digest`, keeping the first alias in sorted order per digest.
-fn invert(map: HashMap<String, DigestKey>) -> HashMap<DigestKey, String> {
-    let mut pairs: Vec<(String, DigestKey)> = map.into_iter().collect();
-    pairs.sort();
-    let mut out: HashMap<DigestKey, String> = HashMap::new();
-    for (alias, key) in pairs {
-        out.entry(key).or_insert(alias);
-    }
-    out
-}
-
-impl AliasMaps {
-    pub(crate) fn add_sequence_namespace(&mut self, ns: &str, map: HashMap<String, DigestKey>) {
-        self.sequence.insert(ns.to_string(), invert(map));
-    }
-
-    pub(crate) fn add_collection_namespace(&mut self, ns: &str, map: HashMap<String, DigestKey>) {
-        self.collection.insert(ns.to_string(), invert(map));
-    }
-
-    fn sequence(&self, ns: &str, digest: &str) -> Option<&str> {
-        use crate::hashkeyable::HashKeyable;
-        self.sequence.get(ns)?.get(&digest.to_key()).map(String::as_str)
-    }
-
-    fn collection(&self, ns: &str, digest: &str) -> Option<&str> {
-        use crate::hashkeyable::HashKeyable;
-        self.collection.get(ns)?.get(&digest.to_key()).map(String::as_str)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hashkeyable::HashKeyable;
 
-    fn render(t: &str, coll: Option<(&str, &str)>, maps: &AliasMaps) -> (String, bool) {
-        LabelTemplate::parse(t).unwrap().render("SEQDIGEST", coll, maps)
+    fn render(t: &str, coll: Option<(&str, &str)>, maps: &(AliasIndex, AliasIndex)) -> (String, bool) {
+        LabelTemplate::parse(t).unwrap().render("SEQDIGEST", coll, &maps.0, &maps.1)
     }
 
     #[test]
     fn valid_templates_parse() {
         for t in [
             "{seq}", "{seq:refseq}", "{col}", "{col:ucsc}", "{name}",
-            "seq", "seq:refseq", "col", "col:ucsc", "name",
-            "{col:ucsc}/{name}", "{col:pansn}#{name}", "x{{{seq}}}y", "{name}_{seq}",
+            "{col:ucsc}/{name}", "{col:pansn}#{name}", "x{seq}y", "{name}_{seq}",
         ] {
             LabelTemplate::parse(t).unwrap_or_else(|e| panic!("{t}: {e}"));
         }
@@ -346,12 +280,13 @@ mod tests {
             ("{foo}", "unknown field"),
             ("{name:ucsc}", "no namespace"),
             ("{seq:}", "empty namespace"),
-            ("seq:", "empty namespace"),
             ("{seq", "unbalanced"),
             ("seq}", "unbalanced"),
             ("{seq}}", "unbalanced"),
+            ("{{seq}}", "unbalanced"),
             ("hello", "no fields"),
-            ("{{seq}}", "no fields"),
+            ("name", "no fields"),
+            ("seq:refseq", "no fields"),
             ("names", "no fields"),
         ] {
             let err = LabelTemplate::parse(t).unwrap_err().to_string();
@@ -361,32 +296,23 @@ mod tests {
     }
 
     #[test]
-    fn shorthand_equals_braced() {
-        let maps = AliasMaps::default();
-        let c = Some(("COL", "chr1"));
-        assert_eq!(render("name", c, &maps), render("{name}", c, &maps));
-        assert_eq!(render("seq", c, &maps), render("{seq}", c, &maps));
-        assert_eq!(render("col", c, &maps), render("{col}", c, &maps));
-    }
-
-    #[test]
     fn rendering_and_fallbacks() {
-        let mut maps = AliasMaps::default();
         let mut seq_map = HashMap::new();
         seq_map.insert("NC_1".to_string(), "SEQDIGEST".to_key());
-        maps.add_sequence_namespace("refseq", seq_map);
         let mut col_map = HashMap::new();
         col_map.insert("zz".to_string(), "COL".to_key());
         col_map.insert("hg38".to_string(), "COL".to_key());
-        maps.add_collection_namespace("ucsc", col_map);
+        let maps = (
+            AliasIndex::from([("refseq".to_string(), invert(seq_map))]),
+            AliasIndex::from([("ucsc".to_string(), invert(col_map))]),
+        );
 
         let c = Some(("COL", "chr1"));
         assert_eq!(render("{seq}", c, &maps), ("SQ.SEQDIGEST".into(), false));
-        assert_eq!(render("seq:refseq", c, &maps), ("NC_1".into(), false));
+        assert_eq!(render("{seq:refseq}", c, &maps), ("NC_1".into(), false));
         // First sorted alias wins.
         assert_eq!(render("{col:ucsc}/{name}", c, &maps), ("hg38/chr1".into(), false));
         assert_eq!(render("{col}/{name}", c, &maps), ("COL/chr1".into(), false));
-        assert_eq!(render("x{{{name}}}", c, &maps), ("x{chr1}".into(), false));
         // Missing alias falls back to the digest.
         assert_eq!(render("{col:ucsc}", Some(("OTHER", "a")), &maps), ("OTHER".into(), true));
         assert_eq!(render("{seq:ensembl}", c, &maps), ("SQ.SEQDIGEST".into(), true));
@@ -398,10 +324,10 @@ mod tests {
     #[test]
     fn namespaces_and_needs_collection() {
         let t = LabelTemplate::parse("{col:a}/{seq:b}/{col:a}/{seq:c}").unwrap();
-        assert_eq!(t.namespaces(LabelObject::Col), vec!["a"]);
-        assert_eq!(t.namespaces(LabelObject::Seq), vec!["b", "c"]);
+        assert_eq!(t.namespaces(AliasKind::Collection), vec!["a"]);
+        assert_eq!(t.namespaces(AliasKind::Sequence), vec!["b", "c"]);
         assert!(t.needs_collection());
-        assert!(!LabelTemplate::parse("seq:x").unwrap().needs_collection());
+        assert!(!LabelTemplate::parse("{seq:x}").unwrap().needs_collection());
         assert_eq!(LabelTemplate::default().to_string(), "{seq}");
     }
 }

@@ -19,19 +19,19 @@
 //!
 //! 1. **Partial read** — `get_substring` / `get_substrings`. Returns the bases
 //!    for `[start, end)` as a `String`, reading only the bytes that cover the
-//!    region. Source resolution: resident `Full` bytes -> local `.seq`
+//!    region. Source resolution: loaded or resident bytes -> local `.seq`
 //!    (positioned read; the whole sequence never enters RAM) -> remote
 //!    byte-range (HTTP `Range:` via `open_remote_range`). The whole sequence
 //!    never enters RAM and nothing is persisted, so this is the smart default
 //!    for sparse, random-access extraction regardless of where the data lives.
-//!    A remote-only `Stub` is served by fetching just the covering bytes; it
+//!    A remote-only sequence is served by fetching just the covering bytes; it
 //!    does NOT trigger a whole-chromosome download (use flow 3 for that).
 //!    Repeated remote reads re-fetch, so promote to flow 3 for repeat-heavy
 //!    workloads.
 //!
 //! 2. **Streaming** — `stream_sequence`. Returns a `Read`er over `[start, end)`
 //!    and decodes on the fly, so peak memory stays O(1) in the region length.
-//!    Source resolution: resident `Full` bytes -> local `.seq` (seek) -> remote
+//!    Source resolution: loaded bytes -> local `.seq` (seek) -> remote
 //!    byte-range (HTTP `Range:` via `open_remote_range`). This is the only flow
 //!    that pulls a *region* straight from a remote store, fetching just the
 //!    covering bytes; nothing is persisted, so repeated remote reads re-fetch.
@@ -44,8 +44,8 @@
 //!    full-sequence download + allocation up front (a whole chromosome can be
 //!    tens of MB encoded), so avoid it for one-off region pulls.
 //!
-//! Flows 1 and 2 need only metadata loaded (a `Stub`); flow 3 promotes a `Stub`
-//! to a `Full` record. Remote byte-range (flows 1-2) requires the `http`
+//! Flows 1 and 2 need only metadata loaded; flow 3 loads the sequence's
+//! bytes. Remote byte-range (flows 1-2) requires the `http`
 //! feature; without it, only resident and local sources are available.
 //!
 //! ## Write discipline (concurrency)
@@ -173,7 +173,6 @@ pub use self::alias::{AliasKind, AliasManager};
 #[cfg(feature = "filesystem")]
 pub use self::export::{ExportOptions, ExportSelection, ExportSummary, Molecule};
 pub use self::label::{LabelError, LabelTemplate};
-pub(crate) use self::label::LabelObject;
 pub use self::atomic::is_transient_store_file;
 pub use self::lock::{LockInfo, LockOptions, StoreLock, force_unlock, lock_status};
 pub use self::fhr_metadata::{
@@ -417,7 +416,7 @@ pub(crate) struct StoreMetadata {
     /// Whether ancillary digests are computed and stored
     #[serde(default = "default_true")]
     pub(crate) ancillary_digests: bool,
-    /// Whether on-disk attribute index is maintained (Part 2)
+    /// Whether the on-disk attribute index is maintained
     #[serde(default)]
     pub(crate) attribute_index: bool,
     /// Available sequence alias namespaces (for remote discovery)
@@ -460,19 +459,19 @@ pub(crate) fn default_true() -> bool {
 /// returned by `add_sequence_collections_from_fastas`.
 #[derive(Debug, Clone)]
 pub struct StoreStats {
-    /// Total number of sequences (Stub + Full)
+    /// Total number of sequences (loaded or not)
     pub n_sequences: usize,
-    /// Number of sequences whose bytes are currently held in RAM (`Full`
-    /// records). Structurally always 0 for a disk-backed store: importing
-    /// downgrades every record to a `Stub` after handing its bytes to the
-    /// writer pool (see `add_sequence_record_deferred_write`). Only an
-    /// on-demand remote fetch ever makes a record `Full` again.
+    /// Number of sequences whose bytes are currently held in RAM (loaded).
+    /// Structurally always 0 for a disk-backed store: importing drops each
+    /// sequence's bytes after handing them off to be written (see
+    /// `add_sequence_record_deferred_write`). Only an on-demand fetch loads
+    /// them again.
     pub n_sequences_in_memory: usize,
-    /// Total number of collections (Stub + Full)
+    /// Total number of collections (loaded or not)
     pub n_collections: usize,
-    /// Number of collections whose sequence list is currently held in RAM
-    /// (`Full` records). Collections finalized by this process are `Full`;
-    /// collections rehydrated from `collections.rgci` are `Stub`. This is a
+    /// Number of collections whose member list is currently held in RAM
+    /// (loaded). Collections finalized by this process are loaded; collections
+    /// read from `collections.rgci` are not. This is a
     /// residency gauge, NOT a count of collections added by this run — it
     /// resets on process start and also counts collections merely touched by
     /// a read.
@@ -502,8 +501,8 @@ pub struct StoreStats {
 pub struct ImportReport {
     /// Per-file results in input order: `(metadata, was_new)`.
     pub collections: Vec<(SequenceCollectionMetadata, bool)>,
-    /// Sequences whose bytes were dispatched to the writer pool this run
-    /// (i.e. genuinely new content). For in-memory stores, sequences newly
+    /// Sequences whose bytes were written this run (i.e. genuinely new
+    /// content). For in-memory stores, sequences newly
     /// inserted into the in-memory map.
     pub n_sequences_written: usize,
     /// Sequences already present (by content digest), so no bytes were written.

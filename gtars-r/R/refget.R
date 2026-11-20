@@ -743,6 +743,23 @@ setMethod('compact', 'RefgetStore', function(store) {
   .Call(wrap__compact_store, store@ptr)
 })
 
+#' Turn the pack block cache on or off (alpha).
+#'
+#' Off by default. When on, reads from a packed store's local pack files go
+#' through a cache of 1 MiB blocks. It helps clustered reads (for example a
+#' sorted BED) on a cold network file system, and hurts scattered reads on
+#' stores larger than the cache.
+#'
+#' @param store A RefgetStore object
+#' @param megabytes Cache size in megabytes; 0 turns the cache off
+#' @return The store, invisibly
+#' @export
+setGeneric('set_pack_cache', function(store, megabytes) standardGeneric('set_pack_cache'))
+setMethod('set_pack_cache', 'RefgetStore', function(store, megabytes) {
+  .Call(wrap__set_pack_cache_store, store@ptr, as.integer(megabytes))
+  invisible(store)
+})
+
 #' Export sequences as FASTA, to a file or to stdout.
 #'
 #' Choose records with exactly one of \code{collections}, \code{seq_digests}
@@ -752,8 +769,8 @@ setMethod('compact', 'RefgetStore', function(store) {
 #' Label fields: \code{{seq}} sequence digest (\code{SQ.}...), the default;
 #' \code{{seq:NS}} the sequence's alias in namespace NS; \code{{col}}
 #' collection digest; \code{{col:NS}} the collection's alias in namespace NS;
-#' \code{{name}} the sequence's name in its collection. A single field may drop
-#' its braces (\code{"name"}). A missing alias falls back to the digest. The
+#' \code{{name}} the sequence's name in its collection. A missing alias falls
+#' back to the digest. The
 #' same label for the same sequence is written once; the same label for
 #' different sequences is an error, raised before any output.
 #'

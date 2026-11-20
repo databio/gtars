@@ -7,7 +7,7 @@
 //! into a remote store's cache.
 
 use super::*;
-use super::label::{label_err, AliasMaps, LabelObject, LabelTemplate};
+use super::label::{invert, label_err, AliasIndex, LabelTemplate};
 use super::readonly::ReadonlyRefgetStore;
 
 use std::collections::{HashMap, HashSet};
@@ -109,14 +109,20 @@ impl std::str::FromStr for Molecule {
 }
 
 /// How an export labels and formats its records.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ExportOptions {
     /// Label template; default `{seq}`.
     pub label: LabelTemplate,
     /// Keep only sequences of this molecule type.
     pub molecule: Option<Molecule>,
-    /// Bases per line: `None` is 80, `Some(0)` writes each sequence on one line.
-    pub line_width: Option<usize>,
+    /// Bases per line, default 80; `0` writes each sequence on one line.
+    pub line_width: usize,
+}
+
+impl Default for ExportOptions {
+    fn default() -> Self {
+        Self { label: LabelTemplate::default(), molecule: None, line_width: 80 }
+    }
 }
 
 /// Counts reported by an export.
@@ -492,35 +498,38 @@ impl ReadonlyRefgetStore {
         })
     }
 
-    /// Digest -> alias maps for every namespace `label` uses, after checking
-    /// each namespace exists in this store.
-    pub(crate) fn label_alias_maps(&self, label: &LabelTemplate) -> Result<AliasMaps> {
-        let mut maps = AliasMaps::default();
-        let seq_namespaces = self.aliases.sequence_namespaces();
-        for ns in label.namespaces(LabelObject::Seq) {
-            if !seq_namespaces.contains(&ns) {
+    /// Digest -> alias maps for every sequence and collection namespace
+    /// `label` uses, after checking each namespace exists in this store.
+    pub(crate) fn label_alias_maps(&self, label: &LabelTemplate) -> Result<(AliasIndex, AliasIndex)> {
+        Ok((
+            self.label_aliases(label, AliasKind::Sequence)?,
+            self.label_aliases(label, AliasKind::Collection)?,
+        ))
+    }
+
+    /// [`Self::label_alias_maps`] for the namespaces of one alias kind.
+    fn label_aliases(&self, label: &LabelTemplate, kind: AliasKind) -> Result<AliasIndex> {
+        let what = match kind {
+            AliasKind::Sequence => "sequence",
+            AliasKind::Collection => "collection",
+        };
+        let available = self.aliases.namespaces_for(kind);
+        let mut out = AliasIndex::new();
+        for ns in label.namespaces(kind) {
+            if !available.contains(&ns) {
                 return Err(label_err!(
-                    "Unknown sequence-alias namespace '{}' in label '{}'. This store's sequence-alias namespaces: {}",
+                    "Unknown {}-alias namespace '{}' in label '{}'. This store's {}-alias namespaces: {}",
+                    what,
                     ns,
                     label,
-                    list_or_none(&seq_namespaces)
+                    what,
+                    list_or_none(&available)
                 ));
             }
-            maps.add_sequence_namespace(&ns, self.aliases.namespace_map(AliasKind::Sequence, &ns));
+            let map = invert(self.aliases.namespace_map(kind, &ns));
+            out.insert(ns, map);
         }
-        let col_namespaces = self.aliases.collection_namespaces();
-        for ns in label.namespaces(LabelObject::Col) {
-            if !col_namespaces.contains(&ns) {
-                return Err(label_err!(
-                    "Unknown collection-alias namespace '{}' in label '{}'. This store's collection-alias namespaces: {}",
-                    ns,
-                    label,
-                    list_or_none(&col_namespaces)
-                ));
-            }
-            maps.add_collection_namespace(&ns, self.aliases.namespace_map(AliasKind::Collection, &ns));
-        }
-        Ok(maps)
+        Ok(out)
     }
 
     /// Export sequences from BED file regions to a FASTA file.
@@ -549,7 +558,8 @@ impl ReadonlyRefgetStore {
             }
             let member = self.catalog.member_by_name(coll, m.name()).unwrap_or(m);
             let sha = member.seq().sha512t24u();
-            let rendered = label.render(sha.as_str(), Some((&collection_str, m.name())), &maps);
+            let rendered =
+                label.render(sha.as_str(), Some((&collection_str, m.name())), &maps.0, &maps.1);
             check_label_whitespace(&rendered.0)?;
             name_labels.insert(m.name(), rendered);
         }
@@ -600,7 +610,7 @@ impl ReadonlyRefgetStore {
         output_path: P,
         opts: &ExportOptions,
     ) -> Result<ExportSummary> {
-        let line_width = opts.line_width.unwrap_or(80);
+        let line_width = opts.line_width;
         let maps = self.label_alias_maps(&opts.label)?;
         let candidates = self.export_candidates(selection, &opts.label)?;
 
@@ -617,7 +627,7 @@ impl ReadonlyRefgetStore {
             }
             let sha = view.sha512t24u();
             let coll = c.collection.as_ref().map(|(col, name)| (col.as_str(), *name));
-            let (label, fallback) = opts.label.render(sha.as_str(), coll, &maps);
+            let (label, fallback) = opts.label.render(sha.as_str(), coll, &maps.0, &maps.1);
             check_label_whitespace(&label)?;
             match seen.get(&label) {
                 Some((row, _)) if *row == c.row => {
@@ -648,12 +658,12 @@ impl ReadonlyRefgetStore {
         let total = plan.len();
         for (i, rec) in plan.iter().enumerate() {
             let meta = self.catalog.seq(rec.row).to_metadata();
-            let bytes = self.sequence_bytes(rec.row)?;
+            let bytes = self.read_stored_bytes(rec.row, false)?;
             write_fasta_record(
                 &mut *writer,
                 &rec.label,
                 &meta,
-                bytes.as_slice(),
+                &bytes[..],
                 self.mode,
                 line_width,
                 EXPORT_CHUNK_BASES,
@@ -790,9 +800,9 @@ mod tests {
 
     fn name_opts(line_width: usize) -> ExportOptions {
         ExportOptions {
-            label: LabelTemplate::parse("name").unwrap(),
+            label: LabelTemplate::parse("{name}").unwrap(),
             molecule: None,
-            line_width: Some(line_width),
+            line_width,
         }
     }
     use tempfile::{NamedTempFile, TempDir};

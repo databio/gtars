@@ -923,6 +923,20 @@ pub fn compact_store(store_ptr: Robj) -> extendr_api::Result<List> {
     })
 }
 
+/// Turn the pack block cache on or off
+/// @param store_ptr External pointer to RefgetStore
+/// @param megabytes Cache size in megabytes (0 = off)
+#[extendr]
+pub fn set_pack_cache_store(store_ptr: Robj, megabytes: i32) -> extendr_api::Result<()> {
+    if megabytes < 0 {
+        return Err(extendr_api::Error::Other("megabytes must be 0 or more".into()));
+    }
+    with_store!(store_ptr, store, {
+        store.set_pack_cache_mb(megabytes as usize);
+        Ok(())
+    })
+}
+
 fn r_str_vec(x: &Robj) -> Option<Vec<String>> {
     if x.is_null() {
         None
@@ -948,7 +962,7 @@ fn summary_list(s: &ExportSummary) -> Robj {
 /// @param names Sequence names to keep in each collection (NULL for all)
 /// @param seq_digests Sequence digests (NULL unless selecting by digest)
 /// @param all Export every collection plus sequences in no collection
-/// @param label Label template, e.g. "{seq}", "name", "{col}/{name}"
+/// @param label Label template, e.g. "{seq}", "{name}", "{col}/{name}"
 /// @param molecule NULL, "dna" or "protein"
 /// @param line_width Bases per line (0 = unwrapped, negative = default 80)
 #[extendr]
@@ -976,7 +990,7 @@ pub fn export_fasta_store(
         label: LabelTemplate::parse(label).map_err(|e| e.to_string())?,
         molecule: Molecule::from_opt(molecule.as_ref().and_then(|v| v.first()).map(String::as_str))
             .map_err(|e| e.to_string())?,
-        line_width: if line_width < 0 { None } else { Some(line_width as usize) },
+        line_width: if line_width < 0 { 80 } else { line_width as usize },
     };
     with_store!(store_ptr, store, {
         store
@@ -1720,6 +1734,7 @@ extendr_module! {
     fn write_store_to_directory_store;
     fn write_store;
     fn compact_store;
+    fn set_pack_cache_store;
     fn export_fasta_store;
     fn get_seqs_bed_file_store;
     fn get_seqs_bed_file_to_vec_store;

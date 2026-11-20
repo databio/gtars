@@ -80,6 +80,15 @@ test_that("packed store round-trips and compacts", {
     meta <- rec@metadata
     expect_equal(get_substring(reopened, meta@sha512t24u, 0, meta@length), bases[[meta@name]])
   }
+
+  # The pack block cache, on and then off, reads the same bases.
+  for (megabytes in c(16, 0)) {
+    set_pack_cache(reopened, megabytes)
+    for (rec in expected@sequences) {
+      meta <- rec@metadata
+      expect_equal(get_substring(reopened, meta@sha512t24u, 0, meta@length), bases[[meta@name]])
+    }
+  }
 })
 
 # =========================================================================
@@ -490,7 +499,7 @@ test_that("export_fasta with names subset and name labels works", {
 
   seq_names <- sapply(result@sequences[1:2], function(s) s@metadata@name)
   export_fasta(store, export_path, collections = result@digest,
-               names = seq_names, label = "name", line_width = 60L)
+               names = seq_names, label = "{name}", line_width = 60L)
   headers <- grep("^>", readLines(export_path), value = TRUE)
   expect_equal(headers, paste0(">", seq_names))
 })

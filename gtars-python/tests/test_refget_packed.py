@@ -39,6 +39,26 @@ def test_packed_store_roundtrip(tmp_path):
         assert reopened.get_substring(meta.sha512t24u, 0, meta.length) == bases
 
 
+def test_set_pack_cache_reads_the_same_bases(tmp_path):
+    fasta = tmp_path / "in.fa"
+    fasta.write_text("".join(f">{n}\n{s}\n" for n, s in SEQS.items()))
+    store_dir = tmp_path / "store"
+    store = RefgetStore.on_disk(store_dir, packed=True)
+    store.set_quiet(True)
+    store.add_sequence_collection_from_fasta(fasta)
+    del store
+
+    store = RefgetStore.open_local(store_dir)
+    by_name = {m.name: m for m in store.list_sequences()}
+    # On, off, then on again with a different size.
+    for megabytes in [16, 0, 1]:
+        store.set_pack_cache(megabytes)
+        for name, bases in SEQS.items():
+            meta = by_name[name]
+            assert store.get_substring(meta.sha512t24u, 0, meta.length) == bases
+            assert store.get_substring(meta.sha512t24u, 3, 9) == bases[3:9]
+
+
 def test_standalone_store_reports_its_layout(tmp_path):
     assert RefgetStore.on_disk(tmp_path / "store").layout == "standalone"
 

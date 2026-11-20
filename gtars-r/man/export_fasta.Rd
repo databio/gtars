@@ -47,8 +47,8 @@ stream one sequence at a time and leave the store's loaded state unchanged.
 Label fields: \code{{seq}} sequence digest (\code{SQ.}...), the default;
 \code{{seq:NS}} the sequence's alias in namespace NS; \code{{col}}
 collection digest; \code{{col:NS}} the collection's alias in namespace NS;
-\code{{name}} the sequence's name in its collection. A single field may drop
-its braces (\code{"name"}). A missing alias falls back to the digest. The
+\code{{name}} the sequence's name in its collection. A missing alias falls
+back to the digest. The
 same label for the same sequence is written once; the same label for
 different sequences is an error, raised before any output.
 }

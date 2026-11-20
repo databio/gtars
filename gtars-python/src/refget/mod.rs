@@ -2248,6 +2248,23 @@ impl PyRefgetStore {
         Ok(d)
     }
 
+    /// Turn the pack block cache on or off (alpha).
+    ///
+    /// Off by default. When on, reads from a packed store's local pack files
+    /// go through a cache of 1 MiB blocks. It helps clustered reads (for
+    /// example a sorted BED) on a cold network file system, and hurts
+    /// scattered reads on stores larger than the cache.
+    ///
+    /// Args:
+    ///     megabytes: Cache size in megabytes; 0 turns the cache off.
+    ///
+    /// Example:
+    ///     >>> store = RefgetStore.open_local("/scratch/packed_store")
+    ///     >>> store.set_pack_cache(128)
+    fn set_pack_cache(&self, py: Python<'_>, megabytes: usize) {
+        self.lock(py).set_pack_cache_mb(megabytes);
+    }
+
     /// Eagerly load all Stub collections to Full.
     ///
     /// After this call, read methods like get_collection(), get_collection_level2(),
@@ -3124,10 +3141,10 @@ impl PyRefgetStore {
     /// default), `{seq:NS}` the sequence's alias in namespace NS, `{col}`
     /// collection digest, `{col:NS}` the collection's alias in namespace NS,
     /// `{name}` the sequence's name in its collection. Literal text is copied
-    /// as-is; a single field may drop its braces (`"name"`). A missing alias
-    /// falls back to the digest; records with no collection get `{seq}`. The
-    /// same label for the same sequence is written once; the same label for
-    /// different sequences is an error, raised before any output.
+    /// as-is. A missing alias falls back to the digest; records with no
+    /// collection get `{seq}`. The same label for the same sequence is written
+    /// once; the same label for different sequences is an error, raised before
+    /// any output.
     ///
     /// Args:
     ///     output_path: Path to write the FASTA file ('.gz' compresses); "-" writes to stdout.
@@ -3148,10 +3165,10 @@ impl PyRefgetStore {
     ///     IOError: If the file cannot be written or sequences are not found.
     ///
     /// Example:
-    ///     >>> store.export_fasta("hg38.fa", collections=[digest], label="name")
+    ///     >>> store.export_fasta("hg38.fa", collections=[digest], label="{name}")
     ///     >>> store.export_fasta("-", all=True)  # every sequence once, labeled SQ.…
     ///     >>> store.export_fasta("all.fa", all=True, label="{col:ucsc}/{name}")
-    #[pyo3(signature = (output_path, collections=None, names=None, seq_digests=None, all=false, label="{seq}", molecule=None, line_width=None))]
+    #[pyo3(signature = (output_path, collections=None, names=None, seq_digests=None, all=false, label="{seq}", molecule=None, line_width=80))]
     #[allow(clippy::too_many_arguments)]
     fn export_fasta<'py>(
         &self,
@@ -3163,7 +3180,7 @@ impl PyRefgetStore {
         all: bool,
         label: &str,
         molecule: Option<&str>,
-        line_width: Option<usize>,
+        line_width: usize,
     ) -> PyResult<Bound<'py, pyo3::types::PyDict>> {
         let output_path = output_path.to_string();
         let collections: Option<Vec<String>> = match collections {

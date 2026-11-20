@@ -35,7 +35,7 @@ pub use encoder::{
     EncodeError, SequenceEncoder, byte_range_for_bases, decode_string_from_bytes, decode_substring_from_bytes,
     decode_substring_from_bytes_at_offset, encode_sequence,
 };
-pub use raw::{Digest32, RawMd5, RawSha, md5_to_raw, raw_to_md5, raw_to_sha, sha_to_raw};
+pub use raw::Digest32;
 pub use fasta::{ParseOptions, digest_fasta_bytes, load_fasta_bytes, parse_fasta_header};
 pub use stream::FastaStreamHasher;
 pub use streaming_decoder::StreamingDecoder;

@@ -73,6 +73,11 @@ limit with `standalone_file_limit=` on `add_sequence_collection_from_fasta`
 or `add_sequence_collections_from_fastas`. `force=True` does not skip the
 limit.
 
+Reads from a packed store can go through a block cache, which is off by
+default. `store.set_pack_cache(128)` turns it on with 128 MB; `0` turns it
+off. It helps clustered reads (for example a sorted BED) on a cold network
+file system, and hurts scattered reads on stores larger than the cache.
+
 The packed layout is alpha: its on-disk format may change before it is
 declared stable.
 

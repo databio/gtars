@@ -125,5 +125,10 @@ A standard store refuses an import that would leave it with more than 500,000
 `add_fasta(store, path, standalone_file_limit = ...)`. `force = TRUE` does not
 skip the limit.
 
+Reads from a packed store can go through a block cache, which is off by
+default. `set_pack_cache(store, 128)` turns it on with 128 MB; `0` turns it
+off. It helps clustered reads (for example a sorted BED) on a cold network
+file system, and hurts scattered reads on stores larger than the cache.
+
 The packed layout is alpha: its on-disk format may change before it is
 declared stable.
