@@ -362,15 +362,13 @@ query; blastn would split it (`split_query.c`).
 
 ## 7. Open work
 
-- **Packed stores** (plan 8): millions of small sequences packed into a few large files instead of
-  one file each. The build-side batching is done; the packed layout itself waits for gtars-refget's
-  packed-layout work to reach `dev`. Until then `store::access::open` refuses packed stores.
+- **Packed stores** (plan 8): build and search read packed stores, local or remote, through each
+  record's stored span. A packed store served over HTTP is tested only against a local server
+  (`scripts/golden/remote_smoke.sh` step 9); no real packed store exists on S3 yet.
 - **Transcriptome search speed.** On GENCODE, rgblastn is about 3x slower than blastn for megablast
   and 1.3–1.5x slower for `-task blastn`. Most of it is per-subject cost: 4.7 s of plan setup
   (mostly freeing per-subject strings and maps) and one file open per subject. Plan 8 replaces
   both. The rest of the `-task blastn` gap is the dynamic-programming traceback.
-- **CI.** The BLAST+ steps and the `blast` job in `.github/workflows/tests.yml` and `codecov.yml`
-  have not been run in CI.
 - **Not yet measured:** jungle with `-task blastn`; remote rgblastn speed.
 - **Status.** In the metaplan, plans 1–7 are marked implemented and plan 8 (packed stores) is
   open; none is marked verified yet.

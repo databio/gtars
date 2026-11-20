@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `rgblast origin` and `report` use much less memory: hits are trimmed while searching and alignment details are dropped when the output does not need them.
 - `rgmakeblastdb`, `rgblastn` and `rgblast` on a remote store: Ctrl-C now stops the download within a few seconds instead of after it finishes, and the download prints a `fetch:` progress line every 2 s (progress event `fetching`).
 - `gtars-refget`: an unknown collection in a store with no files again names the missing file, instead of "No local path configured".
-- CI (untested): install ncbi-blast+ for BLAST tests; add a `blast` test job and feature checks.
+- CI: the `blast` job runs the golden tests on NCBI's BLAST+ 2.17.0 tarball (codecov runs them through the `ncbi/blast:2.17.0` image); the `r` job lists skipped tests and fails when the generated R wrappers or man pages are out of date; `codecov.yml` can be started by hand.
 
 ### Breaking
 

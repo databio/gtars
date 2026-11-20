@@ -18,8 +18,6 @@ env:
 # avoid paying for a second full compile of the same tests, this workflow only
 # covers the language-binding suites (R and Python), each in its own parallel
 # job with its own cache.
-# UNTESTED (plan 6 Part H): the BLAST+ steps below, the `blast` job and the
-# docker pull in codecov.yml have not been run in CI.
 # Release builds (build-binaries, build-python-bindings, build-r-bindings) use
 # default features, which already include `blast`, so they need no edits; the
 # `blast` job below checks those feature sets on every PR.
