@@ -9,6 +9,7 @@
 use super::OpenedStore;
 use crate::error::Error;
 use crate::plan::SubjectPlan;
+use crate::progress::ProgressEvent;
 use memmap2::{Mmap, MmapOptions};
 use std::collections::HashMap;
 use std::fs::File;
@@ -306,8 +307,13 @@ impl MappedFiles {
 
 /// The access path for a store: `MappedFiles` over the store's own records, or, for a remote
 /// store, over the cache after the subjects are pulled into it ([`OpenedStore::pull`]).
-pub fn open(store: &mut OpenedStore, plan: &SubjectPlan) -> Result<MappedFiles, Error> {
+/// `progress` sees the pull's `Fetching` events and can cancel it.
+pub fn open(
+    store: &mut OpenedStore,
+    plan: &SubjectPlan,
+    progress: &mut dyn FnMut(&ProgressEvent) -> bool,
+) -> Result<MappedFiles, Error> {
     let digests: Vec<String> = plan.subjects.iter().map(|s| s.digest.clone()).collect();
-    store.pull(&digests)?;
+    store.pull(&digests, progress)?;
     MappedFiles::new(store, plan)
 }

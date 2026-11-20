@@ -147,7 +147,7 @@ pub fn run_planned_each(
             "the selection holds no searchable sequences",
         ));
     }
-    let access = crate::store::access::open(store, &plan)?;
+    let access = crate::store::access::open(store, &plan, progress)?;
     let subjects = StoreSubjects::new(plan.clone(), access, req.params.stats);
     let queries = match &req.query {
         QuerySource::Path(p) => QuerySet::from_fasta_path(p)?,

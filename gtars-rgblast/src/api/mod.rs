@@ -337,7 +337,7 @@ pub(crate) fn pull_plan(
         return Err(Error::Cancelled);
     }
     let digests: Vec<String> = subjects.iter().map(|s| s.digest.clone()).collect();
-    store.pull(&digests)
+    store.pull(&digests, progress)
 }
 
 /// Write a planned database (a remote store's subjects pulled into the cache first); emits

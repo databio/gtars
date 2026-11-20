@@ -333,10 +333,42 @@ pub struct Prefetch {
     failed: bool,
 }
 
+/// A handle on a running [`Prefetch`] for another thread: read its counters
+/// or cancel it. After `cancel`, workers stop after their current request and
+/// the iterator ends with an error.
+#[derive(Clone)]
+pub struct PrefetchHandle {
+    stats: Arc<AtomicCounters>,
+    started: Instant,
+    cancel: Arc<AtomicBool>,
+    budget: Arc<Budget>,
+}
+
+impl PrefetchHandle {
+    pub fn counters(&self) -> FetchCounters {
+        self.stats.snapshot(self.started.elapsed())
+    }
+
+    pub fn cancel(&self) {
+        self.cancel.store(true, Ordering::Relaxed);
+        self.budget.cv.notify_all();
+    }
+}
+
 impl Prefetch {
     /// What this run has done so far.
     pub fn counters(&self) -> FetchCounters {
         self.stats.snapshot(self.started.elapsed())
+    }
+
+    /// A handle to read counters or cancel from another thread.
+    pub fn handle(&self) -> PrefetchHandle {
+        PrefetchHandle {
+            stats: Arc::clone(&self.stats),
+            started: self.started,
+            cancel: Arc::clone(&self.cancel),
+            budget: Arc::clone(&self.budget),
+        }
     }
 
     #[cfg(test)]

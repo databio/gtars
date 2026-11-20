@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `rgblast search` and `origin`: flags like `--quiet` now work after blastn flags instead of being passed to the engine.
 - `rgblast origin` and `report` use much less memory: hits are trimmed while searching and alignment details are dropped when the output does not need them.
+- `rgmakeblastdb`, `rgblastn` and `rgblast` on a remote store: Ctrl-C now stops the download within a few seconds instead of after it finishes, and the download prints a `fetch:` progress line every 2 s (progress event `fetching`).
+- `gtars-refget`: an unknown collection in a store with no files again names the missing file, instead of "No local path configured".
 - CI (untested): install ncbi-blast+ for BLAST tests; add a `blast` test job and feature checks.
 
 ### Breaking

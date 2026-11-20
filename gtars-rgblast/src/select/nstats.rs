@@ -322,7 +322,7 @@ pub fn ensure(
         return Ok(out);
     }
     let digests: Vec<String> = need.iter().map(|(d, _, _)| d.clone()).collect();
-    store.pull(&digests)?;
+    store.pull(&digests, progress)?;
     let fetch = StoreFiles::new(store);
     let scanned = scan(store, &fetch, &need, threads, progress)?;
     if opts.write_cache

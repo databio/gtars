@@ -63,7 +63,7 @@ impl SeqFetch for StoreFiles<'_> {
     fn read(&self, digest: &str) -> Result<StoredBytes, Error> {
         let err = |e: anyhow::Error| Error::sequence(digest, format!("{e:#}"));
         if self.remote && !self.store.stored_span(digest).map_err(err)?.path.is_file() {
-            super::pull(self.store, &[digest.to_string()])?;
+            super::pull(self.store, &[digest.to_string()], &mut |_| true)?;
         }
         self.store.read_local_stored_bytes(digest).map_err(err)
     }

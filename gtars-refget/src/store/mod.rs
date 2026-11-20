@@ -223,7 +223,9 @@ pub use self::verify::{
 pub use self::fetch::{FetchConfig, FetchCounters, RemoteMissing};
 pub use self::cache::{cache_info, clear_cache, default_cache_root, normalize_remote_url, CacheInfo};
 #[cfg(feature = "filesystem")]
-pub use self::prefetch::{ItemSource, Prefetch, PrefetchItem, PrefetchOptions, PrefetchOrder};
+pub use self::prefetch::{
+    ItemSource, Prefetch, PrefetchHandle, PrefetchItem, PrefetchOptions, PrefetchOrder,
+};
 
 use serde::{Deserialize, Serialize};
 use std::io::{BufReader, Read};

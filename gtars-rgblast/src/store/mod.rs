@@ -13,14 +13,17 @@ pub mod fetch;
 
 use crate::error::Error;
 use crate::plan::ResolvedSelection;
+use crate::progress::{ProgressEvent, Throttle};
 use crate::select::resolve::{Names, resolve_selector};
 pub use fetch::{SeqFetch, StoreFiles, StoredBytes};
 use gtars_refget::store::{
-    FetchConfig, FetchCounters, FhrMetadata, PrefetchOptions, ReadonlyRefgetStore, RefgetStore,
-    RemoteMissing, StorageMode, SyncStrategy,
+    FetchConfig, FetchCounters, FhrMetadata, PrefetchOptions, PrefetchOrder, ReadonlyRefgetStore,
+    RefgetStore, RemoteMissing, StorageMode, SyncStrategy,
 };
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::Duration;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StoreLocation {
@@ -65,21 +68,68 @@ impl RemoteOptions {
     }
 }
 
-/// Download sequences of a remote store into its cache with gtars-refget's
-/// `cache_sequences`; sequences already there are not downloaded again.
+/// Download sequences of a remote store into its cache with gtars-refget's prefetch (as
+/// `cache_sequences` does); sequences already there are not downloaded again. Emits
+/// `Fetching` every 2 s; `progress` returning false cancels the downloads after their
+/// current requests (`Error::Cancelled`).
 pub(crate) fn pull(
     store: &ReadonlyRefgetStore,
     digests: &[String],
+    progress: &mut dyn FnMut(&ProgressEvent) -> bool,
 ) -> Result<FetchCounters, Error> {
-    store
-        .cache_sequences(digests, PrefetchOptions::default())
-        .map_err(|e| match e.downcast_ref::<RemoteMissing>() {
-            Some(m) => Error::remote_not_found(&m.url, m.status),
-            None => Error::Fetch {
-                what: "sequence download".into(),
-                msg: format!("{e:#}"),
-            },
-        })
+    let fetch_error = |e: anyhow::Error| match e.downcast_ref::<RemoteMissing>() {
+        Some(m) => Error::remote_not_found(&m.url, m.status),
+        None => Error::Fetch {
+            what: "sequence download".into(),
+            msg: format!("{e:#}"),
+        },
+    };
+    let opts = PrefetchOptions {
+        order: PrefetchOrder::Any,
+        write_cache: true,
+        ..PrefetchOptions::default()
+    };
+    let mut run = store.prefetch(digests, opts).map_err(fetch_error)?;
+    let handle = run.handle();
+    let total = digests.len() as u64;
+    let done = AtomicU64::new(0);
+    let finished = AtomicBool::new(false);
+    let mut cancelled = false;
+    let result = std::thread::scope(|scope| {
+        let worker = scope.spawn(|| {
+            let r = run.by_ref().try_for_each(|item| {
+                item?;
+                done.fetch_add(1, Ordering::Relaxed);
+                Ok::<_, anyhow::Error>(())
+            });
+            finished.store(true, Ordering::Release);
+            r
+        });
+        let mut throttle = Throttle::new(2000);
+        while !finished.load(Ordering::Acquire) {
+            std::thread::sleep(Duration::from_millis(50));
+            if throttle.ready() {
+                let c = handle.counters();
+                let ev = ProgressEvent::Fetching {
+                    done: done.load(Ordering::Relaxed),
+                    total,
+                    bytes: c.bytes_downloaded,
+                    elapsed_s: c.elapsed_secs,
+                };
+                if !progress(&ev) {
+                    cancelled = true;
+                    handle.cancel();
+                    break;
+                }
+            }
+        }
+        worker.join().expect("prefetch thread panicked")
+    });
+    if cancelled {
+        return Err(Error::Cancelled);
+    }
+    result.map_err(fetch_error)?;
+    Ok(run.counters())
 }
 
 pub struct OpenedStore {
@@ -156,12 +206,17 @@ impl OpenedStore {
     }
 
     /// Pull sequences of a remote store into the cache (the sequence index must be loaded);
-    /// `None` for a local store, which has its files already.
-    pub fn pull(&self, digests: &[String]) -> Result<Option<FetchCounters>, Error> {
+    /// `None` for a local store, which has its files already. `progress` sees `Fetching`
+    /// and can cancel.
+    pub fn pull(
+        &self,
+        digests: &[String],
+        progress: &mut dyn FnMut(&ProgressEvent) -> bool,
+    ) -> Result<Option<FetchCounters>, Error> {
         if !self.is_remote() {
             return Ok(None);
         }
-        pull(&self.store, digests).map(Some)
+        pull(&self.store, digests, progress).map(Some)
     }
 
     /// Directory name, or the URL's last path segment.

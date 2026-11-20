@@ -30,6 +30,14 @@ pub enum ProgressEvent {
         sequences: u64,
         bases: u64,
     },
+    /// A remote store's pull, every 2 s: `done` of `total` sequences in the cache, `bytes`
+    /// downloaded so far.
+    Fetching {
+        done: u64,
+        total: u64,
+        bytes: u64,
+        elapsed_s: f64,
+    },
     /// Counting N bases of sequences the cache does not know (announced with `done` = 0).
     NScan {
         done: u64,
@@ -256,6 +264,18 @@ pub fn describe(e: &ProgressEvent) -> String {
             "pulling {} sequences ({}) into the cache",
             commas(*sequences),
             bp(*bases)
+        ),
+        ProgressEvent::Fetching {
+            done,
+            total,
+            bytes,
+            elapsed_s,
+        } => format!(
+            "fetch: {}/{} sequences, {} downloaded, {:.1} MB/s",
+            commas(*done),
+            commas(*total),
+            gb(*bytes),
+            *bytes as f64 / 1e6 / elapsed_s.max(1e-9)
         ),
         ProgressEvent::NScan {
             done,
