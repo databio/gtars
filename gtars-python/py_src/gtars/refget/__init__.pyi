@@ -454,6 +454,10 @@ class RefgetStore:
             if store is not None:
                 process(store)
 
+        **Threads**: slow calls (disk, network, FASTA import, export) release
+        the GIL, so other Python threads keep running. Threads may share one
+        store; their calls on it run one at a time.
+
     Examples:
         Create a new store and import sequences::
 
@@ -485,6 +489,11 @@ class RefgetStore:
     @property
     def storage_mode(self) -> StorageMode:
         """Current storage mode (Raw, Encoded, or Zstd)."""
+        ...
+
+    @property
+    def layout(self) -> Literal["packed", "standalone"]:
+        """On-disk layout of sequence bytes: "packed" or "standalone"."""
         ...
 
     @property
@@ -543,7 +552,9 @@ class RefgetStore:
         ...
 
     @classmethod
-    def on_disk(cls, cache_path: Union[str, PathLike]) -> "RefgetStore":
+    def on_disk(
+        cls, cache_path: Union[str, PathLike], packed: bool = False
+    ) -> "RefgetStore":
         """Create or load a disk-backed RefgetStore.
 
         If the directory contains an existing store (rgstore.json),
@@ -551,6 +562,12 @@ class RefgetStore:
 
         Args:
             cache_path: Directory path for the store. Created if it doesn't exist.
+            packed: Create the store with the packed layout (alpha): sequences
+                are written into a few large pack files under ``packs/``
+                instead of one ``.seq`` file each. A store's layout is fixed
+                when it is created; opening an existing standalone store with
+                ``packed=True`` raises an error. The packed format may change
+                before it is declared stable.
 
         Returns:
             RefgetStore (new or loaded from disk).
@@ -560,6 +577,48 @@ class RefgetStore:
             store = RefgetStore.on_disk("/data/my_store")
             store.add_sequence_collection_from_fasta("genome.fa")
             # Store is automatically persisted to disk
+            packed = RefgetStore.on_disk("/data/packed_store", packed=True)
+        """
+        ...
+
+    def compact(self, prune_unreferenced: bool = False) -> Dict[str, int]:
+        """Reclaim dead bytes in a packed store (alpha).
+
+        Removing collections leaves their bytes inside pack files. This
+        rewrites the live sequences into fresh packs and deletes the old ones.
+        Reads return the same bases before and after.
+
+        Args:
+            prune_unreferenced: Also delete pack files that no index entry
+                points to, such as packs left by a crashed writer. Only use
+                this when no other process is writing to the store: a pack
+                another writer has sealed but not committed yet is deleted too.
+
+        Returns:
+            Dict with ``packs_before``, ``packs_after``, ``bytes_reclaimed``
+            and ``packs_pruned`` (pack files deleted by ``prune_unreferenced``).
+
+        Raises:
+            IOError: If the store is not a packed disk-backed store, or the
+                rewrite fails.
+        """
+        ...
+
+    def set_pack_cache(self, megabytes: int) -> None:
+        """Turn the pack block cache on or off (alpha).
+
+        Off by default. When on, reads from a packed store's local pack files
+        go through a cache of 1 MiB blocks. It helps clustered reads (for
+        example a sorted BED) on a cold network file system, and hurts
+        scattered reads on stores larger than the cache.
+
+        Args:
+            megabytes: Cache size in megabytes; 0 turns the cache off.
+
+        Example::
+
+            store = RefgetStore.open_local("/scratch/packed_store")
+            store.set_pack_cache(128)
         """
         ...
 
@@ -789,6 +848,7 @@ class RefgetStore:
         force: bool = False,
         namespaces: Optional[List[str]] = None,
         collection_alias: Optional[str] = None,
+        standalone_file_limit: Optional[int] = None,
     ) -> tuple[SequenceCollectionMetadata, bool]:
         """Add a sequence collection from a FASTA file.
 
@@ -807,6 +867,11 @@ class RefgetStore:
                 This names the collection as a whole and is distinct from
                 ``namespaces``. Errors if the alias already names a different
                 collection, unless ``force`` is set.
+            standalone_file_limit: Most ``.seq`` files a standard on-disk
+                store may hold after the import. None means the default,
+                500,000. The import stops before writing anything if it would
+                go over. 0 is not special; pass a large number to lift the
+                limit. ``force`` does not skip it. Packed stores ignore it.
 
         Returns:
             A tuple containing:
@@ -814,7 +879,8 @@ class RefgetStore:
                 - bool: True if the collection was newly added, False if it already existed.
 
         Raises:
-            IOError: If the file cannot be read or processed.
+            IOError: If the file cannot be read or processed, or the import
+                would go over ``standalone_file_limit``.
 
         Example::
 
@@ -836,6 +902,7 @@ class RefgetStore:
         jobs: int = 0,
         force: bool = False,
         namespaces: Optional[List[str]] = None,
+        standalone_file_limit: Optional[int] = None,
     ) -> ImportReport:
         """Import multiple FASTA files into the store.
 
@@ -854,6 +921,11 @@ class RefgetStore:
             jobs: Number of files imported concurrently (0 = auto, 1 = serial).
             force: If True, overwrite existing collections/sequences.
             namespaces: Optional namespace prefixes to extract aliases from headers.
+            standalone_file_limit: Most ``.seq`` files a standard on-disk
+                store may hold after the import. None means the default,
+                500,000. The import stops before writing anything if it would
+                go over. 0 is not special; pass a large number to lift the
+                limit. ``force`` does not skip it. Packed stores ignore it.
 
         Returns:
             An :class:`ImportReport`. ``report.collections`` is a list of
@@ -1396,18 +1468,20 @@ class RefgetStore:
         collection_digest: str,
         bed_file_path: Union[str, PathLike],
         output_file_path: Union[str, PathLike],
-        label: str = "{seq}",
+        label: str = "{name}",
     ) -> Dict[str, int]:
         """Export sequences from BED file regions to a FASTA file.
 
         Writes one record per region, labeled by ``label`` (see
-        ``export_fasta``) with ``:start-end`` appended.
+        ``export_fasta``) with ``:start-end`` appended. The default label is
+        the sequence name, so headers look like ``>chr1:0-10``.
 
         Args:
             collection_digest: The collection's SHA-512/24u digest.
             bed_file_path: Path to BED file defining regions.
             output_file_path: Path to write the output FASTA file; "-" writes to stdout.
-            label: Label template (default "{seq}").
+            label: Label template (default "{name}"). Pass "{seq}" to label
+                regions by sequence digest.
 
         Returns:
             Summary counts: n_records, n_bases, n_fallbacks, n_deduplicated.
@@ -1422,7 +1496,6 @@ class RefgetStore:
                 "uC_UorBNf3YUu1YIDainBhI94CedlNeH",
                 "regions.bed",
                 "output.fa",
-                label="name",
             )
         """
         ...
@@ -1464,7 +1537,7 @@ class RefgetStore:
         all: bool = False,
         label: str = "{seq}",
         molecule: Optional[Literal["dna", "protein"]] = None,
-        line_width: Optional[int] = None,
+        line_width: int = 80,
         write_cache: bool = False,
     ) -> Dict[str, Any]:
         """Export sequences as FASTA, to a file or to stdout.
@@ -1479,10 +1552,10 @@ class RefgetStore:
         default), ``{seq:NS}`` the sequence's alias in namespace NS, ``{col}``
         collection digest, ``{col:NS}`` the collection's alias in namespace
         NS, ``{name}`` the sequence's name in its collection. Literal text is
-        copied as-is; a single field may drop its braces (``"name"``). A
-        missing alias falls back to the digest; records with no collection get
-        ``{seq}``. The same label for the same sequence is written once; the
-        same label for different sequences raises ValueError before any output.
+        copied as-is. A missing alias falls back to the digest; records with
+        no collection get ``{seq}``. The same label for the same sequence is
+        written once; the same label for different sequences raises ValueError
+        before any output.
 
         Args:
             output_path: FASTA path ('.gz' compresses); "-" writes to stdout.
@@ -1507,7 +1580,7 @@ class RefgetStore:
 
         Example::
 
-            store.export_fasta("hg38.fa", collections=[digest], label="name")
+            store.export_fasta("hg38.fa", collections=[digest], label="{name}")
             store.export_fasta("-", all=True)
             store.export_fasta("all.fa", all=True, label="{col:ucsc}/{name}")
         """

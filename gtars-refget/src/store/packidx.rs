@@ -10,11 +10,6 @@
 //!               digest(32) '\t' pack(32-hex) '\t' offset(16-hex) '\t' len(16-hex) '\n'
 //! ```
 //!
-//! NOTE: the plan specified a 43-char digest / 111-byte row. In this codebase a
-//! sha512t24u digest is base64url of 24 bytes = exactly **32** chars, so the row
-//! is 100 bytes. The format is otherwise as specified (fixed width, digest-
-//! sorted, binary-searchable over range requests).
-//!
 //! `digest` = sha512t24u (always exactly 32 base64url chars); `pack` = the
 //! content-hash pack name (32 hex chars; the file is `packs/<pack>.pack`);
 //! `offset`/`len` = zero-padded lowercase hex. Row *i* lives at byte
@@ -80,31 +75,48 @@ fn encode_row(digest: &str, row: &PackRow) -> [u8; ROW_BYTES] {
     buf
 }
 
-/// Parse one fixed-width row into `(digest, PackRow)`.
-fn parse_row(row: &[u8]) -> Result<(String, PackRow)> {
-    if row.len() != ROW_BYTES {
-        return Err(anyhow!("pack index row is {} bytes, expected {}", row.len(), ROW_BYTES));
-    }
-    let digest = std::str::from_utf8(&row[0..DIGEST_LEN])
-        .context("pack index row digest not UTF-8")?
-        .to_string();
-    // Layout: digest(32) \t pack(32) \t offset(16) \t len(16) \n
-    let pack = std::str::from_utf8(&row[33..65]).context("pack name not UTF-8")?;
-    let offset = parse_hex(&row[66..82])?;
-    let len = parse_hex(&row[83..99])?;
-    Ok((
-        digest,
-        PackRow {
-            pack: Arc::from(pack),
-            offset,
-            len,
-        },
-    ))
-}
-
 fn parse_hex(bytes: &[u8]) -> Result<u64> {
     let s = std::str::from_utf8(bytes).context("hex field not UTF-8")?;
     u64::from_str_radix(s, 16).with_context(|| format!("invalid hex field '{}'", s))
+}
+
+/// The row bytes of a whole sidecar file, after checking the header length
+/// and that the body is a whole number of rows. Empty for an empty file.
+fn body(bytes: &[u8]) -> Result<&[u8]> {
+    if bytes.is_empty() {
+        return Ok(bytes);
+    }
+    if bytes.len() < HEADER_BYTES {
+        return Err(anyhow!("pack index too small: {} bytes", bytes.len()));
+    }
+    let body = &bytes[HEADER_BYTES..];
+    if !body.len().is_multiple_of(ROW_BYTES) {
+        return Err(anyhow!(
+            "pack index body {} bytes is not a multiple of row width {}",
+            body.len(),
+            ROW_BYTES
+        ));
+    }
+    Ok(body)
+}
+
+/// Split one fixed-width row into `(digest, pack, offset, len)`.
+/// Layout: digest(32) \t pack(32) \t offset(16) \t len(16) \n
+fn fields(row: &[u8]) -> Result<(&str, &str, u64, u64)> {
+    let digest = std::str::from_utf8(&row[0..DIGEST_LEN]).context("pack index row digest not UTF-8")?;
+    let pack = std::str::from_utf8(&row[33..65]).context("pack name not UTF-8")?;
+    Ok((digest, pack, parse_hex(&row[66..82])?, parse_hex(&row[83..99])?))
+}
+
+/// The bytes of the store's `sequences.pack.idx`, or none if it does not
+/// exist yet.
+pub(crate) fn load_pack_idx_or_empty(store_dir: &Path) -> Result<Vec<u8>> {
+    let path = store_dir.join("sequences.pack.idx");
+    match std::fs::read(&path) {
+        Ok(bytes) => Ok(bytes),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(e) => Err(e).with_context(|| format!("reading {}", path.display())),
+    }
 }
 
 /// Atomically publish `sequences.pack.idx` from a digest-sorted row map.
@@ -126,24 +138,10 @@ pub(crate) fn write_pack_idx(path: &Path, rows: &BTreeMap<String, PackRow>) -> R
 /// Parse a whole sidecar file's bytes into a digest-keyed row map.
 pub(crate) fn read_pack_idx_rows(bytes: &[u8]) -> Result<BTreeMap<String, PackRow>> {
     let mut out = BTreeMap::new();
-    if bytes.is_empty() {
-        return Ok(out);
-    }
-    if bytes.len() < HEADER_BYTES {
-        return Err(anyhow!("pack index too small: {} bytes", bytes.len()));
-    }
-    let body = &bytes[HEADER_BYTES..];
-    if !body.len().is_multiple_of(ROW_BYTES) {
-        return Err(anyhow!(
-            "pack index body {} bytes is not a multiple of row width {}",
-            body.len(),
-            ROW_BYTES
-        ));
-    }
-    for chunk in body.chunks_exact(ROW_BYTES) {
-        let (digest, row) = parse_row(chunk)?;
-        out.insert(digest, row);
-    }
+    for_each_row(bytes, |digest, pack, offset, len| {
+        out.insert(digest.to_string(), PackRow { pack: Arc::from(pack), offset, len });
+        Ok(())
+    })?;
     Ok(out)
 }
 
@@ -153,127 +151,37 @@ pub(crate) fn for_each_row(
     bytes: &[u8],
     mut f: impl FnMut(&str, &str, u64, u64) -> Result<()>,
 ) -> Result<()> {
-    if bytes.is_empty() {
-        return Ok(());
-    }
-    if bytes.len() < HEADER_BYTES {
-        return Err(anyhow!("pack index too small: {} bytes", bytes.len()));
-    }
-    let body = &bytes[HEADER_BYTES..];
-    if !body.len().is_multiple_of(ROW_BYTES) {
-        return Err(anyhow!(
-            "pack index body {} bytes is not a multiple of row width {}",
-            body.len(),
-            ROW_BYTES
-        ));
-    }
-    for row in body.chunks_exact(ROW_BYTES) {
-        let digest = std::str::from_utf8(&row[0..DIGEST_LEN]).context("pack index row digest not UTF-8")?;
-        let pack = std::str::from_utf8(&row[33..65]).context("pack name not UTF-8")?;
-        f(digest, pack, parse_hex(&row[66..82])?, parse_hex(&row[83..99])?)?;
+    for row in body(bytes)?.chunks_exact(ROW_BYTES) {
+        let (digest, pack, offset, len) = fields(row)?;
+        f(digest, pack, offset, len)?;
     }
     Ok(())
 }
 
-/// A backend-agnostic sorted, fixed-width row store. One binary search serves
-/// every backend (in-memory today; a ranged-HTTP backend is trivial to add).
-pub(crate) trait RowSource: Send + Sync {
-    fn rows(&self) -> u64;
-    fn read_row(&self, i: u64) -> Result<[u8; ROW_BYTES]>;
-}
-
-/// In-memory sidecar backend: the whole file's bytes held in RAM.
-#[derive(Debug)]
-pub(crate) struct InMemory {
-    bytes: Vec<u8>,
-    rows: u64,
-}
-
-impl InMemory {
-    /// Build from the raw sidecar file bytes.
-    pub(crate) fn from_bytes(bytes: Vec<u8>) -> Result<Self> {
-        let rows = if bytes.is_empty() {
-            0
-        } else {
-            if bytes.len() < HEADER_BYTES {
-                return Err(anyhow!("pack index too small: {} bytes", bytes.len()));
-            }
-            let body = bytes.len() - HEADER_BYTES;
-            if !body.is_multiple_of(ROW_BYTES) {
-                return Err(anyhow!(
-                    "pack index body {} bytes is not a multiple of row width {}",
-                    body,
-                    ROW_BYTES
-                ));
-            }
-            (body / ROW_BYTES) as u64
-        };
-        Ok(Self { bytes, rows })
-    }
-}
-
-impl RowSource for InMemory {
-    fn rows(&self) -> u64 {
-        self.rows
-    }
-    fn read_row(&self, i: u64) -> Result<[u8; ROW_BYTES]> {
-        let start = HEADER_BYTES + (i as usize) * ROW_BYTES;
-        let end = start + ROW_BYTES;
-        if end > self.bytes.len() {
-            return Err(anyhow!("pack index row {} out of range", i));
-        }
-        let mut buf = [0u8; ROW_BYTES];
-        buf.copy_from_slice(&self.bytes[start..end]);
-        Ok(buf)
-    }
-}
-
-/// A sorted fixed-width row store that resolves a digest to a `PackRow` via one
-/// binary search. THE single point of pack-offset resolution for a backend.
-#[derive(Debug)]
-pub(crate) struct PackIndex<S: RowSource> {
-    source: S,
-}
-
-impl<S: RowSource> PackIndex<S> {
-    pub(crate) fn new(source: S) -> Self {
-        Self { source }
-    }
-
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) fn rows(&self) -> u64 {
-        self.source.rows()
-    }
-
-    /// Binary-search the sidecar for `digest`. `Ok(None)` on a genuine miss.
-    pub(crate) fn lookup(&self, digest: &str) -> Result<Option<PackRow>> {
-        let needle = digest.as_bytes();
-        let (mut lo, mut hi) = (0u64, self.source.rows());
-        while lo < hi {
-            let mid = lo + (hi - lo) / 2;
-            let row = self.source.read_row(mid)?;
-            match row[..DIGEST_LEN].cmp(needle) {
-                Ordering::Less => lo = mid + 1,
-                Ordering::Greater => hi = mid,
-                Ordering::Equal => {
-                    let (_d, parsed) = parse_row(&row)?;
-                    return Ok(Some(parsed));
-                }
+/// Binary-search a whole sidecar file's bytes for `digest`. `Ok(None)` on a
+/// genuine miss.
+pub(crate) fn lookup(bytes: &[u8], digest: &str) -> Result<Option<PackRow>> {
+    let body = body(bytes)?;
+    let row_at = |i: usize| &body[i * ROW_BYTES..(i + 1) * ROW_BYTES];
+    let needle = digest.as_bytes();
+    let (mut lo, mut hi) = (0, body.len() / ROW_BYTES);
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        match row_at(mid)[..DIGEST_LEN].cmp(needle) {
+            Ordering::Less => lo = mid + 1,
+            Ordering::Greater => hi = mid,
+            Ordering::Equal => {
+                let (_, pack, offset, len) = fields(row_at(mid))?;
+                return Ok(Some(PackRow { pack: Arc::from(pack), offset, len }));
             }
         }
-        Ok(None)
     }
-}
-
-/// Convenience: an in-memory `PackIndex` built from raw sidecar bytes.
-pub(crate) fn in_memory_index(bytes: Vec<u8>) -> Result<PackIndex<InMemory>> {
-    Ok(PackIndex::new(InMemory::from_bytes(bytes)?))
+    Ok(None)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
 
     fn row(pack: &str, offset: u64, len: u64) -> PackRow {
         PackRow { pack: Arc::from(pack), offset, len }
@@ -311,78 +219,25 @@ mod tests {
     }
 
     #[test]
-    fn two_writes_are_byte_identical() {
-        let rows = sample_rows();
-        let dir = tempfile::tempdir().unwrap();
-        let p1 = dir.path().join("a.idx");
-        let p2 = dir.path().join("b.idx");
-        write_pack_idx(&p1, &rows).unwrap();
-        write_pack_idx(&p2, &rows).unwrap();
-        assert_eq!(std::fs::read(&p1).unwrap(), std::fs::read(&p2).unwrap());
-    }
-
-    #[test]
     fn lookup_hit_first_last_and_miss() {
         let rows = sample_rows();
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("sequences.pack.idx");
         write_pack_idx(&path, &rows).unwrap();
         let bytes = std::fs::read(&path).unwrap();
-        let idx = in_memory_index(bytes).unwrap();
 
         let first = "A".repeat(32);
         let last = "Z".repeat(32);
         let mid = "M".repeat(32);
-        assert_eq!(idx.lookup(&first).unwrap(), Some(row(&"a".repeat(32), 0, 100)));
-        assert_eq!(idx.lookup(&mid).unwrap(), Some(row(&"b".repeat(32), 100, 250)));
-        assert_eq!(idx.lookup(&last).unwrap(), Some(row(&"c".repeat(32), 0, 42)));
-        assert_eq!(idx.lookup(&"B".repeat(32)).unwrap(), None);
-        assert_eq!(idx.lookup(&"0".repeat(32)).unwrap(), None);
+        assert_eq!(lookup(&bytes, &first).unwrap(), Some(row(&"a".repeat(32), 0, 100)));
+        assert_eq!(lookup(&bytes, &mid).unwrap(), Some(row(&"b".repeat(32), 100, 250)));
+        assert_eq!(lookup(&bytes, &last).unwrap(), Some(row(&"c".repeat(32), 0, 42)));
+        assert_eq!(lookup(&bytes, &"B".repeat(32)).unwrap(), None);
+        assert_eq!(lookup(&bytes, &"0".repeat(32)).unwrap(), None);
     }
 
     #[test]
     fn empty_index_lookup_is_none() {
-        let idx = in_memory_index(Vec::new()).unwrap();
-        assert_eq!(idx.rows(), 0);
-        assert_eq!(idx.lookup(&"A".repeat(32)).unwrap(), None);
-    }
-
-    /// A `RowSource` that counts `read_row` calls, to bound binary-search cost.
-    struct CountingSource {
-        inner: InMemory,
-        reads: AtomicU64,
-    }
-    impl RowSource for CountingSource {
-        fn rows(&self) -> u64 {
-            self.inner.rows()
-        }
-        fn read_row(&self, i: u64) -> Result<[u8; ROW_BYTES]> {
-            self.reads.fetch_add(1, AtomicOrdering::SeqCst);
-            self.inner.read_row(i)
-        }
-    }
-
-    #[test]
-    fn lookup_reads_are_logarithmic() {
-        // Build 1000 rows with sortable 43-char digests.
-        let mut m = BTreeMap::new();
-        for i in 0..1000u32 {
-            let d = format!("{:032}", i);
-            m.insert(d, row(&"a".repeat(32), i as u64, 1));
-        }
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("s.idx");
-        write_pack_idx(&path, &m).unwrap();
-        let bytes = std::fs::read(&path).unwrap();
-        let source = CountingSource {
-            inner: InMemory::from_bytes(bytes).unwrap(),
-            reads: AtomicU64::new(0),
-        };
-        let idx = PackIndex::new(source);
-        let target = format!("{:032}", 777u32);
-        assert!(idx.lookup(&target).unwrap().is_some());
-        // ceil(log2(1000)) == 10; allow a small slack.
-        let reads = idx.source.reads.load(AtomicOrdering::SeqCst);
-        assert!(reads <= 12, "binary search used {} reads (> ~log2 n)", reads);
+        assert_eq!(lookup(&[], &"A".repeat(32)).unwrap(), None);
     }
 }

@@ -1,11 +1,6 @@
 //! Columnar store catalog: every sequence, membership and collection fact the
-//! store keeps in RAM, each stored once.
-//!
-//! The old catalog was an object graph: an owned `SequenceRecord` per sequence
-//! in a global map, a second owned copy per collection member, a third copy of
-//! each name in a per-collection name map, digests stored as zero-padded text,
-//! and every copy a separate heap allocation inside a hash table. This module
-//! replaces it with plain columns and `u32` row numbers.
+//! store keeps in RAM, each stored once, as plain columns indexed by `u32` row
+//! numbers.
 //!
 //! Three row spaces:
 //! - **sequence rows** ([`SeqRow`]): one per unique sequence (by sha512t24u).
@@ -30,6 +25,7 @@ use anyhow::{Result, anyhow};
 use hashbrown::{HashMap, HashTable};
 
 use crate::digest::raw::{Digest32, RawMd5, RawSha, md5_to_raw, raw_to_md5, raw_to_sha, sha_to_raw};
+use crate::digest::types::RgsiFields;
 use crate::digest::{AlphabetType, FaiMetadata, SequenceCollectionMetadata, SequenceMetadata};
 
 pub(crate) type SeqRow = u32;
@@ -76,12 +72,9 @@ fn trim_nul(d: &[u8]) -> &[u8] {
     &d[..end]
 }
 
-fn hash_sha(raw: &RawSha) -> u64 {
-    // sha512t24u bytes are uniformly distributed already.
-    u64::from_le_bytes(raw[..8].try_into().unwrap())
-}
-
-fn hash_md5(raw: &RawMd5) -> u64 {
+/// Table hash of a raw digest: its first 8 bytes, which are uniformly
+/// distributed already.
+fn hash_raw(raw: &[u8]) -> u64 {
     u64::from_le_bytes(raw[..8].try_into().unwrap())
 }
 
@@ -92,16 +85,6 @@ pub(crate) struct SeqCore {
     pub(crate) sha512t24u: Digest32,
     pub(crate) length: usize,
     pub(crate) alphabet: AlphabetType,
-}
-
-/// Borrowed columns of one sequence, as handed to [`Catalog::add_sequence_parts`].
-pub(crate) struct SeqParts<'a> {
-    pub(crate) name: &'a str,
-    pub(crate) description: Option<&'a str>,
-    pub(crate) length: usize,
-    pub(crate) alphabet: AlphabetType,
-    pub(crate) sha512t24u: &'a str,
-    pub(crate) md5: &'a str,
 }
 
 /// One member of a collection, as handed to [`Catalog::set_members`].
@@ -135,7 +118,6 @@ pub(crate) struct Catalog {
     member_name_len: Vec<u32>,
     member_desc: hashbrown::HashMap<MemberRow, Box<str>>,
     member_fai: hashbrown::HashMap<MemberRow, FaiMetadata>,
-    member_dead: Bits,
     n_dead_members: usize,
 
     /// One shared arena of all sequence and member names. A member whose name
@@ -155,7 +137,7 @@ pub(crate) struct Catalog {
     by_md5: HashTable<SeqRow>,
     by_coll: HashTable<CollRow>,
     /// Key = (collection row, member name). Points at the LAST member with that
-    /// name, matching the old `IndexMap::insert` overwrite semantics.
+    /// name, so a repeated name resolves to the later member.
     by_name: HashTable<MemberRow>,
     hasher: hashbrown::DefaultHashBuilder,
 }
@@ -207,7 +189,7 @@ impl Catalog {
 
     pub(crate) fn find_sha_raw(&self, raw: &RawSha) -> Option<SeqRow> {
         self.by_sha
-            .find(hash_sha(raw), |&r| &self.sha[r as usize] == raw)
+            .find(hash_raw(raw), |&r| &self.sha[r as usize] == raw)
             .copied()
     }
 
@@ -215,12 +197,11 @@ impl Catalog {
     pub(crate) fn find_md5(&self, digest: impl AsRef<[u8]>) -> Option<SeqRow> {
         let raw = md5_to_raw(trim_nul(digest.as_ref()))?;
         self.by_md5
-            .find(hash_md5(&raw), |&r| self.md5[r as usize] == raw)
+            .find(hash_raw(&raw), |&r| self.md5[r as usize] == raw)
             .copied()
     }
 
-    /// Resolve either digest kind: MD5 first (as the old `md5_lookup` fallback
-    /// did), then sha512t24u.
+    /// Resolve either digest kind: MD5 first, then sha512t24u.
     pub(crate) fn resolve(&self, digest: impl AsRef<[u8]>) -> Option<SeqRow> {
         let d = digest.as_ref();
         self.find_md5(d).or_else(|| self.find_sha(d))
@@ -230,7 +211,7 @@ impl Catalog {
     /// whether it was newly inserted. A dedup hit leaves the existing row
     /// untouched.
     pub(crate) fn add_sequence(&mut self, meta: &SequenceMetadata) -> Result<(SeqRow, bool)> {
-        let (row, new) = self.add_sequence_parts(SeqParts {
+        let (row, new) = self.add_sequence_parts(RgsiFields {
             name: &meta.name,
             description: meta.description.as_deref(),
             length: meta.length,
@@ -248,7 +229,7 @@ impl Catalog {
 
     /// [`add_sequence`](Self::add_sequence) from borrowed columns, so index
     /// parsers append without building a `SequenceMetadata` per line.
-    pub(crate) fn add_sequence_parts(&mut self, p: SeqParts<'_>) -> Result<(SeqRow, bool)> {
+    pub(crate) fn add_sequence_parts(&mut self, p: RgsiFields<'_>) -> Result<(SeqRow, bool)> {
         let sha = sha_to_raw(p.sha512t24u)
             .ok_or_else(|| anyhow!("invalid sha512t24u digest: {:?}", p.sha512t24u))?;
         if let Some(row) = self.find_sha_raw(&sha) {
@@ -274,18 +255,18 @@ impl Catalog {
 
     fn index_seq(&mut self, row: SeqRow) {
         let Self { sha, md5, by_sha, by_md5, .. } = self;
-        by_sha.insert_unique(hash_sha(&sha[row as usize]), row, |&r| hash_sha(&sha[r as usize]));
+        by_sha.insert_unique(hash_raw(&sha[row as usize]), row, |&r| hash_raw(&sha[r as usize]));
         // An MD5 shared by two sha rows cannot happen for real data; keep the
         // first, like a HashMap insert keyed by md5 would keep the last. Either
         // way lookups stay well defined.
         let m = md5[row as usize];
-        if by_md5.find(hash_md5(&m), |&r| md5[r as usize] == m).is_none() {
-            by_md5.insert_unique(hash_md5(&m), row, |&r| hash_md5(&md5[r as usize]));
+        if by_md5.find(hash_raw(&m), |&r| md5[r as usize] == m).is_none() {
+            by_md5.insert_unique(hash_raw(&m), row, |&r| hash_raw(&md5[r as usize]));
         }
     }
 
     /// Replace a sequence's store-wide label (name, description, FAI). Used by
-    /// forced re-adds, which overwrote the old global record.
+    /// forced re-adds.
     pub(crate) fn set_sequence_label(&mut self, row: SeqRow, meta: &SequenceMetadata) -> Result<()> {
         let (off, len) = self.push_name(&meta.name)?;
         self.seq_name_off[row as usize] = off;
@@ -317,10 +298,10 @@ impl Catalog {
             return;
         }
         let Self { sha, md5, by_sha, by_md5, .. } = self;
-        if let Ok(e) = by_sha.find_entry(hash_sha(&sha[i]), |&r| r == row) {
+        if let Ok(e) = by_sha.find_entry(hash_raw(&sha[i]), |&r| r == row) {
             e.remove();
         }
-        if let Ok(e) = by_md5.find_entry(hash_md5(&md5[i]), |&r| r == row) {
+        if let Ok(e) = by_md5.find_entry(hash_raw(&md5[i]), |&r| r == row) {
             e.remove();
         }
         self.seq_desc.remove(&row);
@@ -338,7 +319,7 @@ impl Catalog {
         (0..self.sha.len() as u32).filter(move |&r| !self.seq_dead.get(r as usize))
     }
 
-    #[cfg(test)]
+    /// Number of loaded collection members that point at this sequence.
     pub(crate) fn seq_refcount(&self, row: SeqRow) -> u32 {
         self.seq_refcount[row as usize]
     }
@@ -421,7 +402,6 @@ impl Catalog {
         self.member_coll.push(coll);
         self.member_name_off.push(off);
         self.member_name_len.push(len);
-        self.member_dead.push(false);
         if let Some(d) = m.description {
             self.member_desc.insert(row, d.into());
         }
@@ -485,7 +465,6 @@ impl Catalog {
             self.member_fai.remove(&row);
             let s = self.member_seq[row as usize] as usize;
             self.seq_refcount[s] = self.seq_refcount[s].saturating_sub(1);
-            self.member_dead.set(row as usize, true);
             self.n_dead_members += 1;
         }
         self.coll_len[coll as usize] = 0;
@@ -581,7 +560,6 @@ impl Catalog {
         self.member_name_len.shrink_to_fit();
         self.member_desc.shrink_to_fit();
         self.member_fai.shrink_to_fit();
-        self.member_dead.shrink_to_fit();
         self.names.shrink_to_fit();
         self.coll_meta.shrink_to_fit();
         self.coll_start.shrink_to_fit();
@@ -727,15 +705,9 @@ impl<'a> SeqView<'a> {
         self.cat.name_at(self.cat.seq_name_off[i], self.cat.seq_name_len[i])
     }
     pub fn description(&self) -> Option<&'a str> {
-        if self.cat.seq_desc.is_empty() {
-            return None;
-        }
         self.cat.seq_desc.get(&self.row).map(|d| &**d)
     }
     pub fn fai(&self) -> Option<&'a FaiMetadata> {
-        if self.cat.seq_fai.is_empty() {
-            return None;
-        }
         self.cat.seq_fai.get(&self.row)
     }
     /// Stored size of this sequence's bytes under `mode` (see
@@ -795,16 +767,10 @@ impl<'a> MemberView<'a> {
         self.cat.name_at(self.cat.member_name_off[i], self.cat.member_name_len[i])
     }
     pub fn description(&self) -> Option<&'a str> {
-        if self.cat.member_desc.is_empty() {
-            return None;
-        }
         self.cat.member_desc.get(&self.row).map(|d| &**d)
     }
     /// This member's own FAI record (from its FASTA), if any.
     pub(crate) fn own_fai(&self) -> Option<&'a FaiMetadata> {
-        if self.cat.member_fai.is_empty() {
-            return None;
-        }
         self.cat.member_fai.get(&self.row)
     }
     /// FAI for this member, falling back to the sequence's store-wide record.

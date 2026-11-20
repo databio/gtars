@@ -88,9 +88,6 @@ required-features = ["filesystem"]
 [[example]]
 name = "perf_task"
 required-features = ["filesystem"]
-[[example]]
-name = "catalog_memory"
-required-features = ["filesystem"]
 
 [[example]]
 name = "open_rss"

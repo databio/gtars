@@ -1,22 +1,22 @@
-//! A coalescing block cache over pack files.
+//! An optional coalescing block cache over local pack files, off by default
+//! (see `ReadonlyRefgetStore::set_pack_cache_mb`).
 //!
-//! Pack files are read through a bounded LRU of fixed-size, block-aligned chunks
-//! shared across every pack of a store. This cache — not the pack layout alone —
-//! is what collapses a 10K-region batch extraction from ~10K positioned reads to
-//! a few dozen: overlapping and adjacent regions land in the same 1 MiB block,
-//! and a run of missing blocks is fetched with ONE call to the backend (a single
-//! `pread` locally, a single HTTP `Range` remotely).
+//! When on, local pack reads go through a bounded LRU of fixed-size,
+//! block-aligned chunks shared across every pack of a store. Overlapping and
+//! adjacent regions land in the same 1 MiB block, and a run of missing blocks
+//! is fetched with ONE positional read, so a clustered batch extraction makes
+//! a few dozen reads instead of one per region. That helps on a cold network
+//! file system; scattered reads on a store larger than the cache get slower,
+//! since each small read pulls a whole block. Remote (HTTP range) reads do not
+//! use it.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{anyhow, Result};
 
-/// Default aligned block size: 1 MiB.
+/// Aligned block size: 1 MiB.
 pub(crate) const PACK_BLOCK_SIZE: u64 = 1 << 20;
-
-/// Default cache capacity in blocks (128 MiB at the default block size).
-pub(crate) const DEFAULT_PACK_CACHE_BLOCKS: usize = 128;
 
 /// A bounded LRU of block-aligned pack chunks.
 ///

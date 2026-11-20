@@ -32,7 +32,7 @@ def test_export_fasta_names_and_label(tmp_path):
     digest = _collection(store, tmp_path / "a.fa", ">chr1\nACGT\n>chr2\nGGCC\n")
 
     out_path = tmp_path / "out_names.fa"
-    store.export_fasta(out_path, collections=[digest], names=["chr1"], label="name", line_width=2)
+    store.export_fasta(out_path, collections=[digest], names=["chr1"], label="{name}", line_width=2)
 
     assert out_path.read_text() == ">chr1\nAC\nGT\n"
 
@@ -53,7 +53,7 @@ def test_export_fasta_seq_digests_and_all(tmp_path):
     summary = store.export_fasta(str(out_path), all=True, label="{col}/{name}")
     assert summary["n_records"] == 3
 
-    summary = store.export_fasta(str(out_path), all=True, label="name")
+    summary = store.export_fasta(str(out_path), all=True, label="{name}")
     assert summary["n_deduplicated"] == 1
 
 
@@ -69,11 +69,11 @@ def test_export_fasta_bad_inputs_raise_value_error(tmp_path):
     with pytest.raises(ValueError, match="unknown field"):
         store.export_fasta(out, collections=digest, label="{nope}")
     with pytest.raises(ValueError, match="namespace"):
-        store.export_fasta(out, collections=digest, label="seq:nope")
+        store.export_fasta(out, collections=digest, label="{seq:nope}")
     with pytest.raises(ValueError, match="molecule"):
         store.export_fasta(out, collections=digest, molecule="rna")
     with pytest.raises(ValueError, match="two different sequences"):
-        store.export_fasta(out, collections=digest, label="name")
+        store.export_fasta(out, collections=digest, label="{name}")
 
 
 def test_export_fasta_from_regions_label(tmp_path):
@@ -83,7 +83,12 @@ def test_export_fasta_from_regions_label(tmp_path):
     bed.write_text("chr1\t2\t6\n")
     out = tmp_path / "r.fa"
 
-    summary = store.export_fasta_from_regions(digest, str(bed), str(out), label="name")
+    # The default label is the sequence name.
+    summary = store.export_fasta_from_regions(digest, str(bed), str(out))
 
     assert out.read_text() == ">chr1:2-6\nGTAC\n"
     assert summary["n_records"] == 1
+
+    store.export_fasta_from_regions(digest, str(bed), str(out), label="{seq}")
+    sha = store.get_collection(digest).sequences[0].metadata.sha512t24u
+    assert out.read_text() == f">SQ.{sha}:2-6\nGTAC\n"

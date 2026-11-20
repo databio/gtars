@@ -3,13 +3,12 @@
 //! Exports stream records in order: a prefetch reads each record's stored
 //! bytes (from RAM, a local `.seq` file, the shared cache, or the remote store,
 //! many at once) ahead of the writer, within a fixed memory budget (1 GiB),
-//! and the writer decodes them in chunks. An export never loads sequences into the store, and
-//! writes downloaded `.seq` files to the shared cache only with
+//! and the writer decodes them in chunks. An export never loads sequences into
+//! the store, and writes downloaded `.seq` files to the shared cache only with
 //! [`ExportOptions::write_cache`].
 
 use super::*;
-use super::label::{label_err, AliasMaps, LabelObject, LabelTemplate};
-use super::catalog::SeqView;
+use super::label::{invert, label_err, AliasIndex, LabelTemplate};
 use super::readonly::ReadonlyRefgetStore;
 use super::fetch::FetchCounters;
 use super::prefetch::{PrefetchOptions, PrefetchOrder, DEFAULT_MEMORY_BUDGET};
@@ -29,7 +28,8 @@ use gtars_core::utils::get_file_info;
 use crate::digest::{
     AlphabetType, SequenceMetadata, decode_substring_from_bytes, lookup_alphabet, strip_sq_prefix,
 };
-use crate::hashkeyable::{DigestKey, HashKeyable, key_to_digest_string};
+use super::catalog::SeqRow;
+use crate::hashkeyable::HashKeyable;
 
 /// Bases decoded per chunk when streaming a record.
 pub(crate) const EXPORT_CHUNK_BASES: usize = 1 << 20;
@@ -113,17 +113,23 @@ impl std::str::FromStr for Molecule {
 }
 
 /// How an export labels and formats its records.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ExportOptions {
     /// Label template; default `{seq}`.
     pub label: LabelTemplate,
     /// Keep only sequences of this molecule type.
     pub molecule: Option<Molecule>,
-    /// Bases per line: `None` is 80, `Some(0)` writes each sequence on one line.
-    pub line_width: Option<usize>,
+    /// Bases per line, default 80; `0` writes each sequence on one line.
+    pub line_width: usize,
     /// Publish sequences downloaded from a remote store to the shared cache,
     /// so an interrupted export can resume without downloading them again.
     pub write_cache: bool,
+}
+
+impl Default for ExportOptions {
+    fn default() -> Self {
+        Self { label: LabelTemplate::default(), molecule: None, line_width: 80, write_cache: false }
+    }
 }
 
 /// Counts reported by an export.
@@ -258,13 +264,12 @@ pub(crate) fn write_fasta_record(
 /// One record to write: its label and the sequence behind it.
 struct PlannedRecord {
     label: String,
-    key: DigestKey,
+    row: SeqRow,
 }
 
 /// A record before labeling: the sequence plus how it was reached.
 struct Candidate<'a> {
-    key: DigestKey,
-    meta: SeqView<'a>,
+    row: SeqRow,
     /// `(collection digest, sequence name)` when reached through a collection.
     collection: Option<(String, &'a str)>,
 }
@@ -502,35 +507,38 @@ impl ReadonlyRefgetStore {
         })
     }
 
-    /// Digest -> alias maps for every namespace `label` uses, after checking
-    /// each namespace exists in this store.
-    pub(crate) fn label_alias_maps(&self, label: &LabelTemplate) -> Result<AliasMaps> {
-        let mut maps = AliasMaps::default();
-        let seq_namespaces = self.aliases.sequence_namespaces();
-        for ns in label.namespaces(LabelObject::Seq) {
-            if !seq_namespaces.contains(&ns) {
+    /// Digest -> alias maps for every sequence and collection namespace
+    /// `label` uses, after checking each namespace exists in this store.
+    pub(crate) fn label_alias_maps(&self, label: &LabelTemplate) -> Result<(AliasIndex, AliasIndex)> {
+        Ok((
+            self.label_aliases(label, AliasKind::Sequence)?,
+            self.label_aliases(label, AliasKind::Collection)?,
+        ))
+    }
+
+    /// [`Self::label_alias_maps`] for the namespaces of one alias kind.
+    fn label_aliases(&self, label: &LabelTemplate, kind: AliasKind) -> Result<AliasIndex> {
+        let what = match kind {
+            AliasKind::Sequence => "sequence",
+            AliasKind::Collection => "collection",
+        };
+        let available = self.aliases.namespaces_for(kind);
+        let mut out = AliasIndex::new();
+        for ns in label.namespaces(kind) {
+            if !available.contains(&ns) {
                 return Err(label_err!(
-                    "Unknown sequence-alias namespace '{}' in label '{}'. This store's sequence-alias namespaces: {}",
+                    "Unknown {}-alias namespace '{}' in label '{}'. This store's {}-alias namespaces: {}",
+                    what,
                     ns,
                     label,
-                    list_or_none(&seq_namespaces)
+                    what,
+                    list_or_none(&available)
                 ));
             }
-            maps.add_sequence_namespace(&ns, self.aliases.namespace_map(AliasKind::Sequence, &ns));
+            let map = invert(self.aliases.namespace_map(kind, &ns));
+            out.insert(ns, map);
         }
-        let col_namespaces = self.aliases.collection_namespaces();
-        for ns in label.namespaces(LabelObject::Col) {
-            if !col_namespaces.contains(&ns) {
-                return Err(label_err!(
-                    "Unknown collection-alias namespace '{}' in label '{}'. This store's collection-alias namespaces: {}",
-                    ns,
-                    label,
-                    list_or_none(&col_namespaces)
-                ));
-            }
-            maps.add_collection_namespace(&ns, self.aliases.namespace_map(AliasKind::Collection, &ns));
-        }
-        Ok(maps)
+        Ok(out)
     }
 
     /// Export sequences from BED file regions to a FASTA file.
@@ -545,17 +553,22 @@ impl ReadonlyRefgetStore {
         output_file_path: &str,
         label: &LabelTemplate,
     ) -> Result<ExportSummary> {
-        let collection_str = self
-            .loaded_coll_row(collection_digest.as_ref())
-            .map(|c| self.catalog.coll_meta(c).digest.clone())?;
+        let coll = self.loaded_coll_row(collection_digest.as_ref())?;
+        let collection_str = self.catalog.coll_meta(coll).digest.clone();
         let maps = self.label_alias_maps(label)?;
 
-        // Label each name once, from this collection's own records. A repeated
-        // name keeps its last record, as the region lookup does.
+        // Label each name once, from the member the region lookup resolves the
+        // name to (`member_by_name`), so a repeated name labels the same
+        // sequence whose bases are written.
         let mut name_labels: HashMap<&str, (String, bool)> = HashMap::new();
-        for m in self.collection_members(collection_digest.as_ref())? {
+        for m in self.catalog.members(coll) {
+            if name_labels.contains_key(m.name()) {
+                continue;
+            }
+            let member = self.catalog.member_by_name(coll, m.name()).unwrap_or(m);
+            let sha = member.seq().sha512t24u();
             let rendered =
-                label.render(m.seq().sha512t24u().as_str(), Some((&collection_str, m.name())), &maps);
+                label.render(sha.as_str(), Some((&collection_str, m.name())), &maps.0, &maps.1);
             check_label_whitespace(&rendered.0)?;
             name_labels.insert(m.name(), rendered);
         }
@@ -606,51 +619,54 @@ impl ReadonlyRefgetStore {
         output_path: P,
         opts: &ExportOptions,
     ) -> Result<ExportSummary> {
-        let line_width = opts.line_width.unwrap_or(80);
+        let line_width = opts.line_width;
         let maps = self.label_alias_maps(&opts.label)?;
         let candidates = self.export_candidates(selection, &opts.label)?;
 
         // Plan: label every record, apply the uniqueness rule.
         let mut summary = ExportSummary::default();
-        let mut seen: HashMap<String, (DigestKey, String)> = HashMap::new();
+        let mut seen: HashMap<String, (SeqRow, String)> = HashMap::new();
         let mut plan: Vec<PlannedRecord> = Vec::new();
         for c in candidates {
+            let view = self.catalog.seq(c.row);
             if let Some(m) = opts.molecule {
-                if !m.keeps(&c.meta.alphabet()) {
+                if !m.keeps(&view.alphabet()) {
                     continue;
                 }
             }
+            let sha = view.sha512t24u();
             let coll = c.collection.as_ref().map(|(col, name)| (col.as_str(), *name));
-            let (label, fallback) = opts.label.render(c.meta.sha512t24u().as_str(), coll, &maps);
+            let (label, fallback) = opts.label.render(sha.as_str(), coll, &maps.0, &maps.1);
             check_label_whitespace(&label)?;
             match seen.get(&label) {
-                Some((key, _)) if *key == c.key => {
+                Some((row, _)) if *row == c.row => {
                     summary.n_deduplicated += 1;
                     continue;
                 }
-                Some((key, first_source)) => {
+                Some((row, first_source)) => {
                     return Err(label_err!(
                         "Label '{}' would name two different sequences: {} from {} and {} from {}. \
                          Add {{col:NS}} or {{col}} to the label (for example '{{col}}/{{name}}') to make labels unique.",
                         label,
-                        key_to_digest_string(key),
+                        self.catalog.seq(*row).sha512t24u(),
                         first_source,
-                        c.meta.sha512t24u().as_str(),
+                        sha,
                         source_of(&c.collection)
                     ));
                 }
                 None => {}
             }
             summary.n_fallbacks += fallback as usize;
-            seen.insert(label.clone(), (c.key, source_of(&c.collection)));
-            plan.push(PlannedRecord { label, key: c.key });
+            seen.insert(label.clone(), (c.row, source_of(&c.collection)));
+            plan.push(PlannedRecord { label, row: c.row });
         }
         drop(seen);
 
         // Write: stream each record's bytes, read ahead in parallel.
         let remote = self.remote_source.is_some();
         let mut writer = open_output(output_path.as_ref())?;
-        let keys: Vec<DigestKey> = plan.iter().map(|r| r.key).collect();
+        let keys: Vec<DigestKey> =
+            plan.iter().map(|r| self.catalog.seq(r.row).sha512t24u().to_key()).collect();
         let popts = PrefetchOptions {
             order: PrefetchOrder::Input,
             write_cache: opts.write_cache,
@@ -662,12 +678,8 @@ impl ReadonlyRefgetStore {
             let item = fetch
                 .next()
                 .ok_or_else(|| anyhow!("Sequence data for record {} was not delivered", rec.label))??;
-            debug_assert_eq!(item.digest.to_key(), rec.key);
-            let meta = self
-                .catalog
-                .find_sha(key_to_digest_string(&rec.key))
-                .map(|r| self.catalog.seq(r).to_metadata())
-                .ok_or_else(|| anyhow!("Sequence record not found: {}", key_to_digest_string(&rec.key)))?;
+            let meta = self.catalog.seq(rec.row).to_metadata();
+            debug_assert_eq!(item.digest, meta.sha512t24u);
             write_fasta_record(
                 &mut *writer,
                 &rec.label,
@@ -711,12 +723,6 @@ impl ReadonlyRefgetStore {
         selection: &ExportSelection,
         label: &LabelTemplate,
     ) -> Result<Vec<Candidate<'_>>> {
-        let global = |key: &DigestKey| -> Result<SeqView<'_>> {
-            self.catalog
-                .find_sha(key_to_digest_string(key))
-                .map(|r| self.catalog.seq(r))
-                .ok_or_else(|| anyhow!("Sequence record not found for digest: {}", key_to_digest_string(key)))
-        };
         let mut out: Vec<Candidate<'_>> = Vec::new();
 
         match selection {
@@ -725,20 +731,20 @@ impl ReadonlyRefgetStore {
                     return Err(anyhow!("No collections selected for export"));
                 }
                 for digest in digests {
-                    self.collection_candidates(digest, names.as_deref(), &global, &mut out)?;
+                    self.collection_candidates(digest, names.as_deref(), &mut out)?;
                 }
             }
             ExportSelection::SeqDigests(digests) => {
                 for d in digests {
-                    let view = self
-                        .sequence_view(strip_sq_prefix(d))
-                        .ok_or_else(|| anyhow!("Sequence not found: {}", d))?;
-                    let key = view.sha512t24u().to_key();
-                    out.push(Candidate { key, meta: global(&key)?, collection: None });
+                    let row = self
+                        .catalog
+                        .resolve(strip_sq_prefix(d))
+                        .ok_or_else(|| anyhow!("Sequence record not found for digest: {}", d))?;
+                    out.push(Candidate { row, collection: None });
                 }
             }
             ExportSelection::All => {
-                let mut in_collection: HashSet<DigestKey> = HashSet::new();
+                let mut in_collection: HashSet<SeqRow> = HashSet::new();
                 if label.needs_collection() {
                     let mut coll_digests: Vec<String> = self
                         .catalog
@@ -748,18 +754,19 @@ impl ReadonlyRefgetStore {
                     coll_digests.sort();
                     for digest in &coll_digests {
                         let start = out.len();
-                        self.collection_candidates(digest, None, &global, &mut out)?;
-                        in_collection.extend(out[start..].iter().map(|c| c.key));
+                        self.collection_candidates(digest, None, &mut out)?;
+                        in_collection.extend(out[start..].iter().map(|c| c.row));
                     }
                 }
-                let mut rest: Vec<(String, DigestKey)> = self
-                    .sequence_views()
-                    .map(|v| (v.sha512t24u().to_string(), v.sha512t24u().to_key()))
-                    .filter(|(_, k)| !in_collection.contains(k))
+                let mut rest: Vec<(crate::digest::Digest32, SeqRow)> = self
+                    .catalog
+                    .seq_rows()
+                    .filter(|r| !in_collection.contains(r))
+                    .map(|r| (self.catalog.seq(r).sha512t24u(), r))
                     .collect();
-                rest.sort();
-                for (_, key) in rest {
-                    out.push(Candidate { key, meta: global(&key)?, collection: None });
+                rest.sort_by(|a, b| a.0.as_str().cmp(b.0.as_str()));
+                for (_, row) in rest {
+                    out.push(Candidate { row, collection: None });
                 }
             }
         }
@@ -771,26 +778,23 @@ impl ReadonlyRefgetStore {
         &'a self,
         digest: &str,
         names: Option<&[String]>,
-        global: &dyn Fn(&DigestKey) -> Result<SeqView<'a>>,
         out: &mut Vec<Candidate<'a>>,
     ) -> Result<()> {
-        let c = self.loaded_coll_row(digest)?;
-        let digest_str = self.catalog.coll_meta(c).digest.clone();
+        let coll = self.loaded_coll_row(digest)?;
+        let digest_str = self.catalog.coll_meta(coll).digest.clone();
         let wanted: Option<HashSet<&str>> = names.map(|ns| ns.iter().map(String::as_str).collect());
         if let Some(names) = names {
-            let present: HashSet<&str> = self.catalog.members(c).map(|m| m.name()).collect();
+            let present: HashSet<&str> = self.catalog.members(coll).map(|m| m.name()).collect();
             if let Some(n) = names.iter().find(|n| !present.contains(n.as_str())) {
                 return Err(anyhow!("Sequence '{}' not found in collection {}", n, digest_str));
             }
         }
-        for m in self.catalog.members(c) {
+        for m in self.catalog.members(coll) {
             if wanted.as_ref().is_some_and(|w| !w.contains(m.name())) {
                 continue;
             }
-            let seq_key = m.seq().sha512t24u().to_key();
             out.push(Candidate {
-                key: seq_key,
-                meta: global(&seq_key)?,
+                row: m.seq_row(),
                 collection: Some((digest_str.clone(), m.name())),
             });
         }
@@ -830,9 +834,9 @@ mod tests {
 
     fn name_opts(line_width: usize) -> ExportOptions {
         ExportOptions {
-            label: LabelTemplate::parse("name").unwrap(),
+            label: LabelTemplate::parse("{name}").unwrap(),
             molecule: None,
-            line_width: Some(line_width),
+            line_width,
             ..Default::default()
         }
     }

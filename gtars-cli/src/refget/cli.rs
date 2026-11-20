@@ -66,7 +66,14 @@ pub fn create_refget_cli() -> Command {
                     Arg::new("force")
                         .long("force")
                         .action(ArgAction::SetTrue)
-                        .help("Overwrite existing collections/sequences in the store"),
+                        .help("Overwrite existing collections/sequences in the store. Does not lift --standalone-file-limit."),
+                )
+                .arg(
+                    Arg::new("standalone_file_limit")
+                        .long("standalone-file-limit")
+                        .value_name("N")
+                        .value_parser(clap::value_parser!(usize))
+                        .help("Most .seq files a standalone store may hold after the import (default 500000). The import stops before writing anything if it would go over. 0 is not special; pass a large number to lift the limit. Packed stores ignore it."),
                 )
                 .arg(
                     Arg::new("collection_alias")
@@ -114,6 +121,12 @@ pub fn create_refget_cli() -> Command {
                     Arg::new("store")
                         .required(true)
                         .help("Path to an existing packed RefgetStore directory"),
+                )
+                .arg(
+                    Arg::new("prune_unreferenced")
+                        .long("prune-unreferenced")
+                        .action(ArgAction::SetTrue)
+                        .help("Also delete pack files no index entry points to. Only use when no other process is writing to the store."),
                 ),
         )
         .subcommand(
@@ -121,10 +134,9 @@ pub fn create_refget_cli() -> Command {
                 .about("Export sequences from a RefgetStore as FASTA, to a file or to stdout.")
                 .after_help(
                     "Label fields: {seq} sequence digest (SQ.…), {seq:NS} sequence alias in namespace NS, \
-                     {col} collection digest, {col:NS} collection alias in namespace NS, {name} sequence name.\n\
-                     A single field may drop its braces.\n\n\
+                     {col} collection digest, {col:NS} collection alias in namespace NS, {name} sequence name.\n\n\
                      Examples:\n  \
-                     gtars refget export -s store -c ucsc:hg38 -l name > hg38.fa\n  \
+                     gtars refget export -s store -c ucsc:hg38 -l '{name}' > hg38.fa\n  \
                      gtars refget export -s store --all | makeblastdb -in - -dbtype nucl -out store\n  \
                      gtars refget export -s store --all -l '{col:ucsc}/{name}'\n  \
                      gtars refget export --remote https://refgenie.s3.us-east-1.amazonaws.com/refget-store/jungle/ -c name:hg38-refgenie -l name --resume > hg38.fa\n\n\
@@ -213,6 +225,14 @@ pub fn create_refget_cli() -> Command {
                         .value_parser(clap::value_parser!(usize))
                         .default_value("80")
                         .help("Sequence line width. 0 = unwrapped, one sequence per line (what GGCAT/SSHash expect)"),
+                )
+                .arg(
+                    Arg::new("pack_cache_mb")
+                        .long("pack-cache-mb")
+                        .value_name("N")
+                        .value_parser(clap::value_parser!(usize))
+                        .default_value("0")
+                        .help("Read a PACKED store through a block cache of N megabytes (alpha; 0 = off, the default). Helps clustered reads on a cold network file system; hurts scattered reads on stores larger than the cache."),
                 ),
         )
         .subcommand(

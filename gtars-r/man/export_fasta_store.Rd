@@ -30,7 +30,7 @@ export_fasta_store(
 
 \item{all}{Export every collection plus sequences in no collection}
 
-\item{label}{Label template, e.g. "{seq}", "name", "{col}/{name}"}
+\item{label}{Label template, e.g. "{seq}", "{name}", "{col}/{name}"}
 
 \item{molecule}{NULL, "dna" or "protein"}
 

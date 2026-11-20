@@ -559,7 +559,7 @@ fn export_fasta_is_lossless() {
                 &ExportOptions {
                     label: LabelTemplate::parse("{name}").unwrap(),
                     molecule: None,
-                    line_width: Some(7),
+                    line_width: 7,
                     ..Default::default()
                 },
             )

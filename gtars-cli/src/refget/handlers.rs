@@ -4,9 +4,9 @@ use anyhow::Result;
 use clap::ArgMatches;
 
 use gtars_refget::store::{
-    ExportOptions, ExportSelection, FastaImportOptions, FetchConfig, LabelTemplate, LockOptions,
-    Molecule, RefgetStore, StorageMode, VerifyOptions, VerifyReport, default_cache_root,
-    force_unlock, lock_status,
+    CompactOptions, ExportOptions, ExportSelection, FastaImportOptions, FetchConfig,
+    LabelTemplate, LockOptions, Molecule, RefgetStore, StorageMode, VerifyOptions, VerifyReport,
+    default_cache_root, force_unlock, lock_status,
 };
 use gtars_refget::{FastaInputs, expand_fasta_inputs};
 
@@ -23,11 +23,12 @@ pub fn run_refget(matches: &ArgMatches) -> Result<()> {
 
 fn run_compact(matches: &ArgMatches) -> Result<()> {
     let store_path = matches.get_one::<String>("store").expect("store is required");
-    let mut store = RefgetStore::on_disk(store_path)
+    let mut store = RefgetStore::open_local(store_path)
         .map_err(|e| anyhow::anyhow!("Failed to open store at {}: {}", store_path, e))?;
+    let prune_unreferenced = matches.get_flag("prune_unreferenced");
     let dead_before = store.packed_dead_bytes().unwrap_or(0);
     let report = store
-        .compact()
+        .compact_with(CompactOptions { prune_unreferenced })
         .map_err(|e| anyhow::anyhow!("Failed to compact store: {}", e))?;
     eprintln!(
         "Compacted {}: packs {} -> {}, reclaimed {} dead byte(s) (was {}).",
@@ -37,6 +38,9 @@ fn run_compact(matches: &ArgMatches) -> Result<()> {
         report.bytes_reclaimed,
         dead_before,
     );
+    if prune_unreferenced {
+        eprintln!("Pruned {} unreferenced pack file(s).", report.packs_pruned);
+    }
     Ok(())
 }
 
@@ -97,6 +101,7 @@ fn run_build(matches: &ArgMatches) -> Result<()> {
     let force = matches.get_flag("force");
     let packed = matches.get_flag("packed");
     let pack_cap = matches.get_one::<u64>("pack_cap").copied();
+    let standalone_file_limit = matches.get_one::<usize>("standalone_file_limit").copied();
 
     // Parse --collection-alias NAMESPACE:ALIAS. Owned up front so the borrows
     // in FastaImportOptions outlive the builder chain.
@@ -158,6 +163,9 @@ fn run_build(matches: &ArgMatches) -> Result<()> {
     let mut opts = FastaImportOptions::new().force(force).jobs(jobs);
     if let Some((ns, alias)) = collection_alias.as_ref() {
         opts = opts.collection_alias(ns, alias);
+    }
+    if let Some(limit) = standalone_file_limit {
+        opts = opts.standalone_file_limit(limit);
     }
     let report = store
         .add_sequence_collections_from_fastas(&fastas, opts)
@@ -284,6 +292,7 @@ fn run_export(matches: &ArgMatches) -> Result<()> {
         .map(|m| m.parse())
         .transpose()?;
     let line_width = *matches.get_one::<usize>("line_width").unwrap_or(&80);
+    let pack_cache_mb = *matches.get_one::<usize>("pack_cache_mb").unwrap_or(&0);
 
     let remote = matches.get_one::<String>("remote");
     let cache_dir = matches.get_one::<String>("cache_dir");
@@ -308,6 +317,7 @@ fn run_export(matches: &ArgMatches) -> Result<()> {
                 .map_err(|e| anyhow::anyhow!("Failed to open store at {}: {}", store_path, e))?
         }
     };
+    store.set_pack_cache_mb(pack_cache_mb);
 
     let selection = if matches.get_flag("all") {
         ExportSelection::All
@@ -355,7 +365,7 @@ fn run_export(matches: &ArgMatches) -> Result<()> {
     let opts = ExportOptions {
         label,
         molecule,
-        line_width: Some(line_width),
+        line_width,
         write_cache: resume || cache_dir.is_some(),
     };
     let summary = match store.export_fasta(&selection, output, &opts) {

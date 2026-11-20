@@ -59,16 +59,17 @@ use std::path::Path;
 
 use anyhow::{anyhow, Context, Result};
 
-use super::catalog::{CollRow, NewMember, SeqParts};
+use super::catalog::{CollRow, NewMember};
 use sha2::{Sha256, Digest};
 
 use crate::collection::{
+    RgsiHeader,
     SequenceMetadataExt,
     read_rgsi_file,
 };
 use crate::digest::{
     SequenceCollectionMetadata, SequenceMetadata,
-    SeqColDigestLvl1, parse_rgci_line, parse_rgsi_fields, parse_rgsi_line,
+    parse_rgci_line, parse_rgsi_fields, parse_rgsi_line,
 };
 use crate::hashkeyable::{HashKeyable, key_to_digest_string};
 
@@ -326,7 +327,7 @@ impl ReadonlyRefgetStore {
             let member_keys = self.loaded_member_seq_keys(&key_to_digest_string(coll_key));
             if let Some(missing) = member_keys.iter().find(|k| !sequences.contains_key(*k)) {
                 anyhow::bail!(
-                    "cannot commit collection {}: its sequence {} is no longer in the                      store index. Another writer removed it while this import was in                      progress. Re-run the import.",
+                    "cannot commit collection {}: its sequence {} is no longer in the store index. Another writer removed it while this import was in progress. Re-run the import.",
                     key_to_digest_string(coll_key),
                     key_to_digest_string(missing),
                 );
@@ -387,14 +388,37 @@ impl ReadonlyRefgetStore {
         let idx_path = local_path.join("sequences.pack.idx");
 
         // Start from the CURRENT on-disk sidecar.
-        let mut rows: BTreeMap<String, PackRow> = match fs::read(&idx_path) {
-            Ok(bytes) => read_pack_idx_rows(&bytes)?,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => BTreeMap::new(),
-            Err(e) => return Err(e).with_context(|| format!("reading {}", idx_path.display())),
+        let mut rows: BTreeMap<String, PackRow> =
+            read_pack_idx_rows(&super::packidx::load_pack_idx_or_empty(local_path)?)?;
+
+        // Every pack a new row points at must still be on disk. A writer whose
+        // pack had the same content-hash name as an existing one reuses that
+        // file instead of writing its own, and another writer can have
+        // unlinked it since. Removal and compaction unlink packs only under
+        // this lock, so against them a pack present now stays present through
+        // this commit. A failed import or a dropped handle unlinks packs it
+        // created without the lock (see `remove_uncommitted_packs`).
+        let packs_dir = local_path.join("packs");
+        let check_packs = |new_rows: &mut dyn Iterator<Item = &PackRow>| -> Result<()> {
+            let mut seen: HashSet<&str> = HashSet::new();
+            for row in new_rows {
+                if seen.insert(&row.pack) && !packs_dir.join(format!("{}.pack", row.pack)).exists() {
+                    anyhow::bail!(
+                        "cannot commit: pack {} is no longer in the store. Another writer \
+                         removed it while this handle was writing. Reopen the store and \
+                         re-run the import.",
+                        row.pack
+                    );
+                }
+            }
+            Ok(())
         };
+        check_packs(&mut pending.pack_rows.values())?;
 
         // Seal any open incremental session pack and fold in its rows.
-        for (digest, row) in self.seal_open_session_pack()? {
+        let session_rows = self.seal_open_session_pack()?;
+        check_packs(&mut session_rows.iter().map(|(_, row)| row))?;
+        for (digest, row) in session_rows {
             rows.insert(digest, row);
         }
 
@@ -422,10 +446,10 @@ impl ReadonlyRefgetStore {
     /// name.
     ///
     /// The honest framing is that `sequences.rgsi`'s `name` column is ADVISORY.
-    /// The authoritative per-collection name mapping lives in `name_lookup` and
-    /// in each `collections/<digest>.rgsi`. A lexicographic tie-break would be
-    /// order-independent but would silently rename sequences on rebuild, which
-    /// is worse.
+    /// The authoritative per-collection name mapping lives in each collection's
+    /// members and in each `collections/<digest>.rgsi`. A lexicographic
+    /// tie-break would be order-independent but would silently rename
+    /// sequences on rebuild, which is worse.
     fn apply_pending_sequence_rows(
         &self,
         rows: &mut HashMap<DigestKey, SequenceMetadata>,
@@ -714,10 +738,10 @@ impl ReadonlyRefgetStore {
     /// The set of sequence digests still referenced by SOME collection on disk,
     /// excluding `exclude` (the collection being removed).
     ///
-    /// Derived from disk, not from `name_lookup`. `name_lookup` is populated only
-    /// by `load_collections_from_directory`, `ensure_collection_loaded`, and the
-    /// import path — NOT by the normal `open_local` stub load. On a
-    /// partially-loaded store it is empty, so a `name_lookup`-derived live set
+    /// Derived from disk, not from the loaded collection members. Members are
+    /// loaded only by `load_collections_from_directory`, `ensure_collection_loaded`,
+    /// and the import path, NOT by the normal `open_local` load. On a
+    /// partially-loaded store none are, so a live set derived from them
     /// says "nothing is referenced" and the GC unlinks sequences other
     /// collections still need. That difference is invisible from inside the
     /// function: a partially-loaded store looks exactly like a fully-loaded small
@@ -1178,14 +1202,7 @@ impl ReadonlyRefgetStore {
             if let Some(f) = parse_rgsi_fields(&line) {
                 // A deferred index load may run after a sequence was already
                 // added (and loaded); dedup keeps that row and its bytes.
-                store.catalog.add_sequence_parts(SeqParts {
-                    name: f.name,
-                    description: f.description,
-                    length: f.length,
-                    alphabet: f.alphabet,
-                    sha512t24u: f.sha512t24u,
-                    md5: f.md5,
-                })?;
+                store.catalog.add_sequence_parts(f)?;
             }
         }
         Ok(())
@@ -1256,13 +1273,7 @@ impl ReadonlyRefgetStore {
         let mut reader = std::io::BufReader::with_capacity(1 << 20, file);
         let mut line = String::new();
 
-        let mut seqcol_digest = String::new();
-        let mut names_digest = String::new();
-        let mut sequences_digest = String::new();
-        let mut lengths_digest = String::new();
-        let mut name_length_pairs_digest: Option<String> = None;
-        let mut sorted_name_length_pairs_digest: Option<String> = None;
-        let mut sorted_sequences_digest: Option<String> = None;
+        let mut header = RgsiHeader::default();
         let mut pending_data = false;
         loop {
             line.clear();
@@ -1270,29 +1281,15 @@ impl ReadonlyRefgetStore {
                 break;
             }
             let l = line.trim_end_matches(['\n', '\r']);
-            if let Some(stripped) = l.strip_prefix("##") {
-                if let Some((key, value)) = stripped.split_once('=') {
-                    match key {
-                        "seqcol_digest" => seqcol_digest = value.to_string(),
-                        "names_digest" => names_digest = value.to_string(),
-                        "sequences_digest" => sequences_digest = value.to_string(),
-                        "lengths_digest" => lengths_digest = value.to_string(),
-                        "name_length_pairs_digest" => name_length_pairs_digest = Some(value.to_string()),
-                        "sorted_name_length_pairs_digest" => sorted_name_length_pairs_digest = Some(value.to_string()),
-                        "sorted_sequences_digest" => sorted_sequences_digest = Some(value.to_string()),
-                        _ => {}
-                    }
-                }
-                continue;
-            }
-            if l.starts_with('#') {
+            if header.read_line(l) || l.starts_with('#') {
                 continue;
             }
             pending_data = true;
             break;
         }
 
-        if sequences_digest.is_empty() || names_digest.is_empty() || lengths_digest.is_empty() {
+        // `n_sequences` is set once the rows are counted.
+        let Some(meta) = header.into_metadata(0, path) else {
             let collection = read_rgsi_file(path)?;
             if let Some(e) = expected {
                 if collection.metadata.digest != e {
@@ -1307,26 +1304,12 @@ impl ReadonlyRefgetStore {
             let members: Vec<SequenceMetadata> =
                 sequences.iter().map(|s| s.metadata().clone()).collect();
             return Ok(self.insert_collection(metadata, &members)?.0);
-        }
-
-        let lvl1 = SeqColDigestLvl1 { sequences_digest, names_digest, lengths_digest };
-        let digest = if seqcol_digest.is_empty() { lvl1.to_digest() } else { seqcol_digest };
+        };
         if let Some(e) = expected {
-            if digest != e {
-                return Err(anyhow!("Collection digest mismatch: expected {}, got {}", e, digest));
+            if meta.digest != e {
+                return Err(anyhow!("Collection digest mismatch: expected {}, got {}", e, meta.digest));
             }
         }
-        let meta = SequenceCollectionMetadata {
-            digest,
-            n_sequences: 0,
-            names_digest: lvl1.names_digest,
-            sequences_digest: lvl1.sequences_digest,
-            lengths_digest: lvl1.lengths_digest,
-            name_length_pairs_digest,
-            sorted_name_length_pairs_digest,
-            sorted_sequences_digest,
-            file_path: Some(path.to_path_buf()),
-        };
         let c = self.catalog.upsert_collection(meta)?;
         self.catalog.start_members(c);
 
@@ -1344,18 +1327,9 @@ impl ReadonlyRefgetStore {
                     continue;
                 }
                 let Some(f) = parse_rgsi_fields(&line) else { continue };
-                let (seq, _) = self.catalog.add_sequence_parts(SeqParts {
-                    name: f.name,
-                    description: f.description,
-                    length: f.length,
-                    alphabet: f.alphabet,
-                    sha512t24u: f.sha512t24u,
-                    md5: f.md5,
-                })?;
-                self.catalog.push_member(
-                    c,
-                    NewMember { seq, name: f.name, description: f.description, fai: None },
-                )?;
+                let (name, description) = (f.name, f.description);
+                let (seq, _) = self.catalog.add_sequence_parts(f)?;
+                self.catalog.push_member(c, NewMember { seq, name, description, fai: None })?;
                 n += 1;
             }
             Ok(())

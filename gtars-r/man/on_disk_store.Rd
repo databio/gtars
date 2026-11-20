@@ -4,10 +4,12 @@
 \alias{on_disk_store}
 \title{Create a disk-backed RefgetStore}
 \usage{
-on_disk_store(path)
+on_disk_store(path, packed)
 }
 \arguments{
 \item{path}{Path for storing sequences and metadata}
+
+\item{packed}{Create the store with the packed layout (alpha)}
 }
 \description{
 Create a disk-backed RefgetStore

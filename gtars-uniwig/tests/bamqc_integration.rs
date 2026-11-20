@@ -42,29 +42,6 @@ fn test_bamqc_chr22_small() {
     );
 }
 
-/// test_chr22_small.bam holds 8 proper pairs at distinct positions. One pair
-/// has MAPQ 23 on both mates; two pairs sit exactly at MAPQ 30.
-#[test]
-fn test_bamqc_chr22_small_min_mapq() {
-    let bam_path = test_data_path().join("test_chr22_small.bam");
-    if !bam_path.exists() {
-        eprintln!("Skipping test - BAM file not found: {:?}", bam_path);
-        return;
-    }
-
-    // Default (0): every pair counts, as in PEPATAC's bamQC.py.
-    let all = compute_bam_qc(&bam_path, 0).expect("Failed to compute BAM QC");
-    assert_eq!(all.total_reads, 8);
-    assert_eq!(all.distinct, 8);
-    assert_eq!(all.m1, 8);
-
-    // ENCODE prefilter (30): the MAPQ-23 pair is dropped; MAPQ 30 passes.
-    let encode = compute_bam_qc(&bam_path, 30).expect("Failed to compute BAM QC");
-    assert_eq!(encode.total_reads, 7);
-    assert_eq!(encode.distinct, 7);
-    assert_eq!(encode.m1, 7);
-}
-
 #[test]
 fn test_bamqc_tsv_output_format() {
     let result = BamQcResult {

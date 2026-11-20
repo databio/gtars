@@ -501,7 +501,8 @@ refget_store_raw <- function(mode) .Call(wrap__refget_store_raw, mode)
 #' Create a disk-backed RefgetStore
 #' @export
 #' @param path Path for storing sequences and metadata
-on_disk_store <- function(path) .Call(wrap__on_disk_store, path)
+#' @param packed Create the store with the packed layout (alpha)
+on_disk_store <- function(path, packed) .Call(wrap__on_disk_store, path, packed)
 
 #' Open store from local directory
 #' @export
@@ -593,7 +594,9 @@ import_fasta_store <- function(store_ptr, file_path) .Call(wrap__import_fasta_st
 #' @param store_ptr External pointer to RefgetStore
 #' @param file_path Path to FASTA file
 #' @param force Whether to overwrite existing sequences/collections
-add_fasta_store <- function(store_ptr, file_path, force) .Call(wrap__add_fasta_store, store_ptr, file_path, force)
+#' @param standalone_file_limit Most .seq files a standalone store may hold
+#'   after the import (NULL for the default, 500,000)
+add_fasta_store <- function(store_ptr, file_path, force, standalone_file_limit) .Call(wrap__add_fasta_store, store_ptr, file_path, force, standalone_file_limit)
 
 #' Get sequence by digest from store (supports SHA512t24u or MD5)
 #' @param store_ptr External pointer to RefgetStore
@@ -738,6 +741,16 @@ write_store_to_directory_store <- function(store_ptr, root_path, seqdata_path_te
 #' @param store_ptr External pointer to RefgetStore
 write_store <- function(store_ptr) .Call(wrap__write_store, store_ptr)
 
+#' Reclaim dead bytes in a packed store
+#' @param store_ptr External pointer to RefgetStore
+#' @param prune_unreferenced Also delete pack files no index entry points to
+compact_store <- function(store_ptr, prune_unreferenced) .Call(wrap__compact_store, store_ptr, prune_unreferenced)
+
+#' Turn the pack block cache on or off
+#' @param store_ptr External pointer to RefgetStore
+#' @param megabytes Cache size in megabytes (0 = off)
+set_pack_cache_store <- function(store_ptr, megabytes) .Call(wrap__set_pack_cache_store, store_ptr, megabytes)
+
 #' Export sequences to FASTA (a file, or stdout with "-")
 #' @param store_ptr External pointer to RefgetStore
 #' @param output_path Output FASTA file path, or "-" for stdout
@@ -745,7 +758,7 @@ write_store <- function(store_ptr) .Call(wrap__write_store, store_ptr)
 #' @param names Sequence names to keep in each collection (NULL for all)
 #' @param seq_digests Sequence digests (NULL unless selecting by digest)
 #' @param all Export every collection plus sequences in no collection
-#' @param label Label template, e.g. "{seq}", "name", "{col}/{name}"
+#' @param label Label template, e.g. "{seq}", "{name}", "{col}/{name}"
 #' @param molecule NULL, "dna" or "protein"
 #' @param line_width Bases per line (0 = unwrapped, negative = default 80)
 export_fasta_store <- function(store_ptr, output_path, collections, names, seq_digests, all, label, molecule, line_width, write_cache) .Call(wrap__export_fasta_store, store_ptr, output_path, collections, names, seq_digests, all, label, molecule, line_width, write_cache)

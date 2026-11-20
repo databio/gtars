@@ -8,13 +8,84 @@ use crate::digest::types::{
 };
 use crate::digest::{AlphabetType, md5, sha512t24u};
 use crate::hashkeyable::{DigestKey, HashKeyable};
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
 use tempfile::tempdir;
 
+use super::catalog::SeqRow;
+use super::readonly::ReadonlyRefgetStore;
+
 // =========================================================================
 // Test helpers
 // =========================================================================
+
+/// Catalog reads keyed by digest, for assertions.
+impl ReadonlyRefgetStore {
+    /// The record of a sequence, looked up by sha512t24u digest only.
+    pub(crate) fn t_seq<K: AsRef<[u8]>>(&self, digest: K) -> Option<SequenceRecord> {
+        self.catalog.find_sha(digest).map(|r| self.seq_record(r))
+    }
+
+    /// Every sequence record, keyed by sha512t24u digest.
+    pub(crate) fn t_seq_map(&self) -> HashMap<DigestKey, SequenceRecord> {
+        self.catalog
+            .seq_rows()
+            .map(|r| (self.catalog.seq(r).sha512t24u().to_key(), self.seq_record(r)))
+            .collect()
+    }
+
+    pub(crate) fn t_has_md5<K: AsRef<[u8]>>(&self, md5: K) -> bool {
+        self.catalog.find_md5(md5).is_some()
+    }
+
+    pub(crate) fn t_coll_keys(&self) -> Vec<DigestKey> {
+        self.catalog
+            .coll_rows()
+            .map(|c| self.catalog.coll_meta(c).digest.to_key())
+            .collect()
+    }
+
+    pub(crate) fn t_has_coll<K: AsRef<[u8]>>(&self, digest: K) -> bool {
+        self.catalog.find_coll(digest).is_some()
+    }
+
+    /// Number of collections with loaded members.
+    pub(crate) fn t_n_loaded_colls(&self) -> usize {
+        self.catalog.coll_rows().filter(|&c| self.catalog.is_loaded(c)).count()
+    }
+
+    /// Unique member names of one collection, in first-occurrence order.
+    pub(crate) fn t_names<K: AsRef<[u8]>>(&self, digest: K) -> Vec<String> {
+        let mut seen = HashSet::new();
+        self.collection_members(digest)
+            .map(|ms| {
+                ms.map(|m| m.name().to_string())
+                    .filter(|n| seen.insert(n.clone()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// (name, sequence digest key) for unique member names, first-occurrence
+    /// order; a repeated name resolves to its last member.
+    pub(crate) fn t_name_pairs<K: AsRef<[u8]>>(&self, digest: K) -> Vec<(String, DigestKey)> {
+        let d = digest.as_ref().to_vec();
+        self.t_names(&d)
+            .into_iter()
+            .map(|n| {
+                let k = self.member_by_name(&d, &n).unwrap().seq().sha512t24u().to_key();
+                (n, k)
+            })
+            .collect()
+    }
+
+    /// Drop every sequence row, keeping collections.
+    pub(crate) fn t_clear_sequences(&mut self) {
+        let rows: Vec<SeqRow> = self.catalog.seq_rows().collect();
+        self.remove_sequence_rows(&rows);
+    }
+}
 
 /// Copy a test FASTA to a temp directory to avoid writing RGSI cache files
 /// into the test data directory.
@@ -53,8 +124,8 @@ fn coll_sel<K: AsRef<[u8]>>(digest: K, names: Option<&[&str]>) -> ExportSelectio
 }
 
 /// Export options that label records by name.
-fn name_opts(line_width: Option<usize>) -> ExportOptions {
-    ExportOptions { label: LabelTemplate::parse("name").unwrap(), molecule: None, line_width, ..Default::default() }
+fn name_opts(line_width: usize) -> ExportOptions {
+    ExportOptions { label: LabelTemplate::parse("{name}").unwrap(), molecule: None, line_width, ..Default::default() }
 }
 
 fn setup_export_test_store(temp_path: &std::path::Path) -> (RefgetStore, DigestKey) {
@@ -180,7 +251,7 @@ chr2\t0\t4
             collection_digest_ref,
             temp_bed_path.to_str().unwrap(),
             temp_output_fa_path.to_str().unwrap(),
-            &LabelTemplate::parse("name").unwrap(),
+            &LabelTemplate::parse("{name}").unwrap(),
         )
         .expect("export_fasta_from_regions failed");
 
@@ -819,7 +890,7 @@ fn test_export_fasta_all_sequences() {
 
     let output_path = temp_dir.path().join("exported_all.fa");
     store
-        .export_fasta(&coll_sel(collection_digest, None), &output_path, &name_opts(Some(80)))
+        .export_fasta(&coll_sel(collection_digest, None), &output_path, &name_opts(80))
         .unwrap();
 
     let exported = fs::read_to_string(&output_path).unwrap();
@@ -834,7 +905,7 @@ fn test_export_fasta_subset_sequences() {
 
     let output_path = temp_dir.path().join("exported_subset.fa");
     store
-        .export_fasta(&coll_sel(collection_digest, Some(&["chr1", "chr3"])), &output_path, &name_opts(Some(80)))
+        .export_fasta(&coll_sel(collection_digest, Some(&["chr1", "chr3"])), &output_path, &name_opts(80))
         .unwrap();
 
     let exported = fs::read_to_string(&output_path).unwrap();
@@ -871,7 +942,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCC
     let collections: Vec<_> = store1.t_coll_keys().into_iter().collect();
     let collection_digest = collections[0];
     let exported_path = temp_path.join("exported.fa");
-    store1.export_fasta(&coll_sel(collection_digest, None), &exported_path, &name_opts(Some(60))).expect("Failed to export FASTA");
+    store1.export_fasta(&coll_sel(collection_digest, None), &exported_path, &name_opts(60)).expect("Failed to export FASTA");
 
     let mut store2 = RefgetStore::in_memory();
     store2
@@ -902,7 +973,7 @@ fn test_export_fasta_by_digests() {
         .collect();
 
     let output_path = temp_dir.path().join("exported_by_digests.fa");
-    let opts = ExportOptions { line_width: Some(80), ..Default::default() };
+    let opts = ExportOptions { line_width: 80, ..Default::default() };
     store.export_fasta(&ExportSelection::SeqDigests(digests.clone()), &output_path, &opts).unwrap();
 
     let exported = fs::read_to_string(&output_path).unwrap();
@@ -913,7 +984,7 @@ fn test_export_fasta_by_digests() {
     // SQ.-prefixed digests are accepted, and a name template falls back to {seq}.
     let prefixed: Vec<String> = digests.iter().map(|d| format!("SQ.{}", d)).collect();
     let summary = store
-        .export_fasta(&ExportSelection::SeqDigests(prefixed), &output_path, &name_opts(None))
+        .export_fasta(&ExportSelection::SeqDigests(prefixed), &output_path, &name_opts(80))
         .unwrap();
     assert_eq!(summary.n_fallbacks, digests.len());
     assert_eq!(fs::read_to_string(&output_path).unwrap().matches(">SQ.").count(), digests.len());
@@ -927,9 +998,9 @@ fn test_export_fasta_error_handling() {
     let output_path = temp_dir.path().join("should_fail.fa");
 
     let fake_collection = b"fake_collection_digest_12345678";
-    assert!(store.export_fasta(&coll_sel(fake_collection, None), &output_path, &name_opts(Some(80))).is_err());
+    assert!(store.export_fasta(&coll_sel(fake_collection, None), &output_path, &name_opts(80)).is_err());
 
-    assert!(store.export_fasta(&coll_sel(collection_digest, Some(&["nonexistent_chr"])), &output_path, &name_opts(Some(80))).is_err());
+    assert!(store.export_fasta(&coll_sel(collection_digest, Some(&["nonexistent_chr"])), &output_path, &name_opts(80)).is_err());
 }
 
 #[test]
@@ -962,7 +1033,7 @@ fn test_export_fasta_after_load_local() {
 
     let output_path = temp_path.join("exported.fa");
     loaded_store
-        .export_fasta(&coll_sel(collection_digest, None), &output_path, &name_opts(Some(80)))
+        .export_fasta(&coll_sel(collection_digest, None), &output_path, &name_opts(80))
         .expect("export_fasta should work on disk-loaded stores");
 
     let exported = fs::read_to_string(&output_path).unwrap();
@@ -3161,8 +3232,7 @@ fn test_resume_skips_present_collection_before_decoding_fasta() {
 /// Generate a FASTA with `n` short, DISTINCT sequences. Each record encodes its
 /// index in base-4 as DNA so every sequence has a unique content digest (no
 /// dedup), mimicking a transcriptome with hundreds of thousands of tiny records
-/// -- the workload the writer pool is meant to accelerate (the old single
-/// inserter did a File::create + create_dir_all per record).
+/// -- the workload the writer pool is meant to accelerate.
 fn write_many_tiny_fasta(path: &std::path::Path, n: usize) {
     use std::io::Write;
     const BASES: [u8; 4] = [b'A', b'C', b'G', b'T'];
@@ -4041,7 +4111,7 @@ fn test_export_fasta_streams_without_loading_from_deferred_state() {
 
     let output_path = dir.path().join("export_chr1.fa");
     store
-        .export_fasta(&coll_sel(&collection.digest, Some(&["chr1"])), &output_path, &name_opts(None))
+        .export_fasta(&coll_sel(&collection.digest, Some(&["chr1"])), &output_path, &name_opts(80))
         .expect("export_fasta should stream the requested sequence");
 
     let exported = fs::read_to_string(&output_path).unwrap();
@@ -4075,7 +4145,7 @@ fn test_export_fasta_duplicate_named_sequences() {
     let output_path = dir.path().join("dup_out.fa");
     // Same label for two different sequences is a clash.
     let err = store
-        .export_fasta(&coll_sel(&collection.digest, Some(&["dup"])), &output_path, &name_opts(None))
+        .export_fasta(&coll_sel(&collection.digest, Some(&["dup"])), &output_path, &name_opts(80))
         .unwrap_err()
         .to_string();
     assert!(err.contains("'dup'") && err.contains("{col}"), "{err}");
@@ -4818,6 +4888,54 @@ fn test_failed_import_cleanup_preserves_existing_sequences() {
     }
 }
 
+/// A standalone import whose last `.seq` write fails must not leave its
+/// collection staged: a later commit on the same handle would publish a
+/// collection whose sequence has no file. A read-only shard directory for the
+/// last sequence's digest makes that one write fail after the collection has
+/// finalized.
+#[cfg(unix)]
+#[test]
+fn test_standalone_write_failure_does_not_publish_its_collection() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempdir().unwrap();
+    let store_path = dir.path().join("store");
+    let seqs = ["AAAACCCCGGGGTTTT", "ACGTACGTACGTACGT", "TTTTGGGGCCCCAAAA"];
+    let digests: Vec<String> = seqs.iter().map(|s| sha512t24u(s.as_bytes())).collect();
+    let shards: std::collections::HashSet<&str> = digests.iter().map(|d| &d[..2]).collect();
+    assert_eq!(shards.len(), seqs.len(), "each sequence needs its own shard directory");
+    let fasta = dir.path().join("a.fa");
+    let body: String = seqs.iter().enumerate().map(|(i, s)| format!(">s{i}\n{s}\n")).collect();
+    fs::write(&fasta, body).unwrap();
+
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    store.set_quiet(true);
+    let blocked = store_path.join("sequences").join(&digests[2][..2]);
+    fs::create_dir_all(&blocked).unwrap();
+    fs::set_permissions(&blocked, fs::Permissions::from_mode(0o555)).unwrap();
+    if fs::write(blocked.join("probe"), b"x").is_ok() {
+        // Permissions are not enforced here (for example, running as root).
+        fs::set_permissions(&blocked, fs::Permissions::from_mode(0o755)).unwrap();
+        return;
+    }
+
+    store
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new().jobs(1))
+        .expect_err("the last .seq write fails");
+    // The failed import's cleanup may already have removed the empty directory.
+    let _ = fs::set_permissions(&blocked, fs::Permissions::from_mode(0o755));
+    store.write().unwrap();
+    drop(store);
+
+    let mut fresh = RefgetStore::open_local(&store_path).unwrap();
+    let collections = fresh.list_collections(0, 10, &[]).unwrap().results;
+    assert!(collections.is_empty(), "a collection with an unwritten sequence was published");
+    for m in fresh.list_sequences().unwrap() {
+        fresh
+            .get_substring(&m.sha512t24u, 0, m.length)
+            .unwrap_or_else(|e| panic!("published sequence {} cannot be read: {e}", m.name));
+    }
+}
+
 #[test]
 fn test_collection_alias_rejected_for_multiple_files() {
     let dir = tempdir().unwrap();
@@ -5029,10 +5147,9 @@ fn test_removal_is_not_resurrected_by_the_merge() {
     );
 }
 
-/// Orphan GC on a freshly-opened store. `open_local` loads collection STUBS and
-/// never populates `name_lookup`, so the old `name_lookup`-derived live set was
-/// empty here and unlinked sequences the surviving collection still needs.
-/// This test fails against the pre-merge implementation.
+/// Orphan GC on a freshly-opened store. `open_local` loads no collection
+/// members, so a live set derived from loaded members would be empty here and
+/// would unlink sequences the surviving collection still needs.
 #[test]
 fn test_orphan_gc_keeps_sequences_shared_with_another_collection() {
     let work = tempdir().unwrap();
@@ -5121,6 +5238,62 @@ fn test_orphan_gc_refuses_when_a_collection_rgsi_is_missing() {
     );
 }
 
+/// With `collections.rgci` gone, `open_local` loads every collection from its
+/// `.rgsi` and the on-disk live set is empty. Orphan GC must still spare the
+/// sequences a loaded collection uses, and catalog compaction must not panic.
+#[test]
+fn test_orphan_gc_spares_sequences_of_loaded_collections() {
+    for packed in [false, true] {
+        let work = tempdir().unwrap();
+        let store_dir = work.path().join("store");
+        let shared = [("s1", "AAAACCCCGGGGTTTT"), ("s2", "ACGTACGTACGTACGT")];
+        let body = |own: (&str, &str)| -> String {
+            shared
+                .iter()
+                .chain([&own])
+                .map(|(n, s)| format!(">{n}\n{s}\n"))
+                .collect()
+        };
+
+        let mut store = if packed {
+            RefgetStore::on_disk_packed(&store_dir).unwrap()
+        } else {
+            RefgetStore::on_disk(&store_dir).unwrap()
+        };
+        let coll_a = add_collection_to_store(&mut store, work.path(), "a", &body(("onlyA", "TTTTGGGG")));
+        let coll_b = add_collection_to_store(&mut store, work.path(), "b", &body(("onlyB", "GGGGAAAA")));
+        store.write().unwrap();
+        drop(store);
+        fs::remove_file(store_dir.join("collections.rgci")).unwrap();
+
+        let mut store = RefgetStore::open_local(&store_dir).unwrap();
+        assert!(store.remove_collection(&coll_a, true).unwrap(), "packed={packed}");
+
+        let check = |store: &mut RefgetStore| {
+            let coll = store.get_collection(&coll_b).unwrap();
+            assert_eq!(coll.sequences.len(), 3, "packed={packed}");
+            for rec in &coll.sequences {
+                let m = rec.metadata();
+                let want = shared
+                    .iter()
+                    .chain([&("onlyB", "GGGGAAAA")])
+                    .find(|(n, _)| *n == m.name)
+                    .unwrap()
+                    .1;
+                let got = store
+                    .get_substring(&m.sha512t24u, 0, m.length)
+                    .unwrap_or_else(|e| panic!("packed={packed}: cannot read {}: {e}", m.name));
+                assert_eq!(got, want, "packed={packed}: {}", m.name);
+            }
+        };
+        check(&mut store);
+        drop(store);
+        let mut reopened = RefgetStore::open_local(&store_dir).unwrap();
+        reopened.load_collection(&coll_b).unwrap();
+        check(&mut reopened);
+    }
+}
+
 /// Conflicting alias bindings are a semantic conflict, not a merge detail.
 /// Error by default; `--force-alias` takes the in-memory value.
 #[test]
@@ -5198,26 +5371,27 @@ fn has_pending_alias_in(store: &RefgetStore, namespace: &str) -> bool {
 fn test_alias_load_intra_file_clash_errors() {
     let dir = tempdir().unwrap();
     let (a, b) = digests_ab();
-    // Two clashing aliases, so the count is reported as plural.
     let tsv = write_alias_tsv(
         dir.path(),
         "ucsc.tsv",
         &[("chr1", &a), ("chr2", &a), ("chr1", &b), ("chr2", &b)],
     );
 
-    // In memory.
-    let mut store = RefgetStore::in_memory();
-    let err = store
-        .load_sequence_aliases("ucsc", &tsv)
-        .expect_err("one alias mapped to two digests must error");
-    let msg = err.to_string();
-    assert!(msg.starts_with("alias conflict"), "got: {}", msg);
-    assert!(msg.contains("'chr1'"), "error should name the alias: {}", msg);
-    assert!(msg.contains(&a) && msg.contains(&b), "error should name both digests: {}", msg);
-    assert!(msg.contains("line 1") && msg.contains("line 3"), "error should give line numbers: {}", msg);
-    assert!(msg.contains("2 aliases in this file clash"), "error should give the count: {}", msg);
-    assert!(store.list_sequence_aliases("ucsc").is_none(), "nothing may be loaded");
-    assert!(!has_pending_alias_in(&store, "ucsc"), "nothing may be pending");
+    // In memory. Force-alias must not let the last row win either.
+    for force in [false, true] {
+        let mut store = RefgetStore::in_memory();
+        store.set_force_alias(force);
+        let err = store
+            .load_sequence_aliases("ucsc", &tsv)
+            .expect_err("one alias mapped to two digests must error");
+        let msg = err.to_string();
+        assert!(msg.starts_with("alias conflict"), "force={force}: {msg}");
+        assert!(msg.contains("'chr1'"), "force={force}: error should name the alias: {msg}");
+        assert!(msg.contains(&a) && msg.contains(&b), "force={force}: error should name both digests: {msg}");
+        assert!(msg.contains("line 1") && msg.contains("line 3"), "force={force}: error should give line numbers: {msg}");
+        assert!(store.list_sequence_aliases("ucsc").is_none(), "force={force}: nothing may be loaded");
+        assert!(!has_pending_alias_in(&store, "ucsc"), "force={force}: nothing may be pending");
+    }
 
     // On disk: nothing is written either.
     let store_path = dir.path().join("store");
@@ -5229,37 +5403,9 @@ fn test_alias_load_intra_file_clash_errors() {
     assert!(!store_path.join("aliases/sequences/ucsc.tsv").exists());
 }
 
-#[test]
-fn test_alias_load_intra_file_clash_ignores_force() {
-    let dir = tempdir().unwrap();
-    let (a, b) = digests_ab();
-    let tsv = write_alias_tsv(dir.path(), "ucsc.tsv", &[("chr1", &a), ("chr1", &b)]);
-
-    let mut store = RefgetStore::in_memory();
-    store.set_force_alias(true);
-    let err = store
-        .load_sequence_aliases("ucsc", &tsv)
-        .expect_err("force-alias must not let the last row win");
-    assert!(err.to_string().contains("1 alias in this file clashes"), "got: {}", err);
-    assert!(store.list_sequence_aliases("ucsc").is_none());
-}
-
+/// Exact duplicate rows are fine, and the load returns the distinct count.
 #[test]
 fn test_alias_load_exact_duplicate_rows_ok() {
-    let dir = tempdir().unwrap();
-    let (a, _) = digests_ab();
-    let tsv = write_alias_tsv(dir.path(), "ncbi.tsv", &[("NC_000001.11", &a), ("NC_000001.11", &a)]);
-
-    let mut store = RefgetStore::in_memory();
-    assert_eq!(store.load_sequence_aliases("ncbi", &tsv).unwrap(), 1);
-    assert_eq!(store.aliases.resolve_sequence("ncbi", "NC_000001.11"), Some(a.to_key()));
-
-    // Re-loading the same file is idempotent.
-    assert_eq!(store.load_sequence_aliases("ncbi", &tsv).unwrap(), 1);
-}
-
-#[test]
-fn test_alias_load_returns_distinct_count() {
     let dir = tempdir().unwrap();
     let (a, b) = digests_ab();
     let tsv = write_alias_tsv(
@@ -5271,6 +5417,10 @@ fn test_alias_load_returns_distinct_count() {
     let mut store = RefgetStore::in_memory();
     assert_eq!(store.load_sequence_aliases("ncbi", &tsv).unwrap(), 2);
     assert_eq!(store.list_sequence_aliases("ncbi").unwrap().len(), 2);
+    assert_eq!(store.aliases.resolve_sequence("ncbi", "NC_000001.11"), Some(a.to_key()));
+
+    // Re-loading the same file is idempotent.
+    assert_eq!(store.load_sequence_aliases("ncbi", &tsv).unwrap(), 2);
 }
 
 #[test]
@@ -5300,20 +5450,14 @@ fn test_alias_load_conflicts_with_existing_unless_forced() {
 }
 
 #[test]
-fn test_add_alias_same_digest_is_noop() {
-    let (a, _) = digests_ab();
-    let mut store = RefgetStore::in_memory();
-    store.add_sequence_alias("ncbi", "NC_000001.11", &a).unwrap();
-    store.add_sequence_alias("ncbi", "NC_000001.11", &a).unwrap();
-    assert_eq!(store.list_sequence_aliases("ncbi").unwrap().len(), 1);
-    assert_eq!(store.aliases.resolve_sequence("ncbi", "NC_000001.11"), Some(a.to_key()));
-}
-
-#[test]
 fn test_add_alias_conflict_in_memory_store() {
     let (a, b) = digests_ab();
     let mut store = RefgetStore::in_memory();
     store.add_sequence_alias("ncbi", "NC_000001.11", &a).unwrap();
+    // The same digest again is a no-op.
+    store.add_sequence_alias("ncbi", "NC_000001.11", &a).unwrap();
+    assert_eq!(store.list_sequence_aliases("ncbi").unwrap().len(), 1);
+    assert_eq!(store.aliases.resolve_sequence("ncbi", "NC_000001.11"), Some(a.to_key()));
     store.pending.lock().unwrap().aliases.clear();
 
     let err = store
@@ -6179,7 +6323,7 @@ fn verify_parallel_matches_serial() {
 }
 
 // =========================================================================
-// Packed sequence layout (Goal 2, Phase 1)
+// Packed sequence layout
 // =========================================================================
 mod packed_layout {
     use super::*;
@@ -6213,13 +6357,6 @@ mod packed_layout {
             .collect();
         v.sort();
         v
-    }
-
-    fn stream_str(store: &RefgetStore, sha: &str, start: u64, end: u64) -> String {
-        let mut r = store.stream_sequence(sha, Some(start), Some(end)).unwrap();
-        let mut s = String::new();
-        r.read_to_string(&mut s).unwrap();
-        s
     }
 
     fn build_packed(
@@ -6257,63 +6394,7 @@ mod packed_layout {
         s
     }
 
-    // Test 1: byte-exactness vs standalone, both Raw and Encoded.
-    #[test]
-    fn round_trip_byte_exact_vs_standalone() {
-        for raw in [false, true] {
-            let work = tempdir().unwrap();
-            let fasta = work.path().join("in.fa");
-            fs::write(&fasta, PACKED_FASTA).unwrap();
-            let sdir = tempdir().unwrap();
-            let pdir = tempdir().unwrap();
-
-            let sstore = build_standalone(sdir.path(), &fasta, raw);
-            let pstore = build_packed(pdir.path(), &fasta, 1, raw, None);
-
-            // Manifest records the layout.
-            let manifest = fs::read_to_string(pdir.path().join("rgstore.json")).unwrap();
-            assert!(manifest.contains("\"layout\": \"packed\""), "manifest: {manifest}");
-
-            let list = seqs(&sstore);
-            assert_eq!(list, seqs(&pstore), "sequence sets differ (raw={raw})");
-            assert!(!list.is_empty());
-
-            for (sha, len) in &list {
-                let len = *len;
-                // whole sequence
-                let a = sstore.get_substring(sha, 0, len).unwrap();
-                let b = pstore.get_substring(sha, 0, len).unwrap();
-                assert_eq!(a, b, "whole seq differs (raw={raw}) {sha}");
-
-                // scattered substrings
-                let ranges: Vec<(usize, usize)> = vec![(0, 4), (2, 7), (len.saturating_sub(4), len), (1, 1)];
-                let sa = sstore.get_substrings(sha, &ranges).unwrap();
-                let sb = pstore.get_substrings(sha, &ranges).unwrap();
-                assert_eq!(sa, sb, "get_substrings differ (raw={raw}) {sha}");
-
-                // per-range get_substring
-                for &(s, e) in &ranges {
-                    if s == e {
-                        continue;
-                    }
-                    assert_eq!(
-                        sstore.get_substring(sha, s, e).unwrap(),
-                        pstore.get_substring(sha, s, e).unwrap(),
-                        "get_substring [{s},{e}) differ (raw={raw}) {sha}"
-                    );
-                }
-
-                // streaming
-                assert_eq!(
-                    stream_str(&sstore, sha, 0, len as u64),
-                    stream_str(&pstore, sha, 0, len as u64),
-                    "stream differs (raw={raw}) {sha}"
-                );
-            }
-        }
-    }
-
-    // Test 2: parallel == serial determinism of packs + sidecar + rgsi.
+    // parallel == serial determinism of packs + sidecar + rgsi.
     #[test]
     fn parallel_equals_serial_packed() {
         let work = tempdir().unwrap();
@@ -6346,20 +6427,7 @@ mod packed_layout {
         assert_eq!(rgsi1, rgsi4, "sequences.rgsi must be byte-identical (regression guard)");
     }
 
-    // Test 3: bounded file count — no `.seq` files, packs present.
-    #[test]
-    fn bounded_file_count_no_seq_files() {
-        let work = tempdir().unwrap();
-        let fasta = work.path().join("in.fa");
-        fs::write(&fasta, PACKED_FASTA).unwrap();
-        let dir = tempdir().unwrap();
-        let _ = build_packed(dir.path(), &fasta, 4, false, Some(8));
-
-        assert!(collect_seq_files(dir.path()).is_empty(), "packed store must have no .seq files");
-        assert!(!collect_packs(dir.path()).is_empty(), "packed store must have pack files");
-    }
-
-    // Test 4: sealing — second import adds new packs, leaves the first untouched.
+    // sealing — second import adds new packs, leaves the first untouched.
     #[test]
     fn sealing_second_import_leaves_first_packs_untouched() {
         let work = tempdir().unwrap();
@@ -6391,48 +6459,23 @@ mod packed_layout {
         assert!(packs_ab.len() > packs_a.len(), "import B must add new packs");
 
         // The merged sidecar resolves sequences from both imports.
-        let store = RefgetStore::open_local(dir.path()).unwrap();
-        for (sha, len) in seqs(&store) {
-            assert!(store.get_substring(&sha, 0, len).is_ok(), "cannot read {sha}");
+        let bases: std::collections::HashMap<&str, &str> = [
+            ("a1", "ACGTACGTACGT"),
+            ("a2", "GGGGCCCCAAAA"),
+            ("b1", "TTTTACGTACGT"),
+            ("b2", "CCCCGGGGACGT"),
+        ]
+        .into_iter()
+        .collect();
+        let mut store = RefgetStore::open_local(dir.path()).unwrap();
+        let listed = store.list_sequences().unwrap();
+        assert_eq!(listed.len(), 4);
+        for m in &listed {
+            assert_eq!(store.get_substring(&m.sha512t24u, 0, m.length).unwrap(), bases[m.name.as_str()]);
         }
     }
 
-    // Test 5: substring narrowing + coalescing with a shrunk block size.
-    #[test]
-    fn substring_narrowing_and_coalescing() {
-        let work = tempdir().unwrap();
-        let fasta = work.path().join("in.fa");
-        // One long-ish sequence (raw mode: 1 byte/base) so block boundaries matter.
-        let seq: String = "ACGT".repeat(64); // 256 bases
-        fs::write(&fasta, format!(">long\n{}\n", seq)).unwrap();
-        let dir = tempdir().unwrap();
-
-        let mut store = RefgetStore::on_disk_packed(dir.path()).unwrap();
-        store.set_quiet(true);
-        store.disable_encoding(); // raw: 1 byte per base
-        store.add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new().jobs(1)).unwrap();
-
-        // Reopen so records are stubs served through the pack + block cache.
-        let mut store = RefgetStore::open_local(dir.path()).unwrap();
-        store.inner.set_pack_block_size_for_test(16); // 16-byte blocks
-
-        let sha = store.sequence_metadata().next().unwrap().sha512t24u.clone();
-
-        // A narrow read touches only the covering block(s).
-        assert_eq!(store.get_substring(&sha, 20, 24).unwrap(), seq[20..24]);
-        let after_first = store.inner.pack_cache.cached_block_count();
-        assert!(after_first >= 1 && after_first <= 2, "narrow read cached {after_first} blocks");
-
-        // An overlapping read within the same block fetches nothing new.
-        let _ = store.get_substring(&sha, 21, 23).unwrap();
-        assert_eq!(
-            store.inner.pack_cache.cached_block_count(),
-            after_first,
-            "overlapping read must not fetch new blocks"
-        );
-    }
-
-    // Test 6: standalone pre-flight count gate.
+    // standalone pre-flight count gate.
     #[test]
     fn count_gate_standalone_only() {
         let work = tempdir().unwrap();
@@ -6453,17 +6496,33 @@ mod packed_layout {
         assert!(collect_seq_files(dir.path()).is_empty(), "no .seq files after gate rejection");
         assert!(!dir.path().join("sequences.pack.idx").exists());
 
-        // force overrides.
+        // force alone does not pass the gate.
+        {
+            let mut s = RefgetStore::on_disk(dir.path()).unwrap();
+            s.set_quiet(true);
+            let err = s
+                .add_sequence_collection_from_fasta(
+                    &fasta,
+                    FastaImportOptions::new().standalone_file_limit(2).force(true),
+                )
+                .expect_err("force must not skip the count gate");
+            let msg = err.to_string();
+            assert!(msg.contains("standalone_file_limit"), "{msg}");
+            assert!(!msg.contains("force"), "the message must not suggest force: {msg}");
+        }
+        assert!(collect_seq_files(dir.path()).is_empty(), "no .seq files after a forced rejection");
+
+        // A higher limit lets the import through.
         {
             let mut s = RefgetStore::on_disk(dir.path()).unwrap();
             s.set_quiet(true);
             s.add_sequence_collection_from_fasta(
                 &fasta,
-                FastaImportOptions::new().standalone_file_limit(2).force(true),
+                FastaImportOptions::new().standalone_file_limit(3),
             )
             .unwrap();
         }
-        assert!(!collect_seq_files(dir.path()).is_empty(), "force should write files");
+        assert!(!collect_seq_files(dir.path()).is_empty(), "a raised limit should write files");
 
         // Packed bypasses the gate entirely.
         let pdir = tempdir().unwrap();
@@ -6479,7 +6538,13 @@ mod packed_layout {
         assert!(!collect_packs(pdir.path()).is_empty(), "packed import should succeed");
     }
 
-    // Test 6b: re-importing a FASTA the store already holds must not count
+    /// The default loose-file limit is 500,000.
+    #[test]
+    fn default_standalone_file_limit_is_500k() {
+        assert_eq!(FastaImportOptions::new().standalone_file_limit, 500_000);
+    }
+
+    // re-importing a FASTA the store already holds must not count
     // its sequences twice against the standalone gate.
     #[test]
     fn count_gate_ignores_reimported_sequences() {
@@ -6504,7 +6569,7 @@ mod packed_layout {
         .expect("re-import of present sequences must pass the gate");
     }
 
-    // Test 7a: deletion accounting + compact (default cap: dead bytes remain).
+    // deletion accounting + compact (default cap: dead bytes remain).
     #[test]
     fn deletion_dead_bytes_and_compact() {
         let work = tempdir().unwrap();
@@ -6525,13 +6590,7 @@ mod packed_layout {
             s.add_sequence_collection_from_fasta(&fb, FastaImportOptions::new().jobs(1)).unwrap();
             dig_a = ma.digest.clone();
             // encoded length of a_only ("AAAACCCCGGGG" = 12 bases, 2 bits -> 3 bytes)
-            let a_only_sha = s
-                .sequence_metadata()
-                .find(|m| m.length == 12 && m.name == "a_only")
-                .map(|m| m.sha512t24u.clone())
-                .unwrap();
             len_a_only = 12usize.div_ceil(4) as u64; // 2 bits/base -> ceil(12*2/8)=3
-            let _ = a_only_sha;
             let sm = s.sequence_metadata().find(|m| m.name == "shared").unwrap();
             shared_sha = sm.sha512t24u.clone();
             shared_len = sm.length;
@@ -6543,7 +6602,7 @@ mod packed_layout {
 
         let store = RefgetStore::open_local(dir.path()).unwrap();
         // shared still resolves; a_only gone.
-        assert!(store.get_substring(&shared_sha, 0, shared_len).is_ok());
+        assert_eq!(store.get_substring(&shared_sha, 0, shared_len).unwrap(), "ACGTACGTACGT");
         assert!(
             store.sequence_metadata().all(|m| m.name != "a_only"),
             "a_only should be gone from the index"
@@ -6558,10 +6617,72 @@ mod packed_layout {
         assert!(report.bytes_reclaimed >= len_a_only, "compact should reclaim dead bytes");
         assert_eq!(store.packed_dead_bytes().unwrap(), 0, "no dead bytes after compact");
         // Retrieval still byte-identical.
-        assert!(store.get_substring(&shared_sha, 0, shared_len).is_ok());
+        assert_eq!(store.get_substring(&shared_sha, 0, shared_len).unwrap(), "ACGTACGTACGT");
     }
 
-    // Test 7b: a fully-dead pack is unlinked eagerly (small cap: one seq per pack).
+    /// `compact()` inside a caller's batch lock leaves that lock held.
+    #[test]
+    fn compact_keeps_a_batch_lock_the_caller_holds() {
+        let work = tempdir().unwrap();
+        let fasta = work.path().join("in.fa");
+        fs::write(&fasta, PACKED_FASTA).unwrap();
+        let dir = tempdir().unwrap();
+        let mut store = build_packed(dir.path(), &fasta, 1, false, None);
+
+        store.lock_for_batch("x").unwrap();
+        store.compact().unwrap();
+        assert!(store.holds_batch_lock(), "compact released the caller's lock");
+        store.release_batch_lock();
+
+        // Without a caller lock, compact takes and releases its own.
+        store.compact().unwrap();
+        assert!(!store.holds_batch_lock());
+    }
+
+    /// `compact()` keeps a pack no index lists. `prune_unreferenced` deletes
+    /// it and reports it, and keeps temp files and every pack the index
+    /// references.
+    #[test]
+    fn compact_prunes_unreferenced_packs_only_on_request() {
+        let work = tempdir().unwrap();
+        let fasta = work.path().join("in.fa");
+        fs::write(&fasta, PACKED_FASTA).unwrap();
+        let dir = tempdir().unwrap();
+        drop(build_packed(dir.path(), &fasta, 1, false, None));
+        let packs = collect_packs(dir.path());
+        assert_eq!(packs.len(), 1, "the import should commit one pack");
+        let packs_dir = dir.path().join("packs");
+        let unlisted = "0123456789abcdef0123456789abcdef.pack";
+        fs::copy(packs_dir.join(packs.keys().next().unwrap()), packs_dir.join(unlisted)).unwrap();
+        let temp = ".rgstore.tmp.pack.session.other.0";
+        fs::write(packs_dir.join(temp), b"another writer's open pack").unwrap();
+
+        let mut store = RefgetStore::open_local(dir.path()).unwrap();
+        let report = store.compact().unwrap();
+        assert_eq!(report.packs_pruned, 0);
+        assert!(packs_dir.join(unlisted).exists(), "compact() deleted an unlisted pack");
+        assert!(store.packed_dead_bytes().unwrap() > 0);
+
+        let report = store.compact_with(CompactOptions { prune_unreferenced: true }).unwrap();
+        assert_eq!(report.packs_pruned, 1);
+        assert!(!packs_dir.join(unlisted).exists(), "the unlisted pack survived pruning");
+        assert!(packs_dir.join(temp).exists(), "pruning deleted a temp file");
+        assert_eq!(store.packed_dead_bytes().unwrap(), 0);
+        let on_disk: std::collections::BTreeSet<String> =
+            collect_packs(dir.path()).into_keys().collect();
+        let indexed: std::collections::BTreeSet<String> =
+            sidecar_packs(dir.path()).into_iter().map(|p| format!("{p}.pack")).collect();
+        assert_eq!(on_disk, indexed);
+
+        let reopened = RefgetStore::open_local(dir.path()).unwrap();
+        for record in PACKED_FASTA.split('>').filter(|r| !r.trim().is_empty()) {
+            let bases: String = record.lines().skip(1).collect();
+            let sha = sha512t24u(bases.as_bytes());
+            assert_eq!(reopened.get_substring(&sha, 0, bases.len()).unwrap(), bases);
+        }
+    }
+
+    // a fully-dead pack is unlinked eagerly (small cap: one seq per pack).
     #[test]
     fn fully_dead_pack_unlinked() {
         let work = tempdir().unwrap();
@@ -6593,7 +6714,7 @@ mod packed_layout {
         assert_eq!(store.packed_dead_bytes().unwrap(), 0, "no dead bytes after eager unlink");
     }
 
-    // Test 8: incremental writes (panget's add_sequence_record path).
+    // incremental writes (panget's add_sequence_record path).
     #[test]
     fn incremental_add_sequence_record() {
         use crate::digest::{digest_sequence, encode_sequence, lookup_alphabet};
@@ -6637,7 +6758,7 @@ mod packed_layout {
         assert_eq!(store.get_substring(&sha2, 0, 12).unwrap(), "GGGGCCCCAAAA");
     }
 
-    // Test 9: standalone unchanged; manifest without `layout` opens Standalone.
+    // standalone unchanged; manifest without `layout` opens Standalone.
     #[test]
     fn standalone_unchanged_and_missing_layout_defaults() {
         let work = tempdir().unwrap();
@@ -6671,7 +6792,7 @@ mod packed_layout {
         assert!(RefgetStore::on_disk_packed(dir.path()).is_err());
     }
 
-    // Test 12: export a packed store -> standalone image; retrieval byte-identical.
+    // export a packed store -> standalone image; retrieval byte-identical.
     #[test]
     fn export_packed_to_standalone_image() {
         let work = tempdir().unwrap();
@@ -6698,21 +6819,6 @@ mod packed_layout {
                 "exported retrieval must match packed source for {sha}"
             );
         }
-    }
-
-    fn walkdir_seq_count(dir: &std::path::Path) -> usize {
-        let Ok(entries) = std::fs::read_dir(dir) else { return 0 };
-        entries
-            .filter_map(|e| e.ok())
-            .map(|e| {
-                let p = e.path();
-                if p.is_dir() {
-                    walkdir_seq_count(&p)
-                } else {
-                    usize::from(p.extension().is_some_and(|x| x == "seq"))
-                }
-            })
-            .sum()
     }
 
     /// Expected ASCII for each sequence of PACKED_FASTA, keyed by digest.
@@ -6751,31 +6857,47 @@ mod packed_layout {
                     .unwrap();
                 s.write().unwrap();
             }
-            let seq_files = walkdir_seq_count(&store_dir.join("sequences"));
-            assert_eq!(seq_files, 0, "{mode:?}: packed store wrote .seq files");
+            assert!(collect_seq_files(&store_dir).is_empty(), "{mode:?}: packed store wrote .seq files");
+            assert!(!collect_packs(&store_dir).is_empty(), "{mode:?}: packed store has no packs");
+            let manifest = fs::read_to_string(store_dir.join("rgstore.json")).unwrap();
+            assert!(manifest.contains("\"layout\": \"packed\""), "{mode:?} manifest: {manifest}");
 
-            let mut reopened = RefgetStore::open_local(&store_dir).unwrap();
-            reopened.set_quiet(true);
-            let expected = expected_by_digest(&reopened);
-            let ro = reopened.into_readonly();
-            for (sha, want) in &expected {
-                let n = want.len();
-                let got = ro.get_substring(sha, 1, n - 1).unwrap();
-                assert_eq!(got.as_str(), &want[1..n - 1], "{mode:?} substring");
+            // Pack block cache off (the default), then on.
+            for cache_mb in [0, 1] {
+                let mut reopened = RefgetStore::open_local(&store_dir).unwrap();
+                reopened.set_quiet(true);
+                reopened.set_pack_cache_mb(cache_mb);
+                let expected = expected_by_digest(&reopened);
+                let ro = reopened.into_readonly();
+                for (sha, want) in &expected {
+                    let n = want.len();
+                    let got = ro.get_substring(sha, 1, n - 1).unwrap();
+                    assert_eq!(got.as_str(), &want[1..n - 1], "{mode:?} cache={cache_mb} substring");
 
-                let mut r = ro.stream_sequence(sha, Some(2), Some(n as u64)).unwrap();
-                let mut streamed = String::new();
-                r.read_to_string(&mut streamed).unwrap();
-                assert_eq!(streamed, want[2..], "{mode:?} stream");
+                    let ranges = [(0, n), (0, 4), (2, 7), (n - 4, n), (1, 1)];
+                    let got = ro.get_substrings(sha, &ranges).unwrap();
+                    let wanted: Vec<&str> = ranges.iter().map(|&(s, e)| &want[s..e]).collect();
+                    assert_eq!(got, wanted, "{mode:?} cache={cache_mb} get_substrings");
 
-                assert!(ro.verify_sequence(sha, true).unwrap().is_none(), "{mode:?} verify");
-            }
+                    let mut r = ro.stream_sequence(sha, Some(2), Some(n as u64)).unwrap();
+                    let mut streamed = String::new();
+                    r.read_to_string(&mut streamed).unwrap();
+                    assert_eq!(streamed, want[2..], "{mode:?} cache={cache_mb} stream");
 
-            let digests: Vec<String> = expected.iter().map(|(d, _)| d.clone()).collect();
-            assert!(ro.load_resident(&digests).unwrap() > 0, "{mode:?} resident load");
-            for (sha, want) in &expected {
-                let got = ro.get_substring(sha, 0, want.len()).unwrap();
-                assert_eq!(got.as_str(), want.as_str(), "{mode:?} resident read");
+                    assert!(ro.verify_sequence(sha, true).unwrap().is_none(), "{mode:?} cache={cache_mb} verify");
+                }
+                let cached_blocks = ro.pack_cache.as_ref().map(|c| c.cached_block_count());
+                match cache_mb {
+                    0 => assert_eq!(cached_blocks, None, "{mode:?}: the cache is off by default"),
+                    _ => assert!(cached_blocks.unwrap() > 0, "{mode:?}: reads did not go through the cache"),
+                }
+
+                let digests: Vec<String> = expected.iter().map(|(d, _)| d.clone()).collect();
+                assert!(ro.load_resident(&digests).unwrap() > 0, "{mode:?} cache={cache_mb} resident load");
+                for (sha, want) in &expected {
+                    let got = ro.get_substring(sha, 0, want.len()).unwrap();
+                    assert_eq!(got.as_str(), want.as_str(), "{mode:?} cache={cache_mb} resident read");
+                }
             }
         }
     }
@@ -6821,7 +6943,7 @@ mod packed_layout {
             let out = dir.path().join("out.fa");
             let opts = ExportOptions {
                 label: LabelTemplate::parse("{name}").unwrap(),
-                line_width: Some(0),
+                line_width: 0,
                 ..Default::default()
             };
             let sel = ExportSelection::Collections { digests: vec![digest], names: None };
@@ -6872,7 +6994,7 @@ mod packed_layout {
             let out = dir.path().join("out.fa");
             let opts = ExportOptions {
                 label: LabelTemplate::parse("{name}").unwrap(),
-                line_width: Some(0),
+                line_width: 0,
                 write_cache: true,
                 ..Default::default()
             };
@@ -6911,6 +7033,483 @@ mod packed_layout {
         let mut s = build_packed(&dir.path().join("store"), &fasta, 1, false, None);
         assert!(s.set_encoding_mode(StorageMode::Raw).is_err());
         assert_eq!(s.storage_mode(), StorageMode::Encoded);
+    }
+
+    /// A packed import in which one file fails leaves a handle that commits a
+    /// readable store: the good file's sequences keep their pack rows, and the
+    /// failed file's sequences are neither indexed nor given pack rows. With a
+    /// 1-byte cap each sequence gets its own pack, so the failed file's packs
+    /// hold only dropped rows; they are deleted, and `packs/` holds only packs
+    /// the index references.
+    #[test]
+    fn packed_import_partial_failure_stays_readable() {
+        let expected: std::collections::HashMap<&str, &str> =
+            [("a1", "ACGTACGTACGT"), ("a2", "GGGGCCCCAAAA")].into_iter().collect();
+        for (jobs, cap) in [(1, None), (2, None), (1, Some(1)), (2, Some(1))] {
+            let work = tempdir().unwrap();
+            let fa = work.path().join("a.fa");
+            let fb = work.path().join("b.fa");
+            fs::write(&fa, ">a1\nACGTACGTACGT\n>a2\nGGGGCCCCAAAA\n").unwrap();
+            // b1 reaches the inserter; the third header is not UTF-8, so the
+            // build of b.fa fails after b1 was written into a pack.
+            fs::write(&fb, b">b1\nTTTTCCCCAAAAGGGG\n>b2\nCCCCAAAA\n>\xff\nACGT\n").unwrap();
+
+            let dir = tempdir().unwrap();
+            {
+                let mut s = RefgetStore::on_disk_packed(dir.path()).unwrap();
+                s.set_quiet(true);
+                if let Some(cap) = cap {
+                    s.set_pack_cap_bytes(cap);
+                }
+                s.add_sequence_collections_from_fastas(
+                    &[fa.clone(), fb.clone()],
+                    FastaImportOptions::new().jobs(jobs),
+                )
+                .expect_err("b.fa is malformed");
+                s.write().unwrap();
+            }
+
+            let mut store = RefgetStore::open_local(dir.path()).unwrap();
+            let listed = store.list_sequences().unwrap();
+            let mut names: Vec<&str> = listed.iter().map(|m| m.name.as_str()).collect();
+            names.sort();
+            assert_eq!(names, ["a1", "a2"], "jobs={jobs}");
+            for m in &listed {
+                let got = store
+                    .get_substring(&m.sha512t24u, 0, m.length)
+                    .unwrap_or_else(|e| panic!("jobs={jobs}: cannot read {}: {e}", m.name));
+                assert_eq!(got, expected[m.name.as_str()], "jobs={jobs}: {}", m.name);
+            }
+
+            let idx = fs::read(dir.path().join("sequences.pack.idx")).unwrap();
+            let rows = crate::store::packidx::read_pack_idx_rows(&idx).unwrap();
+            let mut indexed: Vec<&String> = rows.keys().collect();
+            indexed.sort();
+            let mut published: Vec<&String> = listed.iter().map(|m| &m.sha512t24u).collect();
+            published.sort();
+            assert_eq!(indexed, published, "jobs={jobs}: pack rows must match the index");
+
+            let referenced: std::collections::BTreeSet<String> =
+                rows.values().map(|r| format!("{}.pack", r.pack)).collect();
+            let on_disk: std::collections::BTreeSet<String> =
+                collect_packs(dir.path()).into_keys().collect();
+            assert_eq!(on_disk, referenced, "jobs={jobs} cap={cap:?}: unindexed packs left");
+        }
+    }
+
+    /// Deterministic pseudo-random bases, so the two writers' sequences differ.
+    fn lcg_bases(seed: u64, len: usize) -> String {
+        let mut x = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        (0..len)
+            .map(|_| {
+                x = x.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                b"ACGT"[(x >> 33) as usize % 4] as char
+            })
+            .collect()
+    }
+
+    /// Two handles on one packed store, in one process, import different
+    /// FASTAs at the same time. Each writer's temp packs have their own names,
+    /// so neither writes into the other's files, and both commits read back.
+    #[test]
+    fn two_packed_writers_in_one_process_do_not_share_temp_packs() {
+        let work = tempdir().unwrap();
+        let mut expected: std::collections::HashMap<String, String> = Default::default();
+        let mut fastas = Vec::new();
+        for (w, prefix) in ["a", "b"].iter().enumerate() {
+            let mut text = String::new();
+            for i in 0..40 {
+                let name = format!("{prefix}{i}");
+                let bases = lcg_bases((w as u64) * 1_000_000 + i, 400);
+                text.push_str(&format!(">{name}\n{bases}\n"));
+                expected.insert(name, bases);
+            }
+            let path = work.path().join(format!("{prefix}.fa"));
+            fs::write(&path, text).unwrap();
+            fastas.push(path);
+        }
+
+        let dir = tempdir().unwrap();
+        RefgetStore::on_disk_packed(dir.path()).unwrap().write().unwrap();
+        let mut handles: Vec<RefgetStore> = (0..2)
+            .map(|_| {
+                let mut s = RefgetStore::open_local(dir.path()).unwrap();
+                s.set_quiet(true);
+                // A few sequences per pack, so both writers use many ordinals.
+                s.set_pack_cap_bytes(300);
+                s
+            })
+            .collect();
+
+        let barrier = std::sync::Barrier::new(2);
+        std::thread::scope(|scope| {
+            for (s, fasta) in handles.iter_mut().zip(&fastas) {
+                let barrier = &barrier;
+                scope.spawn(move || {
+                    barrier.wait();
+                    s.add_sequence_collection_from_fasta(fasta, FastaImportOptions::new().jobs(2))
+                        .unwrap();
+                });
+            }
+        });
+        drop(handles);
+
+        let leftovers: Vec<String> = fs::read_dir(dir.path().join("packs"))
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.starts_with(".rgstore.tmp."))
+            .collect();
+        assert!(leftovers.is_empty(), "temp packs left behind: {leftovers:?}");
+
+        let mut store = RefgetStore::open_local(dir.path()).unwrap();
+        let listed = store.list_sequences().unwrap();
+        assert_eq!(listed.len(), expected.len());
+        for m in &listed {
+            let got = store
+                .get_substring(&m.sha512t24u, 0, m.length)
+                .unwrap_or_else(|e| panic!("cannot read {}: {e}", m.name));
+            assert_eq!(got, expected[&m.name], "{}", m.name);
+        }
+    }
+
+    /// A Full record holding 2-bit encoded bytes, as `add_sequence_record`
+    /// expects in an Encoded store.
+    fn encoded_record(name: &str, seq: &[u8]) -> SequenceRecord {
+        use crate::digest::{digest_sequence, encode_sequence, lookup_alphabet};
+        match digest_sequence(name, seq) {
+            SequenceRecord::Full { metadata, sequence } => {
+                let encoded = encode_sequence(&sequence[..], lookup_alphabet(&metadata.alphabet));
+                SequenceRecord::Full { metadata, sequence: encoded.unwrap().into() }
+            }
+            other => other,
+        }
+    }
+
+    /// Pack names (without `.pack`) listed in the store's sidecar.
+    fn sidecar_packs(dir: &std::path::Path) -> std::collections::HashSet<String> {
+        match fs::read(dir.join("sequences.pack.idx")) {
+            Ok(bytes) => crate::store::packidx::read_pack_idx_rows(&bytes)
+                .unwrap()
+                .values()
+                .map(|r| r.pack.to_string())
+                .collect(),
+            Err(_) => Default::default(),
+        }
+    }
+
+    /// Dropping a handle with an open, unsealed session pack deletes its temp.
+    #[test]
+    fn dropping_unsealed_session_pack_removes_its_temp() {
+        let dir = tempdir().unwrap();
+        {
+            let mut s = RefgetStore::on_disk_packed(dir.path()).unwrap();
+            s.set_quiet(true);
+            s.add_sequence_record(encoded_record("seg1", b"ACGTACGTACGT"), false).unwrap();
+            let temps = fs::read_dir(dir.path().join("packs")).unwrap().count();
+            assert_eq!(temps, 1, "the session pack should be open");
+        }
+        assert_eq!(fs::read_dir(dir.path().join("packs")).unwrap().count(), 0);
+    }
+
+    /// Writer A on a store with a 1-byte pack cap: adding the second record
+    /// seals the first record's pack, which no sidecar lists until A commits.
+    /// Returns A and the two `(digest, bases)` pairs it holds.
+    fn writer_with_sealed_uncommitted_pack(
+        dir: &std::path::Path,
+    ) -> (RefgetStore, Vec<(String, &'static str)>) {
+        let mut a = RefgetStore::open_local(dir).unwrap();
+        a.set_quiet(true);
+        a.set_pack_cap_bytes(1);
+        let mut held = Vec::new();
+        for (name, bases) in [("a1", "TTTTGGGGCCCCAAAA"), ("a2", "GGGGAAAATTTTCCCC")] {
+            let record = encoded_record(name, bases.as_bytes());
+            held.push((record.metadata().sha512t24u.clone(), bases));
+            a.add_sequence_record(record, false).unwrap();
+        }
+        (a, held)
+    }
+
+    /// Removal and compaction unlink only packs the sidecar listed. A pack
+    /// another writer has sealed but not committed survives both, and that
+    /// writer's later commit reads back.
+    #[test]
+    fn removal_and_compact_spare_another_writers_uncommitted_pack() {
+        let work = tempdir().unwrap();
+        let fx = work.path().join("x.fa");
+        fs::write(&fx, ">x1\nAAAACCCCGGGGTTTT\n>x2\nACGTACGTACGTACGT\n").unwrap();
+        let dir = tempdir().unwrap();
+        let dig_x = {
+            let mut s = RefgetStore::on_disk_packed(dir.path()).unwrap();
+            s.set_quiet(true);
+            s.set_pack_cap_bytes(1);
+            let (meta, _) = s
+                .add_sequence_collection_from_fasta(&fx, FastaImportOptions::new().jobs(1))
+                .unwrap();
+            meta.digest
+        };
+        let x_packs = sidecar_packs(dir.path());
+
+        let (a, held) = writer_with_sealed_uncommitted_pack(dir.path());
+        let uncommitted: Vec<String> = collect_packs(dir.path())
+            .into_keys()
+            .filter(|n| !x_packs.contains(n.trim_end_matches(".pack")))
+            .collect();
+        assert_eq!(uncommitted.len(), 1, "A should have sealed one pack: {uncommitted:?}");
+
+        // Writer B removes X, which leaves X's packs fully dead, then compacts.
+        {
+            let mut b = RefgetStore::open_local(dir.path()).unwrap();
+            b.set_quiet(true);
+            assert!(b.remove_collection(&dig_x, true).unwrap());
+            b.compact().unwrap();
+        }
+        let packs_after = collect_packs(dir.path());
+        assert!(packs_after.contains_key(&uncommitted[0]), "B deleted A's uncommitted pack");
+        for x in &x_packs {
+            assert!(!packs_after.contains_key(&format!("{x}.pack")), "X's dead pack {x} survived");
+        }
+
+        a.write().unwrap();
+        drop(a);
+        let store = RefgetStore::open_local(dir.path()).unwrap();
+        for (sha, bases) in &held {
+            assert_eq!(store.get_substring(sha, 0, bases.len()).unwrap(), *bases);
+        }
+    }
+
+    /// A commit refuses rows that point at a pack no longer on disk, instead
+    /// of publishing them.
+    #[test]
+    fn commit_refuses_rows_whose_pack_is_gone() {
+        let dir = tempdir().unwrap();
+        RefgetStore::on_disk_packed(dir.path()).unwrap().write().unwrap();
+        let (a, _) = writer_with_sealed_uncommitted_pack(dir.path());
+        for name in collect_packs(dir.path()).keys() {
+            fs::remove_file(dir.path().join("packs").join(name)).unwrap();
+        }
+        let err = a.write().expect_err("the commit must refuse a missing pack");
+        assert!(err.to_string().contains("no longer in the store"), "{err}");
+        assert!(sidecar_packs(dir.path()).is_empty(), "no rows may be published");
+    }
+
+    /// Dropping a handle deletes the packs it sealed but never committed, and
+    /// nothing else: packs committed by `write()` or by a successful import
+    /// stay, and read back, after their handle is dropped.
+    #[test]
+    fn dropping_a_handle_removes_its_uncommitted_sealed_packs() {
+        let dir = tempdir().unwrap();
+        RefgetStore::on_disk_packed(dir.path()).unwrap().write().unwrap();
+        let (a, _) = writer_with_sealed_uncommitted_pack(dir.path());
+        assert_eq!(collect_packs(dir.path()).len(), 1, "a1's pack should be sealed");
+        drop(a);
+        let left: Vec<_> = fs::read_dir(dir.path().join("packs"))
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name())
+            .collect();
+        assert!(left.is_empty(), "packs/ should be empty: {left:?}");
+
+        let (a, mut held) = writer_with_sealed_uncommitted_pack(dir.path());
+        a.write().unwrap();
+        drop(a);
+        let work = tempdir().unwrap();
+        let fasta = work.path().join("c.fa");
+        let imported = [("c1", "ACGTTGCAACGTTGCA"), ("c2", "CCCCGGGGAAAATTTT")];
+        let text: String = imported.iter().map(|(n, b)| format!(">{n}\n{b}\n")).collect();
+        fs::write(&fasta, text).unwrap();
+        {
+            let mut s = RefgetStore::open_local(dir.path()).unwrap();
+            s.set_quiet(true);
+            s.set_pack_cap_bytes(1);
+            s.add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new().jobs(1))
+                .unwrap();
+        }
+        held.extend(imported.iter().map(|(_, b)| (sha512t24u(b.as_bytes()), *b)));
+
+        let on_disk: std::collections::BTreeSet<String> =
+            collect_packs(dir.path()).into_keys().collect();
+        let indexed: std::collections::BTreeSet<String> =
+            sidecar_packs(dir.path()).into_iter().map(|p| format!("{p}.pack")).collect();
+        assert_eq!(on_disk.len(), 4, "one pack per sequence: {on_disk:?}");
+        assert_eq!(on_disk, indexed);
+        let store = RefgetStore::open_local(dir.path()).unwrap();
+        for (sha, bases) in &held {
+            assert_eq!(store.get_substring(sha, 0, bases.len()).unwrap(), *bases);
+        }
+    }
+
+    /// A commit whose session seal fails keeps the session, so the rows of
+    /// sub-packs it sealed earlier are committed by the next attempt.
+    #[cfg(unix)]
+    #[test]
+    fn failed_session_seal_keeps_sealed_rows_for_the_next_commit() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempdir().unwrap();
+        RefgetStore::on_disk_packed(dir.path()).unwrap().write().unwrap();
+        let (a, held) = writer_with_sealed_uncommitted_pack(dir.path());
+
+        let packs = dir.path().join("packs");
+        fs::set_permissions(&packs, fs::Permissions::from_mode(0o555)).unwrap();
+        if fs::write(packs.join("probe"), b"x").is_ok() {
+            // Permissions are not enforced here (for example, running as root).
+            let _ = fs::remove_file(packs.join("probe"));
+            fs::set_permissions(&packs, fs::Permissions::from_mode(0o755)).unwrap();
+            return;
+        }
+        let first = a.write();
+        fs::set_permissions(&packs, fs::Permissions::from_mode(0o755)).unwrap();
+        first.expect_err("sealing the open pack fails while packs/ is read-only");
+
+        a.write().unwrap();
+        drop(a);
+        let store = RefgetStore::open_local(dir.path()).unwrap();
+        for (sha, bases) in &held {
+            assert_eq!(store.get_substring(sha, 0, bases.len()).unwrap(), *bases);
+        }
+        // The retried seal still names each pack by the hash of its bytes.
+        use sha2::Digest as _;
+        for (name, bytes) in collect_packs(dir.path()) {
+            let digest = sha2::Sha256::digest(&bytes);
+            let want: String = digest[..16].iter().map(|b| format!("{:02x}", b)).collect();
+            assert_eq!(name, format!("{want}.pack"));
+        }
+    }
+
+    /// Bytes a failed append left in the open pack are overwritten by the next
+    /// append and cut off at seal: later rows keep their offsets, and the pack
+    /// is named by the hash of exactly the bytes its rows cover.
+    #[cfg(unix)]
+    #[test]
+    fn append_after_partial_write_keeps_offsets_and_pack_name() {
+        use sha2::Digest as _;
+        use std::io::{Seek as _, SeekFrom, Write as _};
+        let dir = tempdir().unwrap();
+        let mut held = Vec::new();
+        {
+            let mut s = RefgetStore::on_disk_packed(dir.path()).unwrap();
+            s.set_quiet(true);
+            for (i, (name, bases)) in
+                [("a", "ACGTACGTTTTTGGGGCCCCAAAA"), ("b", "GGGGAAAATTTTCCCC")].into_iter().enumerate()
+            {
+                if i == 1 {
+                    // What a write that failed part way leaves behind: bytes
+                    // past the tracked length, and the file cursor after them.
+                    // They are longer than b's bytes, so some outlast b's write.
+                    let mut guard = s.inner.open_session_pack.lock().unwrap();
+                    let session = guard.as_mut().unwrap();
+                    session.file.seek(SeekFrom::Start(session.len)).unwrap();
+                    session.file.write_all(b"partial write").unwrap();
+                }
+                let record = encoded_record(name, bases.as_bytes());
+                held.push((record.metadata().sha512t24u.clone(), bases));
+                s.add_sequence_record(record, false).unwrap();
+            }
+            s.write().unwrap();
+        }
+
+        let store = RefgetStore::open_local(dir.path()).unwrap();
+        for (sha, bases) in &held {
+            assert_eq!(store.get_substring(sha, 0, bases.len()).unwrap(), *bases);
+        }
+        let rows = crate::store::packidx::read_pack_idx_rows(
+            &fs::read(dir.path().join("sequences.pack.idx")).unwrap(),
+        )
+        .unwrap();
+        let packs = collect_packs(dir.path());
+        assert_eq!(packs.len(), 1);
+        for (name, bytes) in packs {
+            let digest = sha2::Sha256::digest(&bytes);
+            let want: String = digest[..16].iter().map(|b| format!("{:02x}", b)).collect();
+            assert_eq!(name, format!("{want}.pack"), "pack name must hash its content");
+            let covered: u64 = rows
+                .values()
+                .filter(|r| format!("{}.pack", r.pack) == name)
+                .map(|r| r.len)
+                .sum();
+            assert_eq!(bytes.len() as u64, covered, "{name} holds bytes no row covers");
+        }
+    }
+
+    /// An `add_sequence_record` whose bytes cannot be written returns the
+    /// error and leaves nothing behind: a later `write()` publishes no row
+    /// for the sequence, a forced re-add of a stored sequence keeps it under
+    /// its old name, and the same record adds and reads back once the disk is
+    /// writable again. Packed and standalone layouts alike.
+    #[cfg(unix)]
+    #[test]
+    fn failed_record_write_leaves_no_trace() {
+        use std::os::unix::fs::PermissionsExt;
+        let listed = |store: &RefgetStore| -> std::collections::BTreeMap<String, String> {
+            store.sequence_metadata().map(|m| (m.sha512t24u, m.name)).collect()
+        };
+        let reads_back = |dir: &std::path::Path, held: &[(String, &str)]| {
+            let store = RefgetStore::open_local(dir).unwrap();
+            let names = listed(&store);
+            let want: std::collections::BTreeSet<&String> = held.iter().map(|(s, _)| s).collect();
+            assert_eq!(names.keys().collect::<std::collections::BTreeSet<_>>(), want);
+            for (sha, bases) in held {
+                assert_eq!(store.get_substring(sha, 0, bases.len()).unwrap(), *bases);
+            }
+            names
+        };
+        let (kept_bases, failed_bases) = ("ACGTACGTTTTTGGGG", "GGGGAAAATTTTCCCCACGT");
+        for packed in [true, false] {
+            let dir = tempdir().unwrap();
+            let mut s = if packed {
+                RefgetStore::on_disk_packed(dir.path())
+            } else {
+                RefgetStore::on_disk(dir.path())
+            }
+            .unwrap();
+            s.set_quiet(true);
+            let kept = encoded_record("kept", kept_bases.as_bytes());
+            let failed = encoded_record("failed", failed_bases.as_bytes());
+            let mut held = vec![(kept.metadata().sha512t24u.clone(), kept_bases)];
+            s.add_sequence_record(kept, false).unwrap();
+            s.write().unwrap();
+
+            // Make the directory the bytes go into, and its subdirectories,
+            // read-only, so no new file can be created there.
+            let data_dir = dir.path().join(if packed { "packs" } else { "sequences" });
+            fs::create_dir_all(&data_dir).unwrap();
+            let mut dirs = vec![data_dir.clone()];
+            dirs.extend(
+                fs::read_dir(&data_dir)
+                    .unwrap()
+                    .filter_map(|e| e.ok())
+                    .map(|e| e.path())
+                    .filter(|p| p.is_dir()),
+            );
+            let set_mode = |mode: u32| {
+                for d in &dirs {
+                    fs::set_permissions(d, fs::Permissions::from_mode(mode)).unwrap();
+                }
+            };
+            set_mode(0o555);
+            if fs::write(data_dir.join("probe"), b"x").is_ok() {
+                // Permissions are not enforced here (for example, running as root).
+                let _ = fs::remove_file(data_dir.join("probe"));
+                set_mode(0o755);
+                return;
+            }
+            let new_add = s.add_sequence_record(failed.clone(), false);
+            let renamed = encoded_record("renamed", kept_bases.as_bytes());
+            let forced_add = s.add_sequence_record(renamed, true);
+            set_mode(0o755);
+            new_add.expect_err("adding a record whose bytes cannot be written must fail");
+            forced_add.expect_err("a forced re-add whose bytes cannot be written must fail");
+            assert!(s.sequence_metadata().all(|m| m.name != "failed"), "packed={packed}");
+            s.write().unwrap();
+            let names = reads_back(dir.path(), &held);
+            assert_eq!(names[&held[0].0], "kept", "packed={packed}: the failed re-add renamed it");
+
+            s.add_sequence_record(failed, false).unwrap();
+            held.push((sha512t24u(failed_bases.as_bytes()), failed_bases));
+            s.write().unwrap();
+            drop(s);
+            reads_back(dir.path(), &held);
+        }
     }
 }
 
@@ -6996,14 +7595,14 @@ fn test_export_leaves_no_sequence_loaded() {
         ExportSelection::All,
     ];
     for sel in &selections {
-        for opts in [ExportOptions::default(), name_opts(None)] {
+        for opts in [ExportOptions::default(), name_opts(80)] {
             store.export_fasta(sel, &out, &opts).unwrap();
             for d in &all_digests {
                 assert!(!store.is_sequence_loaded(d), "{sel:?} left {d} loaded");
             }
         }
     }
-    let label = LabelTemplate::parse("name").unwrap();
+    let label = LabelTemplate::parse("{name}").unwrap();
     store
         .export_fasta_from_regions(&digest, bed.to_str().unwrap(), out.to_str().unwrap(), &label)
         .unwrap();
@@ -7042,7 +7641,6 @@ struct LabelFixture {
     store: RefgetStore,
     a: String,
     b: String,
-    c: String,
     s1: String,
     orphan: String,
     _dir: tempfile::TempDir,
@@ -7081,13 +7679,13 @@ fn label_fixture() -> LabelFixture {
     store.add_collection_alias("ucsc", "zzz", &c).unwrap();
     store.add_collection_alias("ucsc", "cgen", &c).unwrap();
 
-    LabelFixture { store, a, b, c, s1, orphan, _dir: dir }
+    LabelFixture { store, a, b, s1, orphan, _dir: dir }
 }
 
 fn export_headers(store: &mut RefgetStore, sel: &ExportSelection, label: &str) -> anyhow::Result<(Vec<String>, ExportSummary)> {
     let dir = tempdir().unwrap();
     let out = dir.path().join("o.fa");
-    let opts = ExportOptions { label: LabelTemplate::parse(label)?, molecule: None, line_width: None, ..Default::default() };
+    let opts = ExportOptions { label: LabelTemplate::parse(label)?, molecule: None, line_width: 80, ..Default::default() };
     let summary = store.export_fasta(sel, &out, &opts)?;
     let headers = fs::read_to_string(&out)
         .unwrap()
@@ -7131,13 +7729,13 @@ fn test_label_collection_name_writes_each_genome_copy() {
 #[test]
 fn test_label_alias_fallbacks_are_counted() {
     let mut f = label_fixture();
-    let (headers, summary) = export_headers(&mut f.store, &coll_sel(&f.a, None), "seq:refseq").unwrap();
+    let (headers, summary) = export_headers(&mut f.store, &coll_sel(&f.a, None), "{seq:refseq}").unwrap();
     assert_eq!(headers[0], "NC_1");
     assert!(headers[1].starts_with("SQ."));
     assert_eq!(summary.n_fallbacks, 2);
 
     // Unknown namespace errors and lists the store's namespaces.
-    let err = export_headers(&mut f.store, &coll_sel(&f.a, None), "seq:nope").unwrap_err().to_string();
+    let err = export_headers(&mut f.store, &coll_sel(&f.a, None), "{seq:nope}").unwrap_err().to_string();
     assert!(err.contains("nope") && err.contains("refseq") && err.contains("ensembl"), "{err}");
     let err = export_headers(&mut f.store, &coll_sel(&f.a, None), "{col:nope}/{name}").unwrap_err().to_string();
     assert!(err.contains("nope") && err.contains("ucsc"), "{err}");
@@ -7149,18 +7747,18 @@ fn test_label_name_with_all_clash_and_dedup() {
     let dir = tempdir().unwrap();
     let out = dir.path().join("o.fa");
     // Same name, same sequence everywhere: dedup, no error.
-    let (headers, summary) = export_headers(&mut f.store, &coll_sel_many(&[&f.a, &f.b], Some(&["chr1"])), "name").unwrap();
+    let (headers, summary) = export_headers(&mut f.store, &coll_sel_many(&[&f.a, &f.b], Some(&["chr1"])), "{name}").unwrap();
     assert_eq!(headers, vec!["chr1"]);
     assert_eq!(summary.n_deduplicated, 1);
     // Across the whole fixture the only repeated name is chr1, same sequence.
-    let (_, summary) = export_headers(&mut f.store, &ExportSelection::All, "name").unwrap();
+    let (_, summary) = export_headers(&mut f.store, &ExportSelection::All, "{name}").unwrap();
     assert_eq!(summary.n_deduplicated, 1);
 
     // A clash: a new collection where `chr1` is a different sequence.
     let fd = dir.path().join("d.fa");
     fs::write(&fd, ">chr1\nCCCCCCCC\n").unwrap();
     f.store.add_sequence_collection_from_fasta(&fd, FastaImportOptions::new()).unwrap();
-    let opts = ExportOptions { label: LabelTemplate::parse("name").unwrap(), ..Default::default() };
+    let opts = ExportOptions { label: LabelTemplate::parse("{name}").unwrap(), ..Default::default() };
     let err = f.store.export_fasta(&ExportSelection::All, &out, &opts).unwrap_err().to_string();
     assert!(err.contains("'chr1'") && err.contains("collection") && err.contains("{col}"), "{err}");
     assert!(!out.exists(), "no output may be written before a label clash error");
@@ -7176,21 +7774,20 @@ fn coll_sel_many(digests: &[&str], names: Option<&[&str]>) -> ExportSelection {
 #[test]
 fn test_label_same_for_one_collection_or_all() {
     let mut f = label_fixture();
-    for t in ["{seq}", "{col}/{name}", "{col:ucsc}#{name}", "seq:refseq"] {
+    for t in ["{seq}", "{col}/{name}", "{col:ucsc}#{name}", "{seq:refseq}"] {
         let (one, _) = export_headers(&mut f.store, &coll_sel(&f.b, None), t).unwrap();
         let (all, _) = export_headers(&mut f.store, &ExportSelection::All, t).unwrap();
         for h in &one {
             assert!(all.contains(h), "{t}: {h} missing from All");
         }
     }
-    let _ = (&f.c, &f.s1);
 }
 
 #[test]
 fn test_label_whitespace_is_an_error() {
     let mut f = label_fixture();
     f.store.add_sequence_alias("spacey", "has space", &f.s1.clone()).unwrap();
-    let err = export_headers(&mut f.store, &coll_sel(&f.a, None), "seq:spacey").unwrap_err().to_string();
+    let err = export_headers(&mut f.store, &coll_sel(&f.a, None), "{seq:spacey}").unwrap_err().to_string();
     assert!(err.contains("whitespace"), "{err}");
     let err = export_headers(&mut f.store, &coll_sel(&f.a, None), "{name} x").unwrap_err().to_string();
     assert!(err.contains("whitespace"), "{err}");
@@ -7210,7 +7807,7 @@ fn test_molecule_filter() {
         (Some(Molecule::Dna), vec!["dna"]),
         (Some(Molecule::Protein), vec!["prot"]),
     ] {
-        let opts = ExportOptions { label: LabelTemplate::parse("name").unwrap(), molecule, line_width: None, ..Default::default() };
+        let opts = ExportOptions { label: LabelTemplate::parse("{name}").unwrap(), molecule, line_width: 80, ..Default::default() };
         store.export_fasta(&coll_sel(&digest, None), &out, &opts).unwrap();
         let headers: Vec<String> = fs::read_to_string(&out)
             .unwrap()

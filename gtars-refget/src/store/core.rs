@@ -49,23 +49,7 @@ impl RefgetStore {
 
     /// Create a disk-backed RefgetStore.
     pub fn on_disk<P: AsRef<Path>>(cache_path: P) -> Result<Self> {
-        let cache_path = cache_path.as_ref();
-        let index_path = cache_path.join("rgstore.json");
-
-        if index_path.exists() {
-            Self::open_local(cache_path)
-        } else {
-            let mode = StorageMode::Encoded;
-            create_dir_all(cache_path)?;
-            let mut inner = ReadonlyRefgetStore::new(mode);
-            inner.local_path = Some(cache_path.to_path_buf());
-            inner.seqdata_path_template = Some(DEFAULT_SEQDATA_PATH_TEMPLATE.to_string());
-            inner.persist_to_disk = true;
-            create_dir_all(cache_path.join("sequences"))?;
-            create_dir_all(cache_path.join("collections"))?;
-            create_dir_all(cache_path.join("fhr"))?;
-            Ok(Self { inner })
-        }
+        Self::create_or_open(cache_path.as_ref(), Layout::Standalone)
     }
 
     /// Create a disk-backed RefgetStore with the PACKED sequence layout.
@@ -76,38 +60,42 @@ impl RefgetStore {
     /// `layout = Packed` and creates `packs/`.
     ///
     /// Opening an EXISTING store: the layout always comes from its manifest.
-    /// Calling `on_disk_packed` on an existing STANDALONE store is an error —
-    /// there is no in-place conversion in Phase 1 (export a standalone image
+    /// Calling `on_disk_packed` on an existing STANDALONE store is an error,
+    /// since there is no in-place conversion (export a standalone image
     /// instead). Calling it on an existing packed store just opens it.
     pub fn on_disk_packed<P: AsRef<Path>>(cache_path: P) -> Result<Self> {
         let cache_path = cache_path.as_ref();
-        let index_path = cache_path.join("rgstore.json");
-
-        if index_path.exists() {
-            let store = Self::open_local(cache_path)?;
-            if store.inner.layout != Layout::Packed {
-                return Err(anyhow::anyhow!(
-                    "store at {} already exists with a standalone layout; \
-                     on_disk_packed cannot convert it in place. Create a fresh \
-                     packed store and export/re-import, or open it with on_disk.",
-                    cache_path.display()
-                ));
-            }
-            Ok(store)
-        } else {
-            let mode = StorageMode::Encoded;
-            create_dir_all(cache_path)?;
-            let mut inner = ReadonlyRefgetStore::new(mode);
-            inner.local_path = Some(cache_path.to_path_buf());
-            inner.seqdata_path_template = Some(DEFAULT_SEQDATA_PATH_TEMPLATE.to_string());
-            inner.persist_to_disk = true;
-            inner.layout = Layout::Packed;
-            create_dir_all(cache_path.join("sequences"))?;
-            create_dir_all(cache_path.join("collections"))?;
-            create_dir_all(cache_path.join("fhr"))?;
-            create_dir_all(cache_path.join("packs"))?;
-            Ok(Self { inner })
+        let store = Self::create_or_open(cache_path, Layout::Packed)?;
+        if store.inner.layout != Layout::Packed {
+            return Err(anyhow::anyhow!(
+                "store at {} already exists with a standalone layout; \
+                 on_disk_packed cannot convert it in place. Create a fresh \
+                 packed store and export/re-import, or open it with on_disk.",
+                cache_path.display()
+            ));
         }
+        Ok(store)
+    }
+
+    /// Open the store at `cache_path`, or create an empty Encoded store with
+    /// `layout` there if it has no `rgstore.json`.
+    fn create_or_open(cache_path: &Path, layout: Layout) -> Result<Self> {
+        if cache_path.join("rgstore.json").exists() {
+            return Self::open_local(cache_path);
+        }
+        create_dir_all(cache_path)?;
+        let mut inner = ReadonlyRefgetStore::new(StorageMode::Encoded);
+        inner.local_path = Some(cache_path.to_path_buf());
+        inner.seqdata_path_template = Some(DEFAULT_SEQDATA_PATH_TEMPLATE.to_string());
+        inner.persist_to_disk = true;
+        inner.layout = layout;
+        create_dir_all(cache_path.join("sequences"))?;
+        create_dir_all(cache_path.join("collections"))?;
+        create_dir_all(cache_path.join("fhr"))?;
+        if layout == Layout::Packed {
+            create_dir_all(cache_path.join("packs"))?;
+        }
+        Ok(Self { inner })
     }
 
     /// Create an in-memory RefgetStore.
@@ -408,7 +396,7 @@ impl RefgetStore {
             let loaded_seq = self.inner.list_sequence_alias_namespaces();
             let loaded_col = self.inner.list_collection_alias_namespaces();
             let seq_pull: Vec<String> = label
-                .namespaces(LabelObject::Seq)
+                .namespaces(AliasKind::Sequence)
                 .into_iter()
                 .filter(|ns| {
                     !loaded_seq.contains(ns)
@@ -416,7 +404,7 @@ impl RefgetStore {
                 })
                 .collect();
             let col_pull: Vec<String> = label
-                .namespaces(LabelObject::Col)
+                .namespaces(AliasKind::Collection)
                 .into_iter()
                 .filter(|ns| {
                     !loaded_col.contains(ns)
@@ -453,10 +441,21 @@ impl RefgetStore {
         self.inner.set_pack_cap_bytes(cap);
     }
 
+    /// Turn the pack block cache on with room for `mb` megabytes, or off with
+    /// 0 (the default). See [`ReadonlyRefgetStore::set_pack_cache_mb`].
+    pub fn set_pack_cache_mb(&mut self, mb: usize) {
+        self.inner.set_pack_cache_mb(mb);
+    }
+
     /// Reclaim dead bytes in a packed store by rewriting live spans into fresh
     /// sealed packs. Byte-identical retrieval before and after.
     pub fn compact(&mut self) -> Result<super::CompactReport> {
         self.inner.compact()
+    }
+
+    /// [`Self::compact`] with options. See [`super::CompactOptions`].
+    pub fn compact_with(&mut self, opts: super::CompactOptions) -> Result<super::CompactReport> {
+        self.inner.compact_with(opts)
     }
 
     /// Enable 2-bit encoding for space efficiency.
@@ -579,7 +578,7 @@ impl RefgetStore {
         self.inner.clear();
     }
 
-    /// Check whether a sequence is loaded (Full).
+    /// Check whether a sequence's bytes are loaded.
     pub fn is_sequence_loaded<K: AsRef<[u8]>>(&self, seq_digest: K) -> bool {
         self.inner.is_sequence_loaded(seq_digest)
     }

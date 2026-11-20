@@ -70,16 +70,20 @@ retrieved_df <- get_seqs_bed_file_to_df(store, collection_digest, temp_bed_path)
 # 9. Write BED regions to a new FASTA file.
 # Unlike step 8, this stops with an error on unknown sequences,
 # so give it a BED file with valid regions only.
+# Headers look like >chr1:0-10; pass label = "{seq}" for sequence digests.
 valid_bed_path <- file.path(temp_dir, "valid.bed")
 writeLines(paste("chr1\t0\t10", "chr2\t2\t6", sep = "\n"), valid_bed_path)
 temp_output_fa_path <- file.path(temp_dir, "output.fa")
 get_seqs_bed_file(store, collection_digest, valid_bed_path, temp_output_fa_path)
 cat(sprintf("Retrieved sequences from BED file written to: %s\n", temp_output_fa_path))
 
-# 10. Export the whole collection (or selected sequences) to FASTA
-export_fasta(store, collection_digest, file.path(temp_dir, "all.fa"))
-export_fasta(store, collection_digest, file.path(temp_dir, "chr1.fa"),
-             sequence_names = c("chr1"), line_width = 60)
+# 10. Export the whole collection (or selected sequences) to FASTA.
+# The default label is the sequence digest (SQ....); "{name}" writes names.
+export_fasta(store, file.path(temp_dir, "all.fa"),
+             collections = collection_digest, label = "{name}")
+export_fasta(store, file.path(temp_dir, "chr1.fa"),
+             collections = collection_digest, names = c("chr1"),
+             label = "{name}", line_width = 60)
 
 # 11. Write store to a new directory.
 # In the template, %s2 is the first 2 characters of the digest and %s the full digest.
@@ -118,3 +122,40 @@ download as parallel 8 MiB ranges, and partial reads (`get_substring`) read only
 the bytes they need. Running the same download again fetches only the sequences
 still missing. See the [Python reference](../python/refget-store.md) for the
 cache layout and download behavior.
+
+**Packed layout (alpha)**
+
+A standard on-disk store writes one `.seq` file per sequence, which means
+hundreds of thousands of files for a large store. The packed layout writes
+sequences into a few large pack files under `packs/` instead, and finds each
+sequence through an index file, `sequences.pack.idx`.
+
+```r
+packed <- refget_store_on_disk(file.path(temp_dir, "packed_store"), packed = TRUE)
+add_fasta(packed, temp_fasta_path)
+
+# Removing collections leaves dead bytes in the packs; compact() reclaims them
+compact(packed)  # list(packs_before, packs_after, bytes_reclaimed, packs_pruned)
+```
+
+`compact(store, prune_unreferenced = TRUE)` also deletes pack files that no
+index entry points to, such as packs left by a writer that crashed. Use it only
+when no other process is writing to the store: a pack another writer has sealed
+but not yet committed looks the same, and would be deleted too.
+
+A store's layout is fixed when it is created. Opening an existing standard
+store with `packed = TRUE` is an error; `refget_store_open_local` opens either
+kind.
+
+A standard store refuses an import that would leave it with more than 500,000
+`.seq` files. To go past that, use the packed layout, or raise the limit with
+`add_fasta(store, path, standalone_file_limit = ...)`. `force = TRUE` does not
+skip the limit.
+
+Reads from a packed store can go through a block cache, which is off by
+default. `set_pack_cache(store, 128)` turns it on with 128 MB; `0` turns it
+off. It helps clustered reads (for example a sorted BED) on a cold network
+file system, and hurts scattered reads on stores larger than the cache.
+
+The packed layout is alpha: its on-disk format may change before it is
+declared stable.
