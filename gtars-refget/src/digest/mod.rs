@@ -18,6 +18,7 @@ pub mod alphabet;
 pub mod auto_decompress;
 pub mod encoder;
 pub mod fasta;
+pub mod raw;
 pub mod stream;
 pub mod streaming_decoder;
 pub mod types;
@@ -34,13 +35,14 @@ pub use encoder::{
     EncodeError, SequenceEncoder, byte_range_for_bases, decode_string_from_bytes, decode_substring_from_bytes,
     decode_substring_from_bytes_at_offset, encode_sequence,
 };
+pub use raw::{Digest32, RawMd5, RawSha, md5_to_raw, raw_to_md5, raw_to_sha, sha_to_raw};
 pub use fasta::{ParseOptions, digest_fasta_bytes, load_fasta_bytes, parse_fasta_header};
 pub use stream::FastaStreamHasher;
 pub use streaming_decoder::StreamingDecoder;
 pub use types::{
     ArrayElementComparison, AttributeComparison, CollectionLevel1, CollectionLevel2,
     CollectionNameMatch, ComparisonDigests, FaiMetadata, SeqColComparison, SeqColDigestLvl1,
-    SequenceCollection, SequenceCollectionMetadata, SequenceCollectionRecord, SequenceMetadata,
+    SequenceCollection, SequenceCollectionMetadata, SequenceMetadata,
     SequenceNameMatch, SequenceRecord, compare_level2_json, digest_sequence,
-    digest_sequence_with_description, parse_rgci_line, parse_rgsi_line,
+    digest_sequence_with_description, parse_rgci_line, parse_rgsi_fields, parse_rgsi_line, RgsiFields,
 };

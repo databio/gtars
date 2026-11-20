@@ -8,16 +8,13 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use std::path::{Path, PathBuf};
 
-use indexmap::IndexMap;
+use super::catalog::{Catalog, CollRow, MemberView, NewMember, SeqCore, SeqRow, SeqView};
 
 use anyhow::{anyhow, Context, Result};
 
-use crate::collection::{read_rgsi_file, SequenceMetadataExt, SequenceRecordExt};
+use crate::collection::SequenceRecordExt;
 use crate::digest::lookup_alphabet;
-use crate::digest::{
-    SequenceCollectionMetadata, SequenceCollectionRecord, SequenceMetadata,
-    SequenceRecord,
-};
+use crate::digest::{SequenceCollectionMetadata, SequenceMetadata, SequenceRecord};
 use crate::digest::{decode_string_from_bytes, decode_substring_from_bytes, encode_sequence, StreamingDecoder};
 use crate::digest::{byte_range_for_bases, decode_substring_from_bytes_at_offset};
 use crate::hashkeyable::{DigestKey, HashKeyable, key_to_digest_string};
@@ -150,8 +147,10 @@ fn decoded_sequence_to_string(bytes: Vec<u8>) -> String {
 struct FdCache {
     cap: usize,
     tick: u64,
-    /// digest key -> (shared file handle, last-use stamp)
-    entries: HashMap<DigestKey, (Arc<File>, u64)>,
+    /// relative-or-absolute file path -> (shared file handle, last-use stamp).
+    /// Keyed by PATH (not digest) so pack files and `.seq` files share one
+    /// bounded LRU of open handles.
+    entries: HashMap<PathBuf, (Arc<File>, u64)>,
 }
 
 impl FdCache {
@@ -164,7 +163,7 @@ impl FdCache {
     }
 
     /// Return a cloned handle on hit, bumping recency. `None` on miss.
-    fn get(&mut self, key: &DigestKey) -> Option<Arc<File>> {
+    fn get(&mut self, key: &Path) -> Option<Arc<File>> {
         self.tick += 1;
         let tick = self.tick;
         if let Some(slot) = self.entries.get_mut(key) {
@@ -176,7 +175,7 @@ impl FdCache {
     }
 
     /// Insert a freshly opened handle, evicting (closing) the LRU entry if full.
-    fn insert(&mut self, key: DigestKey, file: Arc<File>) {
+    fn insert(&mut self, key: PathBuf, file: Arc<File>) {
         self.tick += 1;
         let tick = self.tick;
         if !self.entries.contains_key(&key) && self.entries.len() >= self.cap {
@@ -186,7 +185,7 @@ impl FdCache {
                 .entries
                 .iter()
                 .min_by_key(|(_, (_, stamp))| *stamp)
-                .map(|(k, _)| *k)
+                .map(|(k, _)| k.clone())
             {
                 self.entries.remove(&lru_key);
             }
@@ -297,20 +296,19 @@ fn open_remote_range(
 /// Mutating methods are used during the setup/loading phase; once wrapped in `Arc`,
 /// only `&self` reads are accessible, making concurrent access thread-safe.
 ///
-/// Holds a global sequence_store with all sequences (across collections) deduplicated.
-/// This allows lookup by sequence digest directly (bypassing collection information).
-/// Also holds a collections hashmap, to provide lookup by collection+name.
+/// All sequence and collection metadata lives in one columnar [`Catalog`]:
+/// sequences deduplicated store-wide, each collection's members (with their
+/// per-collection names) as a contiguous range, and digest/name lookups as
+/// tables of row numbers. Sequence bytes are never part of the catalog; they
+/// live in [`Self::loaded`] (owned bytes of in-memory stores) or the
+/// evictable `resident` overlay, both keyed by sequence row.
 #[derive(Debug)]
 pub struct ReadonlyRefgetStore {
-    /// SHA512t24u digest -> SequenceRecord (metadata + optional data)
-    pub(crate) sequence_store: HashMap<DigestKey, SequenceRecord>,
-    /// MD5 digest -> SHA512t24u digest lookup
-    pub(crate) md5_lookup: HashMap<DigestKey, DigestKey>,
-
-    /// Collection digest -> {name -> SHA512t24u digest} (IndexMap preserves FASTA insertion order)
-    pub(crate) name_lookup: HashMap<DigestKey, IndexMap<String, DigestKey>>,
-    /// Active sequence collections (now using SequenceCollectionRecord for Stub/Full pattern)
-    pub(crate) collections: HashMap<DigestKey, SequenceCollectionRecord>,
+    /// Every sequence, membership and collection fact, each stored once.
+    pub(crate) catalog: Catalog,
+    /// Bytes owned by the store: sequences of an in-memory store, or ones
+    /// loaded with `load_sequence`. Keyed by catalog sequence row.
+    pub(crate) loaded: HashMap<SeqRow, Arc<Vec<u8>>>,
     /// Storage strategy for sequences
     pub(crate) mode: StorageMode,
     /// Where the store lives on disk (local store or cache directory)
@@ -353,7 +351,7 @@ pub struct ReadonlyRefgetStore {
     /// is mode-agnostic and only the sliced span is ever decoded. `RwLock` so many
     /// readers proceed concurrently; the `Arc` is cloned out under a brief read
     /// lock and decoded after the lock is dropped, so decodes never serialize.
-    resident: RwLock<HashMap<DigestKey, Arc<Vec<u8>>>>,
+    resident: RwLock<HashMap<SeqRow, Arc<Vec<u8>>>>,
     /// Whether the sequence index (sequences.rgsi) has been loaded.
     /// For remote stores, this starts as `false` and is lazily loaded on first
     /// sequence access, avoiding the costly download when only browsing collections.
@@ -378,6 +376,99 @@ pub struct ReadonlyRefgetStore {
     /// conflict, not a merge detail. Never overrides a clash within one load
     /// (one TSV, or one FASTA's header tags).
     pub(crate) force_alias: bool,
+
+    // --- Packed layout (Goal 2) ---------------------------------------------
+    /// Physical layout of THIS store's sequence bytes. Invariant:
+    /// `layout == Packed` implies `remote_source == None` (the local cache of a
+    /// remote-backed store is always standalone).
+    pub(crate) layout: Layout,
+    /// Layout of the REMOTE this store caches from (if any). A remote packed
+    /// store is read through its sidecar while the local cache stays standalone.
+    pub(crate) remote_layout: Layout,
+    /// Per-pack size cap in bytes for new packs (default 256 MiB).
+    pub(crate) pack_cap_bytes: u64,
+    /// Aligned block size for the pack block cache. A store field (defaulting to
+    /// [`packcache::PACK_BLOCK_SIZE`]) so tests can shrink it.
+    pub(crate) pack_block_size: u64,
+    /// Coalescing block cache shared across all packs of this store.
+    pub(crate) pack_cache: super::packcache::PackBlockCache,
+    /// Pack location of each sequence row on the LOCAL side, built lazily from
+    /// the sidecar on the first packed read. Invalidated (set to `None`)
+    /// whenever a commit changes the sidecar or the catalog is renumbered.
+    pub(crate) pack_cols: Mutex<Option<Arc<super::catalog::PackColumns>>>,
+    /// Lazily-loaded in-memory pack index for the REMOTE side.
+    pub(crate) remote_pack_index:
+        Mutex<Option<Arc<super::packidx::PackIndex<super::packidx::InMemory>>>>,
+    /// Cache of pack file byte lengths (needed to clamp the final block of a
+    /// local block-cache read), keyed by content-hash pack name.
+    pub(crate) pack_lengths: Mutex<HashMap<Arc<str>, u64>>,
+    /// The open, not-yet-sealed pack for an incremental (`add_sequence_record`)
+    /// build session on a packed store. Sealed at cap and always at commit.
+    pub(crate) open_session_pack: Mutex<Option<SessionPack>>,
+}
+
+/// A sealed pack produced by an incremental build session: its final
+/// content-hash name plus the sidecar rows it carries.
+#[derive(Debug)]
+pub(crate) struct SessionSealed {
+    pub(crate) name: Arc<str>,
+    /// `(digest, offset, len)` rows for sequences that landed in this pack.
+    pub(crate) rows: Vec<(String, u64, u64)>,
+}
+
+/// An open, not-yet-sealed pack file for an incremental build session on a
+/// packed store. Bytes are appended sequentially (single-threaded here), the
+/// content hash is fed the same bytes in the same order, and the pack is sealed
+/// (fsync + rename to its content-hash name) at cap and at commit.
+#[derive(Debug)]
+pub(crate) struct SessionPack {
+    /// Directory `packs/` under the store.
+    pub(crate) packs_dir: PathBuf,
+    /// Ordinal of the current open sub-pack (for temp-file naming).
+    pub(crate) ordinal: usize,
+    /// Temp file path `packs/.rgstore.tmp.pack.session.<pid>.<ordinal>`.
+    pub(crate) tmp_path: PathBuf,
+    /// Open handle to the temp pack.
+    pub(crate) file: File,
+    /// Running byte length == next offset.
+    pub(crate) len: u64,
+    /// Running content hash of the bytes appended so far.
+    pub(crate) hasher: sha2::Sha256,
+    /// `(digest, offset, len)` rows for sequences appended to THIS open pack.
+    pub(crate) rows: Vec<(String, u64, u64)>,
+    /// Packs already sealed earlier in this session (cap reached mid-session).
+    pub(crate) sealed: Vec<SessionSealed>,
+}
+
+/// Which side of a (possibly remote-backed) store a resolution targets. The
+/// local cache of a remote packed store is standalone — sealed packs cannot be
+/// appended to — so the two sides can have different layouts.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum StoreSide {
+    Local,
+    Remote,
+}
+
+/// Where a sequence's bytes physically live. THE result type of
+/// [`ReadonlyRefgetStore::resolve_location`]; the read path branches on this,
+/// never on `layout` directly.
+#[derive(Debug)]
+pub(crate) enum Location {
+    /// Template-path `.seq` file (relative path, local or remote).
+    Standalone { relpath: PathBuf },
+    /// A byte span inside a sealed pack file `packs/<pack>.pack`.
+    Packed { pack: Arc<str>, offset: u64, len: u64 },
+}
+
+/// Result of [`ReadonlyRefgetStore::compact`].
+#[derive(Debug, Clone)]
+pub struct CompactReport {
+    /// Pack files on disk before compaction.
+    pub packs_before: usize,
+    /// Pack files after compaction.
+    pub packs_after: usize,
+    /// Dead bytes reclaimed.
+    pub bytes_reclaimed: u64,
 }
 
 /// What this handle has actually created, modified, or deleted since its last
@@ -421,6 +512,10 @@ pub struct PendingChanges {
     /// a conflicting binding another writer already published, as if
     /// `force_alias` were set for that one entry.
     pub(crate) forced_aliases: HashSet<(AliasKind, String, String)>,
+    /// Sidecar rows to publish into `sequences.pack.idx` (packed layout only):
+    /// digest key -> its `(pack, offset, len)` span. Merged and republished
+    /// under the store lock in `write_index_files`.
+    pub(crate) pack_rows: HashMap<DigestKey, super::packidx::PackRow>,
 }
 
 impl PendingChanges {
@@ -432,6 +527,7 @@ impl PendingChanges {
             && self.removed_sequences.is_empty()
             && self.removed_aliases.is_empty()
             && self.emptied_alias_namespaces.is_empty()
+            && self.pack_rows.is_empty()
     }
 
     /// Record a collection this handle added. An add supersedes a pending
@@ -525,6 +621,8 @@ impl PendingChanges {
             .retain(|k| !applied.removed_aliases.contains(k));
         self.emptied_alias_namespaces
             .retain(|k| !applied.emptied_alias_namespaces.contains(k));
+        self.pack_rows
+            .retain(|k, _| !applied.pack_rows.contains_key(k));
     }
 
     /// Drop the alias changes for one namespace, after the cheap
@@ -546,10 +644,8 @@ impl ReadonlyRefgetStore {
     /// Internal only - users should go through RefgetStore.
     pub(crate) fn new(mode: StorageMode) -> Self {
         ReadonlyRefgetStore {
-            sequence_store: HashMap::new(),
-            md5_lookup: HashMap::new(),
-            name_lookup: HashMap::new(),
-            collections: HashMap::new(),
+            catalog: Catalog::new(),
+            loaded: HashMap::new(),
             mode,
             local_path: None,
             remote_source: None,
@@ -570,7 +666,259 @@ impl ReadonlyRefgetStore {
             commit_lock: None,
             lock_options: LockOptions::default(),
             force_alias: false,
+            layout: Layout::Standalone,
+            remote_layout: Layout::Standalone,
+            pack_cap_bytes: 256 * 1024 * 1024,
+            pack_block_size: super::packcache::PACK_BLOCK_SIZE,
+            pack_cache: super::packcache::PackBlockCache::new(
+                super::packcache::DEFAULT_PACK_CACHE_BLOCKS,
+                super::packcache::PACK_BLOCK_SIZE,
+            ),
+            pack_cols: Mutex::new(None),
+            remote_pack_index: Mutex::new(None),
+            pack_lengths: Mutex::new(HashMap::new()),
+            open_session_pack: Mutex::new(None),
         }
+    }
+
+    // =========================================================================
+    // Catalog access
+    // =========================================================================
+
+    /// Resolve a sequence digest (sha512t24u, `SQ.`-prefixed, or MD5) to its
+    /// catalog row.
+    pub(crate) fn seq_row<K: AsRef<[u8]>>(&self, digest: K) -> Option<SeqRow> {
+        self.catalog.resolve(digest)
+    }
+
+    /// A borrowed view of one sequence's metadata, by any digest form.
+    pub fn sequence_view<K: AsRef<[u8]>>(&self, digest: K) -> Option<SeqView<'_>> {
+        self.seq_row(digest).map(|r| self.catalog.seq(r))
+    }
+
+    /// Views of every sequence in the store, in insertion order.
+    pub fn sequence_views(&self) -> impl Iterator<Item = SeqView<'_>> + '_ {
+        self.catalog.seq_rows().map(|r| self.catalog.seq(r))
+    }
+
+    /// Row of a collection whose member list is loaded, or the same errors
+    /// the old `collection_sequence_metadata` returned.
+    pub(crate) fn loaded_coll_row<K: AsRef<[u8]>>(&self, digest: K) -> Result<CollRow> {
+        let d = digest.as_ref();
+        match self.catalog.find_coll(d) {
+            Some(c) if self.catalog.is_loaded(c) => Ok(c),
+            Some(_) => Err(anyhow!(
+                "Collection {} not loaded. Call load_collection() first.",
+                String::from_utf8_lossy(d)
+            )),
+            None => Err(anyhow!("Collection not found: {}", String::from_utf8_lossy(d))),
+        }
+    }
+
+    /// Per-collection members (name, description, sequence) in FASTA order.
+    /// This is the source of truth for names/headers; a sequence's store-wide
+    /// label only names the shared bytes.
+    pub fn collection_members<K: AsRef<[u8]>>(
+        &self,
+        digest: K,
+    ) -> Result<impl ExactSizeIterator<Item = MemberView<'_>> + '_> {
+        let c = self.loaded_coll_row(digest)?;
+        Ok(self.catalog.members(c))
+    }
+
+    /// Borrow the store-owned (loaded) bytes of a sequence, in the store's
+    /// native encoding. `None` if the sequence is unknown or not loaded.
+    pub fn loaded_bytes<K: AsRef<[u8]>>(&self, digest: K) -> Option<&[u8]> {
+        let row = self.seq_row(digest)?;
+        self.loaded.get(&row).map(|b| b.as_slice())
+    }
+
+    /// Store-owned bytes of a sequence, if it is loaded.
+    pub(crate) fn seq_bytes(&self, row: SeqRow) -> Option<Arc<Vec<u8>>> {
+        self.loaded.get(&row).cloned()
+    }
+
+    /// Owned record for a sequence row, with its store-wide label. Bytes are an
+    /// `Arc` bump, not a copy.
+    pub(crate) fn seq_record(&self, row: SeqRow) -> SequenceRecord {
+        let metadata = self.catalog.seq(row).to_metadata();
+        match self.seq_bytes(row) {
+            Some(sequence) => SequenceRecord::Full { metadata, sequence },
+            None => SequenceRecord::Stub(metadata),
+        }
+    }
+
+    /// Owned record for a collection member: THIS collection's name and
+    /// description, the shared bytes.
+    pub(crate) fn member_record(&self, m: MemberView<'_>) -> SequenceRecord {
+        let metadata = m.to_metadata();
+        match self.seq_bytes(m.seq_row()) {
+            Some(sequence) => SequenceRecord::Full { metadata, sequence },
+            None => SequenceRecord::Stub(metadata),
+        }
+    }
+
+    /// Insert (or, with `force`, relabel) a sequence and optionally its bytes.
+    /// Returns the row and whether the store changed (new row or forced).
+    pub(crate) fn insert_sequence(
+        &mut self,
+        meta: &SequenceMetadata,
+        bytes: Option<Arc<Vec<u8>>>,
+        force: bool,
+    ) -> Result<(SeqRow, bool)> {
+        let (row, new) = self.catalog.add_sequence(meta)?;
+        if !new && !force {
+            return Ok((row, false));
+        }
+        if !new {
+            self.catalog.set_sequence_label(row, meta)?;
+        }
+        match bytes {
+            Some(b) => {
+                self.loaded.insert(row, b);
+            }
+            None => {
+                self.loaded.remove(&row);
+            }
+        }
+        Ok((row, true))
+    }
+
+    /// Install a collection with its members (sequences added as needed,
+    /// without bytes). Returns the collection row and the sequence rows that
+    /// were new to the store.
+    pub(crate) fn insert_collection(
+        &mut self,
+        meta: SequenceCollectionMetadata,
+        members: &[SequenceMetadata],
+    ) -> Result<(CollRow, Vec<SeqRow>)> {
+        let mut rows = Vec::with_capacity(members.len());
+        let mut new_rows = Vec::new();
+        for m in members {
+            let (row, new) = self.catalog.add_sequence(m)?;
+            if new {
+                new_rows.push(row);
+            }
+            rows.push(row);
+        }
+        let c = self.catalog.upsert_collection(meta)?;
+        self.catalog.set_members(
+            c,
+            members.iter().zip(&rows).map(|(m, &seq)| NewMember {
+                seq,
+                name: &m.name,
+                description: m.description.as_deref(),
+                fai: m.fai.as_ref(),
+            }),
+        )?;
+        Ok((c, new_rows))
+    }
+
+    /// Tombstone sequences and drop their bytes.
+    pub(crate) fn remove_sequence_rows(&mut self, rows: &[SeqRow]) {
+        let mut resident = self.resident.write().ok();
+        for &r in rows {
+            self.catalog.remove_sequence(r);
+            self.loaded.remove(&r);
+            if let Some(res) = resident.as_mut() {
+                res.remove(&r);
+            }
+        }
+    }
+
+    /// Renumber catalog rows once enough are dead, rekeying the byte maps.
+    pub(crate) fn maybe_compact_catalog(&mut self) {
+        if !self.catalog.needs_compaction() {
+            return;
+        }
+        let remap = self.catalog.compact();
+        let rekey = |m: HashMap<SeqRow, Arc<Vec<u8>>>| -> HashMap<SeqRow, Arc<Vec<u8>>> {
+            m.into_iter()
+                .filter_map(|(r, b)| remap.get(r as usize).copied().flatten().map(|n| (n, b)))
+                .collect()
+        };
+        self.loaded = rekey(std::mem::take(&mut self.loaded));
+        if let Ok(mut res) = self.resident.write() {
+            *res = rekey(std::mem::take(&mut *res));
+        }
+        self.invalidate_pack_index();
+    }
+
+    // =========================================================================
+    // Test helpers: old-map-shaped reads over the catalog
+    // =========================================================================
+
+    #[cfg(test)]
+    pub(crate) fn t_seq<K: AsRef<[u8]>>(&self, digest: K) -> Option<SequenceRecord> {
+        self.catalog.find_sha(digest).map(|r| self.seq_record(r))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn t_seq_map(&self) -> HashMap<DigestKey, SequenceRecord> {
+        self.catalog
+            .seq_rows()
+            .map(|r| (self.catalog.seq(r).sha512t24u().to_key(), self.seq_record(r)))
+            .collect()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn t_has_md5<K: AsRef<[u8]>>(&self, md5: K) -> bool {
+        self.catalog.find_md5(md5).is_some()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn t_coll_keys(&self) -> Vec<DigestKey> {
+        self.catalog
+            .coll_rows()
+            .map(|c| self.catalog.coll_meta(c).digest.to_key())
+            .collect()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn t_has_coll<K: AsRef<[u8]>>(&self, digest: K) -> bool {
+        self.catalog.find_coll(digest).is_some()
+    }
+
+    /// Number of collections with loaded members (the old `name_lookup.len()`).
+    #[cfg(test)]
+    pub(crate) fn t_n_loaded_colls(&self) -> usize {
+        self.catalog.coll_rows().filter(|&c| self.catalog.is_loaded(c)).count()
+    }
+
+    /// Unique member names in first-occurrence order (the old `name_lookup`
+    /// keys of one collection).
+    #[cfg(test)]
+    pub(crate) fn t_names<K: AsRef<[u8]>>(&self, digest: K) -> Vec<String> {
+        let mut seen = HashSet::new();
+        self.collection_members(digest)
+            .map(|ms| {
+                ms.map(|m| m.name().to_string())
+                    .filter(|n| seen.insert(n.clone()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// (name, sequence digest key) for unique member names, first-occurrence
+    /// order, last member wins (the old `name_lookup` entries).
+    #[cfg(test)]
+    pub(crate) fn t_name_pairs<K: AsRef<[u8]>>(&self, digest: K) -> Vec<(String, DigestKey)> {
+        let d = digest.as_ref().to_vec();
+        self.t_names(&d)
+            .into_iter()
+            .map(|n| {
+                let k = self.member_by_name(&d, &n).unwrap().seq().sha512t24u().to_key();
+                (n, k)
+            })
+            .collect()
+    }
+
+    /// Forget every sequence row (the old `sequence_store.clear()` +
+    /// `md5_lookup.clear()`), keeping collections.
+    #[cfg(test)]
+    pub(crate) fn t_clear_sequences(&mut self) {
+        let rows: Vec<SeqRow> = self.catalog.seq_rows().collect();
+        self.remove_sequence_rows(&rows);
     }
 
     // =========================================================================
@@ -667,9 +1015,26 @@ impl ReadonlyRefgetStore {
     /// that its stored alphabet cannot represent. That means the store's
     /// alphabet metadata is wrong (written by an older gtars) and the store
     /// must be re-imported. On error the store is left unchanged.
+    ///
+    /// For a disk-backed PACKED store that already holds sequences, changing the
+    /// mode is refused with an error: the packed bytes on disk are in the
+    /// current mode, and re-encoding only the resident records would desync
+    /// them from the packs. Mode is fixed at creation for a populated packed
+    /// store. (An empty packed store, before any import, may still switch,
+    /// since there are no packed bytes to desync.)
     pub fn set_encoding_mode(&mut self, new_mode: StorageMode) -> Result<()> {
         if self.mode == new_mode {
             return Ok(());
+        }
+        if self.persist_to_disk
+            && self.layout == Layout::Packed
+            && self.catalog.n_sequences() > 0
+        {
+            return Err(anyhow!(
+                "refusing to change storage mode on a populated packed store \
+                 (would desync the packs); mode stays {:?}",
+                self.mode
+            ));
         }
         let old_mode = self.mode;
 
@@ -687,11 +1052,10 @@ impl ReadonlyRefgetStore {
 
         // Convert everything first, then swap in, so an error leaves the store
         // untouched rather than half converted.
-        let mut converted: Vec<(DigestKey, Vec<u8>)> = Vec::new();
-        for (key, record) in self.sequence_store.iter() {
-            let SequenceRecord::Full { metadata, sequence } = record else {
-                continue;
-            };
+        let mut converted: Vec<(SeqRow, Vec<u8>)> = Vec::new();
+        for (key, sequence) in self.loaded.iter() {
+            let owned_meta = self.catalog.seq(*key).to_metadata();
+            let metadata = &owned_meta;
             let new_bytes = match (old_mode, new_mode) {
                 (StorageMode::Raw, StorageMode::Encoded) => encode(metadata, &sequence[..])?,
                 (StorageMode::Encoded, StorageMode::Raw) => {
@@ -725,10 +1089,7 @@ impl ReadonlyRefgetStore {
         }
 
         for (key, new_bytes) in converted {
-            if let Some(SequenceRecord::Full { sequence, .. }) = self.sequence_store.get_mut(&key)
-            {
-                *sequence = std::sync::Arc::new(new_bytes);
-            }
+            self.loaded.insert(key, std::sync::Arc::new(new_bytes));
         }
 
         self.mode = new_mode;
@@ -767,11 +1128,11 @@ impl ReadonlyRefgetStore {
         // commit, and it is correct precisely because nothing here was loaded.
         {
             let mut pending = self.pending.lock().unwrap();
-            for key in self.sequence_store.keys() {
-                pending.add_sequence(*key);
+            for v in self.sequence_views() {
+                pending.add_sequence(v.sha512t24u().to_key());
             }
-            for key in self.collections.keys() {
-                pending.add_collection(*key);
+            for c in self.catalog.coll_rows() {
+                pending.add_collection(self.catalog.coll_meta(c).digest.to_key());
             }
             for kind in [AliasKind::Sequence, AliasKind::Collection] {
                 for ns in self.aliases.namespaces_for(kind) {
@@ -782,18 +1143,19 @@ impl ReadonlyRefgetStore {
             }
         }
 
-        let keys: Vec<DigestKey> = self.sequence_store.keys().cloned().collect();
-        for key in keys {
-            if let Some(SequenceRecord::Full { metadata, sequence }) = self.sequence_store.get(&key)
-            {
-                self.write_sequence_to_disk_single(metadata, sequence)?;
-                let stub = SequenceRecord::Stub(metadata.clone());
-                self.sequence_store.insert(key, stub);
+        let rows: Vec<SeqRow> = self.loaded.keys().copied().collect();
+        for row in rows {
+            if let Some(sequence) = self.loaded.remove(&row) {
+                let metadata = self.catalog.seq(row).to_metadata();
+                self.write_sequence_to_disk_single(&metadata, &sequence)?;
             }
         }
 
-        for record in self.collections.values() {
-            self.write_collection_to_disk_single(record)?;
+        for c in self.catalog.coll_rows() {
+            self.write_collection_to_disk_single(
+                self.catalog.coll_meta(c),
+                self.catalog.members(c).map(|m| m.to_metadata()),
+            )?;
         }
 
         self.write_index_files()?;
@@ -809,32 +1171,6 @@ impl ReadonlyRefgetStore {
     /// Check if persistence to disk is enabled.
     pub fn is_persisting(&self) -> bool {
         self.persist_to_disk
-    }
-
-    /// Adds a sequence to the Store
-    pub fn add_sequence<T: Into<Option<DigestKey>>>(
-        &mut self,
-        sequence_record: SequenceRecord,
-        collection_digest: T,
-        force: bool,
-    ) -> Result<()> {
-        let collection_digest = collection_digest
-            .into()
-            .ok_or_else(|| anyhow::anyhow!("Collection digest is required"))?;
-        self.collections.get(&collection_digest).ok_or_else(|| {
-            anyhow::anyhow!("Collection not found for digest: {:?}", collection_digest)
-        })?;
-
-        let metadata = sequence_record.metadata();
-
-        self.name_lookup
-            .entry(collection_digest)
-            .or_default()
-            .insert(metadata.name.clone(), metadata.sha512t24u.to_key());
-
-        self.add_sequence_record(sequence_record, force)?;
-
-        Ok(())
     }
 
     /// Adds a collection, and all sequences in it, to the store.
@@ -861,27 +1197,23 @@ impl ReadonlyRefgetStore {
     ) -> Result<()> {
         let coll_digest = collection.metadata.digest.to_key();
 
-        if !force && self.collections.contains_key(&coll_digest) {
+        if !force && self.catalog.find_coll(&collection.metadata.digest).is_some() {
             return Ok(());
         }
 
         let crate::digest::SequenceCollection { metadata, sequences } = collection;
-
-        let record = SequenceCollectionRecord::Full {
-            metadata: metadata.clone(),
-            sequences: sequences.iter().map(|s| SequenceRecord::Stub(s.metadata().clone())).collect(),
-        };
+        let members: Vec<SequenceMetadata> =
+            sequences.iter().map(|s| s.metadata().clone()).collect();
 
         if self.persist_to_disk && self.local_path.is_some() {
-            self.write_collection_to_disk_single(&record)?;
+            self.write_collection_to_disk_single(&metadata, &members)?;
         }
-
-        self.collections.insert(coll_digest, record);
-        self.record(|p| p.add_collection(coll_digest));
 
         for sequence_record in sequences {
-            self.add_sequence(sequence_record, coll_digest, force)?;
+            self.add_sequence_record(sequence_record, force)?;
         }
+        self.insert_collection(metadata, &members)?;
+        self.record(|p| p.add_collection(coll_digest));
 
         if self.persist_to_disk && self.local_path.is_some() {
             self.write_index_files()?;
@@ -983,33 +1315,37 @@ impl ReadonlyRefgetStore {
         // A dedup hit records NOTHING: the row is already in memory, which for a
         // disk-backed store means it is already in `sequences.rgsi`. Re-asserting
         // it would put a row this handle did not produce back into the delta.
-        if !force && self.sequence_store.contains_key(&key) {
+        if !force && self.catalog.find_sha(&metadata.sha512t24u).is_some() {
             return Ok(());
         }
-
-        self.md5_lookup
-            .insert(metadata.md5.to_key(), metadata.sha512t24u.to_key());
-        self.record(|p| p.add_sequence(key));
 
         // In Zstd mode the caller passes the ASCII record body (per contract,
         // "do not 2-bit pre-pack, let zstd own the entropy"); the store owns the
         // whole-record zstd compression here so the on-disk / in-memory body is
         // the compressed frame. Reads decompress the whole frame and slice.
         let sr = self.compress_record_for_storage(sr)?;
+        let (metadata, bytes) = match sr {
+            SequenceRecord::Full { metadata, sequence } => (metadata, Some(sequence)),
+            SequenceRecord::Stub(metadata) => (metadata, None),
+        };
+
+        let (row, _) = self.insert_sequence(&metadata, bytes.clone(), true)?;
+        self.record(|p| p.add_sequence(key));
 
         if self.persist_to_disk && self.local_path.is_some() {
-            match &sr {
-                SequenceRecord::Full { metadata, sequence } => {
-                    self.write_sequence_to_disk_single(metadata, sequence)?;
-                    let stub = SequenceRecord::Stub(metadata.clone());
-                    self.sequence_store.insert(key, stub);
+            if let Some(sequence) = &bytes {
+                if self.layout == Layout::Packed {
+                    // Packed incremental write (panget's path): append to the
+                    // open session pack. The bytes stay loaded so mid-session
+                    // reads are served from RAM; on reopen the sequence is
+                    // resolved through the sidecar.
+                    self.session_pack_append(&metadata.sha512t24u, sequence)?;
                     return Ok(());
                 }
-                SequenceRecord::Stub(_) => {}
+                self.write_sequence_to_disk_single(&metadata, sequence)?;
+                self.loaded.remove(&row);
             }
         }
-
-        self.sequence_store.insert(key, sr);
         Ok(())
     }
 
@@ -1057,25 +1393,21 @@ impl ReadonlyRefgetStore {
 
         // Dedup hit: nothing inserted, so nothing to record. See
         // [`Self::add_sequence_record`].
-        if !force && self.sequence_store.contains_key(&key) {
+        if !force && self.catalog.find_sha(&metadata.sha512t24u).is_some() {
             return Ok(None);
         }
-
-        self.md5_lookup
-            .insert(metadata.md5.to_key(), metadata.sha512t24u.to_key());
-        self.record(|p| p.add_sequence(key));
 
         if self.persist_to_disk && self.local_path.is_some() {
             match sr {
                 SequenceRecord::Full { metadata, sequence } => {
-                    // Insert the stub into the map NOW (reserve), so the dedup
+                    // Insert the metadata NOW (reserve), so the dedup
                     // decision is committed on the inserter thread. The actual
                     // byte write is dispatched to the writer pool by the caller.
                     let full_path = self
                         .sequence_file_path(&metadata.sha512t24u)
                         .context("seqdata_path_template/local_path not set")?;
-                    let stub = SequenceRecord::Stub(metadata);
-                    self.sequence_store.insert(key, stub);
+                    self.insert_sequence(&metadata, None, true)?;
+                    self.record(|p| p.add_sequence(key));
                     // INVARIANT: strong_count == 1 here — the Arc was just
                     // constructed in the import pipeline (Arc::new in import.rs)
                     // and no other owner exists at the point of this call, so
@@ -1099,7 +1431,8 @@ impl ReadonlyRefgetStore {
                     return Ok(Some((full_path, bytes)));
                 }
                 SequenceRecord::Stub(s) => {
-                    self.sequence_store.insert(key, SequenceRecord::Stub(s));
+                    self.insert_sequence(&s, None, true)?;
+                    self.record(|p| p.add_sequence(key));
                     return Ok(None);
                 }
             }
@@ -1108,8 +1441,12 @@ impl ReadonlyRefgetStore {
         // In-memory (non-disk-backed): keep the resident body in the store's
         // native form, so a Zstd store holds the compressed frame just like the
         // disk-backed path returns compressed bytes above.
-        let sr = self.compress_record_for_storage(sr)?;
-        self.sequence_store.insert(key, sr);
+        let (metadata, bytes) = match self.compress_record_for_storage(sr)? {
+            SequenceRecord::Full { metadata, sequence } => (metadata, Some(sequence)),
+            SequenceRecord::Stub(metadata) => (metadata, None),
+        };
+        self.insert_sequence(&metadata, bytes, true)?;
+        self.record(|p| p.add_sequence(key));
         Ok(None)
     }
 
@@ -1119,12 +1456,13 @@ impl ReadonlyRefgetStore {
 
     /// Returns an iterator over all sequence digests in the store
     pub fn sequence_digests(&self) -> impl Iterator<Item = DigestKey> + '_ {
-        self.sequence_store.keys().cloned()
+        self.sequence_views().map(|v| v.sha512t24u().to_key())
     }
 
-    /// Returns an iterator over sequence metadata for all sequences in the store.
-    pub fn sequence_metadata(&self) -> impl Iterator<Item = &SequenceMetadata> + '_ {
-        self.sequence_store.values().map(|rec| rec.metadata())
+    /// Returns an iterator over (owned) sequence metadata for all sequences in
+    /// the store. Use [`Self::sequence_views`] to avoid the per-item copy.
+    pub fn sequence_metadata(&self) -> impl Iterator<Item = SequenceMetadata> + '_ {
+        self.sequence_views().map(|v| v.to_metadata())
     }
 
     /// Logical size in bytes of all sequence *payloads*, computed from metadata
@@ -1133,10 +1471,7 @@ impl ReadonlyRefgetStore {
     /// This is the value cached in the manifest at write time (see write path); for
     /// the exact full on-disk footprint use `actual_disk_usage()` (walks the dir).
     pub fn logical_sequence_bytes(&self) -> usize {
-        self.sequence_store
-            .values()
-            .map(|rec| rec.metadata().disk_size(&self.mode))
-            .sum()
+        self.sequence_views().map(|v| v.disk_size(&self.mode)).sum()
     }
 
     /// Exact on-disk footprint of the store: recursively walks the store directory
@@ -1179,8 +1514,8 @@ impl ReadonlyRefgetStore {
         filters: &[(&str, &str)],
     ) -> Result<PagedResult<SequenceCollectionMetadata>> {
         let mut filtered: Vec<SequenceCollectionMetadata> = Vec::new();
-        for record in self.collections.values() {
-            let meta = record.metadata();
+        for c in self.catalog.coll_rows() {
+            let meta = self.catalog.coll_meta(c);
             let mut passes = true;
             for &(attr_name, attr_digest) in filters {
                 if !metadata_matches_attribute(meta, attr_name, attr_digest)? {
@@ -1218,74 +1553,30 @@ impl ReadonlyRefgetStore {
         &self,
         collection_digest: K,
     ) -> Option<&SequenceCollectionMetadata> {
-        let key = collection_digest.to_key();
-        self.collections.get(&key).map(|record| record.metadata())
-    }
-
-    /// Per-collection sequence metadata (name, description, digest) in FASTA
-    /// order. This is the source of truth for names/headers; the global
-    /// `sequence_store` record only labels the shared bytes.
-    pub(crate) fn collection_sequence_metadata(&self, key: &DigestKey) -> Result<&[SequenceRecord]> {
-        match self.collections.get(key) {
-            Some(SequenceCollectionRecord::Full { sequences, .. }) => Ok(sequences),
-            Some(SequenceCollectionRecord::Stub(_)) => Err(anyhow!(
-                "Collection {} not loaded. Call load_collection() first.",
-                key_to_digest_string(key)
-            )),
-            None => Err(anyhow!("Collection not found: {}", key_to_digest_string(key))),
-        }
+        self.catalog
+            .find_coll(collection_digest)
+            .map(|c| self.catalog.coll_meta(c))
     }
 
     /// Get a collection with all its sequences loaded.
     pub fn get_collection(&self, collection_digest: &str) -> Result<crate::digest::SequenceCollection> {
-        let key = collection_digest.to_key();
-
-        if !self.name_lookup.contains_key(&key) {
-            return Err(anyhow!(
-                "Collection not loaded: {}. Call load_collection() or load_all_collections() first.",
-                collection_digest
-            ));
-        }
-
-        let metadata = self
-            .collections
-            .get(&key)
-            .ok_or_else(|| anyhow!("Collection not found: {}", collection_digest))?
-            .metadata()
-            .clone();
-
-        // Iterate the collection's own per-sequence records so each result carries
-        // the per-collection name AND description, not the first-imported global
-        // label of a sequence shared across collections. Only the bytes (and `fai`,
-        // if the collection record lacks it) come from the global store.
-        let sequences: Vec<SequenceRecord> = self
-            .collection_sequence_metadata(&key)?
-            .iter()
-            .map(|coll_record| {
-                let mut meta = coll_record.metadata().clone();
-                let seq_key = meta.sha512t24u.to_key();
-                let global = self.sequence_store.get(&seq_key).ok_or_else(|| {
-                    anyhow!(
-                        "Sequence {} not found in store for collection {}",
-                        key_to_digest_string(&seq_key),
-                        collection_digest,
-                    )
-                })?;
-                if meta.fai.is_none() {
-                    meta.fai = global.metadata().fai.clone();
-                }
-                Ok(match global.sequence_arc() {
-                    Some(seq) => SequenceRecord::Full {
-                        metadata: meta,
-                        sequence: seq,
-                    },
-                    None => SequenceRecord::Stub(meta),
-                })
-            })
-            .collect::<Result<Vec<_>>>()?;
-
+        let c = match self.catalog.find_coll(collection_digest) {
+            Some(c) if self.catalog.is_loaded(c) => c,
+            _ => {
+                return Err(anyhow!(
+                    "Collection not loaded: {}. Call load_collection() or load_all_collections() first.",
+                    collection_digest
+                ));
+            }
+        };
+        // Each result carries the per-collection name AND description, not the
+        // first-imported store-wide label of a sequence shared across
+        // collections. Only the bytes (and `fai`, if the member lacks it) come
+        // from the sequence row.
+        let sequences: Vec<SequenceRecord> =
+            self.catalog.members(c).map(|m| self.member_record(m)).collect();
         Ok(crate::digest::SequenceCollection {
-            metadata,
+            metadata: self.catalog.coll_meta(c).clone(),
             sequences,
         })
     }
@@ -1322,11 +1613,20 @@ impl ReadonlyRefgetStore {
         if self.local_path.is_some() {
             self.collection_sequence_digests(digest)
         } else {
-            Ok(self
-                .name_lookup
-                .get(&digest.to_key())
-                .map(|name_map| name_map.values().cloned().collect())
-                .unwrap_or_default())
+            Ok(self.loaded_member_seq_keys(digest))
+        }
+    }
+
+    /// Sequence digest keys of a loaded collection's members (empty if the
+    /// collection is unknown or not loaded).
+    pub(crate) fn loaded_member_seq_keys(&self, digest: &str) -> Vec<DigestKey> {
+        match self.catalog.find_coll(digest) {
+            Some(c) => self
+                .catalog
+                .members(c)
+                .map(|m| m.seq().sha512t24u().to_key())
+                .collect(),
+            None => Vec::new(),
         }
     }
 
@@ -1340,11 +1640,11 @@ impl ReadonlyRefgetStore {
             return self.live_sequence_digests_from_disk(exclude);
         }
         let mut live = HashSet::new();
-        for (key, name_map) in &self.name_lookup {
-            if key == exclude {
+        for c in self.catalog.coll_rows() {
+            if self.catalog.coll_meta(c).digest.to_key() == *exclude {
                 continue;
             }
-            live.extend(name_map.values().copied());
+            live.extend(self.catalog.members(c).map(|m| m.seq().sha512t24u().to_key()));
         }
         Ok(live)
     }
@@ -1378,7 +1678,7 @@ impl ReadonlyRefgetStore {
     ) -> Result<bool> {
         let key = digest.to_key();
 
-        if !self.collections.contains_key(&key) {
+        if self.catalog.find_coll(digest).is_none() {
             return Ok(false);
         }
 
@@ -1424,8 +1724,9 @@ impl ReadonlyRefgetStore {
             HashSet::new()
         };
 
-        self.collections.remove(&key);
-        self.name_lookup.remove(&key);
+        if let Some(c) = self.catalog.find_coll(digest) {
+            self.catalog.remove_collection(c);
+        }
         self.fhr_metadata.remove(&key);
         self.record(|p| p.remove_collection(key));
 
@@ -1489,16 +1790,13 @@ impl ReadonlyRefgetStore {
                 }
             }
 
-            for orphan_key in &orphans {
-                self.sequence_store.remove(orphan_key);
-            }
-
-            // Single pass over md5_lookup instead of one full scan per orphan.
-            // md5_lookup maps md5 key -> sha512 key, so we filter on the VALUE.
-            let orphan_set: std::collections::HashSet<DigestKey> =
-                orphans.iter().copied().collect();
-            self.md5_lookup.retain(|_, v| !orphan_set.contains(v));
+            let rows: Vec<SeqRow> = orphans
+                .iter()
+                .filter_map(|k| self.catalog.find_sha(key_to_digest_string(k)))
+                .collect();
+            self.remove_sequence_rows(&rows);
         }
+        self.maybe_compact_catalog();
 
         // INDEX FIRST, FILES SECOND. Both orderings can be interrupted by a
         // crash; only one of the two resulting states is recoverable. Rows gone,
@@ -1510,7 +1808,14 @@ impl ReadonlyRefgetStore {
         if self.persist_to_disk {
             self.write_index_files()?;
 
-            if let (Some(local_path), Some(template)) =
+            if self.layout == Layout::Packed {
+                // Packed: no per-`.seq` unlink. Orphan rows were already dropped
+                // from the sidecar by the commit above; here we eagerly unlink
+                // any pack file that no live sidecar row references any more.
+                if let Some(local_path) = self.local_path.clone() {
+                    self.remove_fully_dead_packs(&local_path)?;
+                }
+            } else if let (Some(local_path), Some(template)) =
                 (self.local_path.clone(), self.seqdata_path_template.clone())
             {
                 // Collect parent shard dirs while unlinking, then rmdir them
@@ -1575,10 +1880,8 @@ impl ReadonlyRefgetStore {
         // least one surviving (finalized) collection.
         let mut referenced: std::collections::HashSet<DigestKey> =
             std::collections::HashSet::new();
-        for name_map in self.name_lookup.values() {
-            for &seq_key in name_map.values() {
-                referenced.insert(seq_key);
-            }
+        for c in self.catalog.coll_rows() {
+            referenced.extend(self.catalog.members(c).map(|m| m.seq().sha512t24u().to_key()));
         }
 
         // Candidates: staged by this handle and not yet published.
@@ -1602,14 +1905,12 @@ impl ReadonlyRefgetStore {
         }
 
         // Remove from in-memory structures.
-        for key in &orphans {
-            self.sequence_store.remove(key);
-        }
-
-        // Single pass over md5_lookup instead of one full scan per orphan.
-        // md5_lookup maps md5 key -> sha512 key, so we filter on the VALUE.
+        let rows: Vec<SeqRow> = orphans
+            .iter()
+            .filter_map(|k| self.catalog.find_sha(key_to_digest_string(k)))
+            .collect();
+        self.remove_sequence_rows(&rows);
         let orphan_set: std::collections::HashSet<DigestKey> = orphans.iter().copied().collect();
-        self.md5_lookup.retain(|_, v| !orphan_set.contains(v));
 
         // FORGET these, do not tombstone them. They were staged by an import
         // that failed before its single commit, so no row of ours was ever
@@ -1649,6 +1950,26 @@ impl ReadonlyRefgetStore {
         }
     }
 
+    /// Remove leftover temp pack files (`packs/.rgstore.tmp.pack.<pid>.*`) from
+    /// THIS process, used on a failed packed import so no partial pack survives.
+    #[cfg_attr(not(feature = "filesystem"), allow(dead_code))]
+    pub(crate) fn remove_orphan_temp_packs(&self) {
+        let Some(local_path) = &self.local_path else {
+            return;
+        };
+        let packs_dir = local_path.join("packs");
+        let prefix = format!(".rgstore.tmp.pack.{}.", std::process::id());
+        if let Ok(entries) = fs::read_dir(&packs_dir) {
+            for entry in entries.filter_map(|e| e.ok()) {
+                if let Some(name) = entry.file_name().to_str() {
+                    if name.starts_with(&prefix) {
+                        let _ = fs::remove_file(entry.path());
+                    }
+                }
+            }
+        }
+    }
+
     // =========================================================================
     // Import from another store
     // =========================================================================
@@ -1660,6 +1981,13 @@ impl ReadonlyRefgetStore {
     /// The source store must have the collection loaded (call
     /// `load_collection()` or `load_all_collections()` first).
     pub fn import_collection(&mut self, source: &ReadonlyRefgetStore, digest: &str) -> Result<()> {
+        // Store-to-store copy of packed stores is out of scope for Phase 1.
+        if self.layout == Layout::Packed || source.layout == Layout::Packed {
+            return Err(anyhow!(
+                "import_collection does not support packed stores in Phase 1 \
+                 (store-to-store copy of packed layouts is not implemented)"
+            ));
+        }
         // Both stores must be disk-backed with same mode
         if source.local_path.is_none() || self.local_path.is_none() || !self.persist_to_disk {
             return Err(anyhow!("import_collection requires both stores to be disk-backed"));
@@ -1675,13 +2003,10 @@ impl ReadonlyRefgetStore {
         self.import_collection_file_copy(source, digest)?;
 
         // Copy sequence aliases for every sequence in the imported collection
-        let coll_key = digest.to_key();
-        if let Some(name_map) = source.name_lookup.get(&coll_key) {
-            for seq_key in name_map.values() {
-                let seq_digest = key_to_digest_string(seq_key);
-                for (ns, alias) in source.aliases.reverse_lookup_sequence(&seq_digest) {
-                    self.add_sequence_alias(&ns, &alias, &seq_digest)?;
-                }
+        for seq_key in source.loaded_member_seq_keys(digest) {
+            let seq_digest = key_to_digest_string(&seq_key);
+            for (ns, alias) in source.aliases.reverse_lookup_sequence(&seq_digest) {
+                self.add_sequence_alias(&ns, &alias, &seq_digest)?;
             }
         }
 
@@ -1731,14 +2056,11 @@ impl ReadonlyRefgetStore {
             // Source lacks ancillary digests but destination wants them --
             // compute them and write a new RGSI file.
             metadata.compute_ancillary_digests(&collection.sequences);
-            use crate::collection::SequenceCollectionRecordExt;
-            let record = SequenceCollectionRecord::Full {
-                metadata: metadata.clone(),
-                sequences: collection.sequences.iter()
-                    .map(|s| SequenceRecord::Stub(s.metadata().clone()))
-                    .collect(),
-            };
-            record.write_collection_rgsi(&dst_rgsi_path)?;
+            crate::collection::write_collection_rgsi_rows(
+                &dst_rgsi_path,
+                &metadata,
+                collection.sequences.iter().map(|s| s.metadata()),
+            )?;
         } else {
             // Byte-for-byte copy of the RGSI file
             fs::copy(&src_rgsi_path, &dst_rgsi_path)
@@ -1778,41 +2100,16 @@ impl ReadonlyRefgetStore {
             }
         }
 
-        // 4. Register in memory
+        // 4. Register in memory (sequences deduped against the catalog).
         let coll_key = digest.to_key();
-
-        // Build the collection record with stub sequences
-        let stub_sequences: Vec<SequenceRecord> = collection
-            .sequences
-            .iter()
-            .map(|s| SequenceRecord::Stub(s.metadata().clone()))
-            .collect();
-
-        let record = SequenceCollectionRecord::Full {
-            metadata: metadata.clone(),
-            sequences: stub_sequences,
-        };
-        self.collections.insert(coll_key, record);
+        let members: Vec<SequenceMetadata> =
+            collection.sequences.iter().map(|s| s.metadata().clone()).collect();
+        let (_, new_rows) = self.insert_collection(metadata.clone(), &members)?;
         self.record(|p| p.add_collection(coll_key));
-
-        // Register sequences and populate name_lookup
-        let mut name_map = IndexMap::new();
-        for seq_record in &collection.sequences {
-            let seq_meta = seq_record.metadata();
-            let seq_key = seq_meta.sha512t24u.to_key();
-
-            name_map.insert(seq_meta.name.clone(), seq_key);
-
-            // Insert stub into sequence_store (skip if already present -- dedup)
-            if !self.sequence_store.contains_key(&seq_key) {
-                self.sequence_store
-                    .insert(seq_key, SequenceRecord::Stub(seq_meta.clone()));
-                self.md5_lookup
-                    .insert(seq_meta.md5.to_key(), seq_key);
-                self.record(|p| p.add_sequence(seq_key));
-            }
+        for row in new_rows {
+            let seq_key = self.catalog.seq(row).sha512t24u().to_key();
+            self.record(|p| p.add_sequence(seq_key));
         }
-        self.name_lookup.insert(coll_key, name_map);
 
         // 5. Update index files
         self.write_index_files()?;
@@ -1826,121 +2123,85 @@ impl ReadonlyRefgetStore {
 
     /// List all sequences in the store (metadata only, no sequence data).
     pub fn list_sequences(&self) -> Vec<SequenceMetadata> {
-        let mut result: Vec<_> = self
-            .sequence_store
-            .values()
-            .map(|rec| rec.metadata().clone())
-            .collect();
+        let mut result: Vec<_> = self.sequence_metadata().collect();
         result.sort_by(|a, b| a.sha512t24u.cmp(&b.sha512t24u));
         result
     }
 
     /// Get metadata for a single sequence by digest (no sequence data).
+    /// Accepts sha512t24u (bare or `SQ.`-prefixed) or MD5.
     pub fn get_sequence_metadata<K: AsRef<[u8]>>(
         &self,
         seq_digest: K,
-    ) -> Option<&SequenceMetadata> {
-        let key = seq_digest.to_key();
-        self.sequence_store.get(&key).map(|rec| rec.metadata())
+    ) -> Option<SequenceMetadata> {
+        self.sequence_view(seq_digest).map(|v| v.to_metadata())
     }
 
-    /// Get a sequence by its SHA512t24u digest.
-    pub fn get_sequence<K: AsRef<[u8]>>(&self, seq_digest: K) -> Result<&SequenceRecord> {
-        let digest_key = seq_digest.to_key();
-        let actual_key = self
-            .md5_lookup
-            .get(&digest_key)
-            .copied()
-            .unwrap_or(digest_key);
-        self.sequence_store.get(&actual_key).ok_or_else(|| {
+    /// Get a sequence by its SHA512t24u (or MD5) digest. Bytes, if loaded, are
+    /// shared (`Arc`), not copied.
+    pub fn get_sequence<K: AsRef<[u8]>>(&self, seq_digest: K) -> Result<SequenceRecord> {
+        let row = self.seq_row(seq_digest.as_ref()).ok_or_else(|| {
             anyhow!(
                 "Sequence not found: {}",
                 String::from_utf8_lossy(seq_digest.as_ref())
             )
-        })
+        })?;
+        Ok(self.seq_record(row))
     }
 
     /// Clear sequence data from the store to free memory.
     ///
-    /// Removes all sequence records. Metadata is preserved:
-    /// collections, name lookups, MD5 lookups, aliases, and FHR
-    /// metadata remain intact.
+    /// Drops every sequence's loaded bytes. Metadata is preserved: sequences,
+    /// collections, name lookups, MD5 lookups, aliases, and FHR metadata
+    /// remain intact.
     ///
     /// For on-disk stores, data on disk is unaffected.
     pub fn clear(&mut self) {
-        self.sequence_store.clear();
+        self.loaded.clear();
         if let Ok(mut cache) = self.seq_fd_cache.lock() {
             cache.entries.clear();
         }
     }
 
-    /// Check whether a sequence's record is loaded (Full) rather
-    /// than a metadata-only Stub.
+    /// Check whether a sequence's bytes are loaded (owned by the store) rather
+    /// than metadata only.
     pub fn is_sequence_loaded<K: AsRef<[u8]>>(&self, seq_digest: K) -> bool {
-        let digest_key = seq_digest.to_key();
-        let actual_key = self
-            .md5_lookup
-            .get(&digest_key)
-            .copied()
-            .unwrap_or(digest_key);
-        match self.sequence_store.get(&actual_key) {
-            Some(SequenceRecord::Stub(_)) | None => false,
-            Some(SequenceRecord::Full { .. }) => true,
-        }
+        self.seq_row(seq_digest)
+            .is_some_and(|r| self.loaded.contains_key(&r))
     }
 
     /// Get a sequence by collection digest and name.
     ///
     /// The returned record carries THIS collection's name and description for
     /// the sequence, not the first-imported label of a sequence shared across
-    /// collections. Bytes (and `fai`, if the collection record lacks it) come
-    /// from the global store; the clone is an `Arc` bump, not a copy of the bases.
+    /// collections. Bytes (and `fai`, if the member lacks it) come from the
+    /// sequence row; the bytes are an `Arc` bump, not a copy.
     pub fn get_sequence_by_name<K: AsRef<[u8]>>(
         &self,
         collection_digest: K,
         sequence_name: &str,
     ) -> Result<SequenceRecord> {
-        let collection_key = collection_digest.to_key();
+        let m = self.member_by_name(collection_digest, sequence_name)?;
+        Ok(self.member_record(m))
+    }
 
-        if !self.name_lookup.contains_key(&collection_key) {
-            return Err(anyhow!(
-                "Collection not loaded. Call load_collection() or load_all_collections() first."
-            ));
-        }
-
-        let (idx, _, digest_key) = self.name_lookup.get(&collection_key)
-            .and_then(|name_map| name_map.get_full(sequence_name))
-            .ok_or_else(|| anyhow!("Sequence '{}' not found in collection", sequence_name))?;
-        let digest_key = *digest_key;
-
-        // The name's position in name_lookup is the record's index; scan only
-        // if they disagree (e.g. duplicate names), since a per-call scan is
-        // quadratic over a BED file.
-        let records = self.collection_sequence_metadata(&collection_key)?;
-        let matches = |r: &&SequenceRecord| {
-            r.metadata().name == sequence_name && r.metadata().sha512t24u.to_key() == digest_key
+    /// The member of a loaded collection named `sequence_name`.
+    pub fn member_by_name<K: AsRef<[u8]>>(
+        &self,
+        collection_digest: K,
+        sequence_name: &str,
+    ) -> Result<MemberView<'_>> {
+        let c = match self.catalog.find_coll(collection_digest) {
+            Some(c) if self.catalog.is_loaded(c) => c,
+            _ => {
+                return Err(anyhow!(
+                    "Collection not loaded. Call load_collection() or load_all_collections() first."
+                ));
+            }
         };
-        let coll_record = records
-            .get(idx)
-            .filter(matches)
-            .or_else(|| records.iter().find(matches))
-            .ok_or_else(|| anyhow!("Sequence '{}' not found in collection", sequence_name))?;
-
-        let mut meta = coll_record.metadata().clone();
-        let global = self.sequence_store.get(&digest_key).ok_or_else(|| {
-            anyhow!("Sequence record not found for '{}'. Call load_sequence() first.", sequence_name)
-        })?;
-        if meta.fai.is_none() {
-            meta.fai = global.metadata().fai.clone();
-        }
-
-        Ok(match global.sequence_arc() {
-            Some(seq) => SequenceRecord::Full {
-                metadata: meta,
-                sequence: seq,
-            },
-            None => SequenceRecord::Stub(meta),
-        })
+        self.catalog
+            .member_by_name(c, sequence_name)
+            .ok_or_else(|| anyhow!("Sequence '{}' not found in collection", sequence_name))
     }
 
     // =========================================================================
@@ -1985,32 +2246,38 @@ impl ReadonlyRefgetStore {
 
     /// Eagerly load all Stub collections to Full.
     pub fn load_all_collections(&mut self) -> Result<()> {
-        let keys: Vec<DigestKey> = self.collections.keys().cloned().collect();
-        for key in keys {
-            self.ensure_collection_loaded(&key)?;
+        let digests: Vec<String> = self
+            .catalog
+            .coll_rows()
+            .map(|c| self.catalog.coll_meta(c).digest.clone())
+            .collect();
+        for d in digests {
+            self.ensure_collection_loaded(&d)?;
         }
+        self.catalog.shrink_to_fit();
         Ok(())
     }
 
-    /// Eagerly load all Stub sequences to Full.
+    /// Eagerly load the bytes of every sequence.
     pub fn load_all_sequences(&mut self) -> Result<()> {
-        let keys: Vec<DigestKey> = self.sequence_store.keys().cloned().collect();
-        for key in keys {
-            self.ensure_sequence_loaded(&key)?;
+        let rows: Vec<SeqRow> = self.catalog.seq_rows().collect();
+        for row in rows {
+            self.ensure_sequence_loaded(row)?;
         }
         Ok(())
     }
 
     /// Load a single collection by digest.
     pub fn load_collection(&mut self, digest: &str) -> Result<()> {
-        let key = digest.to_key();
-        self.ensure_collection_loaded(&key)
+        self.ensure_collection_loaded(digest)
     }
 
     /// Load a single sequence by digest.
     pub fn load_sequence(&mut self, digest: &str) -> Result<()> {
-        let key = digest.to_key();
-        self.ensure_sequence_loaded(&key)
+        let row = self
+            .seq_row(digest)
+            .ok_or_else(|| anyhow!("Sequence not found in store"))?;
+        self.ensure_sequence_loaded(row)
     }
 
     // =========================================================================
@@ -2042,26 +2309,20 @@ impl ReadonlyRefgetStore {
         })?;
 
         // Plan: resolve to canonical keys, skip Full / already-resident, dedupe.
-        let mut plan: Vec<(DigestKey, String, String)> = Vec::new();
-        let mut seen: HashSet<DigestKey> = HashSet::new();
+        let mut plan: Vec<(SeqRow, String, String)> = Vec::new();
+        let mut seen: HashSet<SeqRow> = HashSet::new();
         {
             let resident = self
                 .resident
                 .read()
                 .map_err(|_| anyhow!("resident overlay lock poisoned"))?;
             for d in digests {
-                let dk = d.to_key();
-                let key = self.md5_lookup.get(&dk).copied().unwrap_or(dk);
-                if !seen.insert(key) {
-                    continue; // duplicate in this request
-                }
-                if resident.contains_key(&key) {
-                    continue; // already resident
-                }
-                match self.sequence_store.get(&key) {
-                    Some(rec) if rec.is_loaded() => continue, // already Full in the store
-                    Some(rec) => {
-                        let digest_str = rec.metadata().sha512t24u.clone();
+                match self.seq_row(d) {
+                    Some(key) if !seen.insert(key) => continue, // duplicate in this request
+                    Some(key) if resident.contains_key(&key) => continue, // already resident
+                    Some(key) if self.loaded.contains_key(&key) => continue, // already loaded
+                    Some(key) => {
+                        let digest_str = self.catalog.seq(key).sha512t24u().to_string();
                         let relpath = Self::expand_template(&digest_str, template)
                             .to_string_lossy()
                             .into_owned();
@@ -2081,12 +2342,26 @@ impl ReadonlyRefgetStore {
         // directory is walked in order, not in hash order.
         plan.sort_by(|a, b| a.2.cmp(&b.2));
 
-        let mut loaded: Vec<(DigestKey, Arc<Vec<u8>>)> = Vec::with_capacity(plan.len());
+        let mut loaded: Vec<(SeqRow, Arc<Vec<u8>>)> = Vec::with_capacity(plan.len());
         let mut total: u64 = 0;
-        for (key, _digest_str, relpath) in plan {
+        for (key, digest_str, relpath) in plan {
+            // Packed layout: the record is a span inside a pack, not a `.seq`.
+            // A remote packed store still prefers its standalone local cache.
+            let local_cached = self
+                .local_path
+                .as_ref()
+                .map(|lp| lp.join(&relpath).exists())
+                .unwrap_or(false);
+            let packed_bytes = if self.layout == Layout::Packed || !local_cached {
+                self.read_packed_record_bytes(&digest_str)?
+            } else {
+                None
+            };
             // Prefer a direct local read (one open + sequential read_to_end);
             // fall back to the remote fetch only when the local file is absent.
-            let data: Vec<u8> = if let Some(lp) = self.local_path.as_ref() {
+            let data: Vec<u8> = if let Some(bytes) = packed_bytes {
+                bytes
+            } else if let Some(lp) = self.local_path.as_ref() {
                 let full = lp.join(&relpath);
                 match File::open(&full) {
                     Ok(f) => {
@@ -2148,9 +2423,9 @@ impl ReadonlyRefgetStore {
     pub fn evict_resident(&self, digests: &[String]) {
         if let Ok(mut resident) = self.resident.write() {
             for d in digests {
-                let dk = d.to_key();
-                let key = self.md5_lookup.get(&dk).copied().unwrap_or(dk);
-                resident.remove(&key);
+                if let Some(key) = self.seq_row(d) {
+                    resident.remove(&key);
+                }
             }
         }
     }
@@ -2182,11 +2457,10 @@ impl ReadonlyRefgetStore {
     /// Used for RAM-budget planning before committing to a load.
     pub fn resident_estimate_bytes(&self, digests: &[String]) -> u64 {
         let resident = self.resident.read().ok();
-        let mut seen: HashSet<DigestKey> = HashSet::new();
+        let mut seen: HashSet<SeqRow> = HashSet::new();
         let mut total: u64 = 0;
         for d in digests {
-            let dk = d.to_key();
-            let key = self.md5_lookup.get(&dk).copied().unwrap_or(dk);
+            let Some(key) = self.seq_row(d) else { continue };
             if !seen.insert(key) {
                 continue;
             }
@@ -2195,22 +2469,12 @@ impl ReadonlyRefgetStore {
                     continue;
                 }
             }
-            if let Some(rec) = self.sequence_store.get(&key) {
-                if rec.is_loaded() {
-                    continue;
-                }
-                let meta = rec.metadata();
-                let bytes = match self.mode {
-                    StorageMode::Encoded => {
-                        let bps = lookup_alphabet(&meta.alphabet).bits_per_symbol as u64;
-                        (meta.length as u64 * bps + 7) / 8
-                    }
-                    StorageMode::Raw => meta.length as u64,
-                    // Zstd: compressed size varies; use uncompressed as upper bound
-                    StorageMode::Zstd => meta.length as u64,
-                };
-                total += bytes;
+            if self.loaded.contains_key(&key) {
+                continue;
             }
+            // Zstd: compressed size varies; disk_size uses uncompressed as an
+            // upper bound.
+            total += self.catalog.seq(key).disk_size(&self.mode) as u64;
         }
         total
     }
@@ -2218,8 +2482,8 @@ impl ReadonlyRefgetStore {
     /// Clone the resident packed bytes for `key`, if present. The `Arc` is cloned
     /// out under a brief read lock so the lock is released before the caller
     /// decodes -- decodes therefore never serialize against each other.
-    fn resident_lookup(&self, key: &DigestKey) -> Option<Arc<Vec<u8>>> {
-        self.resident.read().ok().and_then(|r| r.get(key).cloned())
+    fn resident_lookup(&self, key: SeqRow) -> Option<Arc<Vec<u8>>> {
+        self.resident.read().ok().and_then(|r| r.get(&key).cloned())
     }
 
     /// Decode `[start, end)` from a whole packed `.seq` byte buffer, applying the
@@ -2228,7 +2492,7 @@ impl ReadonlyRefgetStore {
     /// hit produces output byte-identical to a `Full` record.
     fn decode_full_span(
         &self,
-        metadata: &SequenceMetadata,
+        metadata: &SeqCore,
         sequence: &[u8],
         start: usize,
         end: usize,
@@ -2258,9 +2522,9 @@ impl ReadonlyRefgetStore {
     /// Iterate over all collections with their sequences loaded.
     pub fn iter_collections(&self) -> impl Iterator<Item = crate::digest::SequenceCollection> + '_ {
         let mut digests: Vec<String> = self
-            .collections
-            .values()
-            .map(|rec| rec.metadata().digest.clone())
+            .catalog
+            .coll_rows()
+            .map(|c| self.catalog.coll_meta(c).digest.clone())
             .collect();
         digests.sort();
 
@@ -2271,17 +2535,16 @@ impl ReadonlyRefgetStore {
 
     /// Iterate over all sequences with their data loaded.
     pub fn iter_sequences(&self) -> impl Iterator<Item = SequenceRecord> + '_ {
-        let mut records: Vec<_> = self.sequence_store.values().cloned().collect();
-        records.sort_by(|a, b| a.metadata().sha512t24u.cmp(&b.metadata().sha512t24u));
-        records.into_iter()
+        let mut rows: Vec<SeqRow> = self.catalog.seq_rows().collect();
+        rows.sort_by_key(|&r| self.catalog.seq(r).sha512t24u());
+        rows.into_iter().map(move |r| self.seq_record(r))
     }
 
     /// Check if a collection is fully loaded.
     pub fn is_collection_loaded<K: AsRef<[u8]>>(&self, collection_digest: K) -> bool {
-        let key = collection_digest.to_key();
-        self.collections
-            .get(&key)
-            .map_or(false, |record| record.has_sequences())
+        self.catalog
+            .find_coll(collection_digest)
+            .is_some_and(|c| self.catalog.is_loaded(c))
     }
 
     /// Returns the local path where the store is located (if any)
@@ -2325,14 +2588,7 @@ impl ReadonlyRefgetStore {
         start: usize,
         end: usize,
     ) -> Result<Vec<u8>> {
-        let digest_key = sha512_digest.to_key();
-        let actual_key = self
-            .md5_lookup
-            .get(&digest_key)
-            .copied()
-            .unwrap_or(digest_key);
-
-        let record = self.sequence_store.get(&actual_key).ok_or_else(|| {
+        let actual_key = self.seq_row(sha512_digest.as_ref()).ok_or_else(|| {
             anyhow!(
                 "Sequence not found: {}",
                 String::from_utf8_lossy(sha512_digest.as_ref())
@@ -2351,20 +2607,23 @@ impl ReadonlyRefgetStore {
             return Ok(Vec::new());
         }
 
-        let (metadata, sequence): (&SequenceMetadata, &[u8]) = match record {
+        let core = self.catalog.seq(actual_key).core();
+        let owned = self.seq_bytes(actual_key);
+        let (metadata, sequence): (&SeqCore, &[u8]) = match owned.as_deref() {
             // Not resident: for a disk-backed store, read only the bytes covering
             // [start, end) directly from the `.seq` file instead of loading the
             // whole sequence into RAM. This is the random-access extract path:
             // sparse region extraction touches a tiny fraction of each sequence,
             // so a per-query partial read avoids the cost of `load_sequence`
             // pulling entire chromosomes into memory.
-            SequenceRecord::Stub(meta) => {
+            None => {
+                let meta = &core;
                 // Resident overlay first: if the whole `.seq` has been promoted to
                 // RAM (via `load_resident`), decode the covering span from those
-                // packed bytes exactly like the `Full` arm -- byte-identical
+                // packed bytes exactly like the loaded arm -- byte-identical
                 // output, no disk read. Consulted BEFORE the on-disk partial-read
                 // path so a resident hit never touches the filesystem.
-                if let Some(bytes) = self.resident_lookup(&actual_key) {
+                if let Some(bytes) = self.resident_lookup(actual_key) {
                     return self.decode_full_span(meta, &bytes, start, end);
                 }
                 // Partial-read resolution for a non-resident sequence:
@@ -2388,7 +2647,7 @@ impl ReadonlyRefgetStore {
                 }
                 return Err(anyhow!("Sequence data not loaded (stub only)"));
             }
-            SequenceRecord::Full { metadata, sequence } => (metadata, sequence.as_slice()),
+            Some(sequence) => (&core, sequence.as_slice()),
         };
 
         if start >= metadata.length || end > metadata.length || start >= end {
@@ -2461,21 +2720,15 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
         sha512_digest: K,
         ranges: &[(usize, usize)],
     ) -> Result<Vec<Vec<u8>>> {
-        let digest_key = sha512_digest.to_key();
-        let actual_key = self
-            .md5_lookup
-            .get(&digest_key)
-            .copied()
-            .unwrap_or(digest_key);
-
-        let record = self.sequence_store.get(&actual_key).ok_or_else(|| {
+        let actual_key = self.seq_row(sha512_digest.as_ref()).ok_or_else(|| {
             anyhow!(
                 "Sequence not found: {}",
                 String::from_utf8_lossy(sha512_digest.as_ref())
             )
         })?;
 
-        let metadata = record.metadata();
+        let core = self.catalog.seq(actual_key).core();
+        let metadata = &core;
         let seq_length = metadata.length;
 
         // Validate every range up front (same rule as get_substring). A
@@ -2495,8 +2748,8 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
             }
         }
 
-        match record {
-            SequenceRecord::Full { metadata, sequence } => {
+        match self.seq_bytes(actual_key) {
+            Some(sequence) => {
                 let seq: &[u8] = sequence.as_slice();
                 let mut out = Vec::with_capacity(ranges.len());
                 match self.mode {
@@ -2522,12 +2775,13 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
                 }
                 Ok(out)
             }
-            SequenceRecord::Stub(meta) => {
+            None => {
+                let meta = &core;
                 // Resident overlay first: if the whole `.seq` is RAM-resident
                 // (via `load_resident`), decode every range from those packed
-                // bytes exactly like the `Full` arm above -- byte-identical, no
+                // bytes exactly like the loaded arm above -- byte-identical, no
                 // disk read. Consulted BEFORE the on-disk partial-read path.
-                if let Some(bytes) = self.resident_lookup(&actual_key) {
+                if let Some(bytes) = self.resident_lookup(actual_key) {
                     let seq: &[u8] = bytes.as_slice();
                     let mut out = Vec::with_capacity(ranges.len());
                     match self.mode {
@@ -2653,7 +2907,7 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
     /// sequence in memory.
     fn get_substring_from_disk(
         &self,
-        metadata: &SequenceMetadata,
+        metadata: &SeqCore,
         start: usize,
         end: usize,
     ) -> Result<Vec<u8>> {
@@ -2666,27 +2920,31 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
             ));
         }
 
-        // Fetch (or open + cache) the shared `.seq` file handle. The critical
-        // section is kept tiny: lock -> get-or-open -> clone Arc -> unlock. The
-        // actual positioned read happens OUTSIDE the lock, so concurrent reads
-        // are never serialized by the cache.
-        let file = self.get_cached_seq_file(&metadata.sha512t24u)?;
-
         // Zstd: there is no base->byte mapping into a compressed frame, so read
-        // the whole `.seq` (a small CDC chunk), decompress once, and slice the
-        // ASCII. Whole-frame decompress of a <=256 KiB chunk is microseconds.
+        // the whole stored frame (a small CDC chunk), decompress once, and slice
+        // the ASCII. Whole-frame decompress of a <=256 KiB chunk is microseconds.
         if self.mode == StorageMode::Zstd {
-            let file_len = file
-                .metadata()
-                .context("failed to stat zstd seq file")?
-                .len() as usize;
-            let compressed = crate::posread::read_exact_window(&file, 0, file_len)?;
+            let compressed = match self.resolve_location(&metadata.sha512t24u, StoreSide::Local)? {
+                Location::Standalone { .. } => {
+                    let file = self.get_cached_seq_file(&metadata.sha512t24u)?;
+                    let file_len = file
+                        .metadata()
+                        .context("failed to stat zstd seq file")?
+                        .len() as usize;
+                    crate::posread::read_exact_window(&file, 0, file_len)?
+                }
+                Location::Packed { pack, offset, len } => {
+                    self.read_pack_bytes_local(&pack, offset, offset + len)?
+                }
+            };
             let ascii = zstd::decode_all(&compressed[..])
                 .context("zstd decompression of seq file failed")?;
             return Ok(ascii[start..end].to_vec());
         }
 
-        // Compute the covering byte window, then read it with a positioned read.
+        // Compute the covering byte window (identity under Raw). This math is
+        // layout-independent; narrowing falls out of adding the pack offset to
+        // an already-narrow window.
         let (byte_start, byte_end) = match self.mode {
             StorageMode::Encoded => {
                 let alphabet = lookup_alphabet(&metadata.alphabet);
@@ -2695,7 +2953,24 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
             StorageMode::Raw => (start, end),
             StorageMode::Zstd => unreachable!("handled above"),
         };
-        let buf = crate::posread::read_exact_window(&file, byte_start, byte_end - byte_start)?;
+
+        // Resolve where the bytes live and read only the covering window.
+        let buf = match self.resolve_location(&metadata.sha512t24u, StoreSide::Local)? {
+            Location::Standalone { .. } => {
+                // Fetch (or open + cache) the shared `.seq` file handle. The
+                // critical section is tiny; the positioned read is outside the
+                // lock, so concurrent reads are never serialized by the cache.
+                let file = self.get_cached_seq_file(&metadata.sha512t24u)?;
+                crate::posread::read_exact_window(&file, byte_start, byte_end - byte_start)?
+            }
+            Location::Packed { pack, offset, .. } => {
+                // Add the pack offset to the already-narrow window; block-cache
+                // read of the absolute range.
+                let abs_start = offset + byte_start as u64;
+                let abs_end = offset + byte_end as u64;
+                self.read_pack_bytes_local(&pack, abs_start, abs_end)?
+            }
+        };
 
         let decoded: Vec<u8> = match self.mode {
             StorageMode::Encoded => {
@@ -2709,25 +2984,41 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
         Ok(decoded)
     }
 
+    /// Whole stored bytes of one sequence when it lives in a pack, read from the
+    /// local packs (packed local store) or a byte range of the remote pack
+    /// (remote packed store). Returns `None` for a standalone layout, so the
+    /// caller falls back to its `.seq` file path. Bytes are in the store's
+    /// native form (2-bit, ASCII, or a zstd frame).
+    fn read_packed_record_bytes(&self, sha: &str) -> Result<Option<Vec<u8>>> {
+        if self.layout == Layout::Packed {
+            return match self.resolve_location(sha, StoreSide::Local)? {
+                Location::Packed { pack, offset, len } => {
+                    Ok(Some(self.read_pack_bytes_local(&pack, offset, offset + len)?))
+                }
+                Location::Standalone { .. } => Ok(None),
+            };
+        }
+        if self.remote_layout == Layout::Packed && self.remote_source.is_some() {
+            if let Location::Packed { pack, offset, len } =
+                self.resolve_location(sha, StoreSide::Remote)?
+            {
+                let remote = self.remote_source.as_ref().unwrap();
+                let relpath = PathBuf::from(format!("packs/{}.pack", pack));
+                let mut reader = open_remote_range(remote, &relpath, offset, offset + len)?;
+                let mut buf = Vec::with_capacity(len as usize);
+                reader
+                    .read_to_end(&mut buf)
+                    .context("Failed to read remote pack byte range")?;
+                return Ok(Some(buf));
+            }
+        }
+        Ok(None)
+    }
+
     /// Return a shared handle to the `.seq` file for `digest`, opening and
     /// caching it on a miss. Bounded LRU; the LRU handle is evicted (closed)
     /// when the cache is full.
     fn get_cached_seq_file(&self, digest: &str) -> Result<Arc<File>> {
-        let key = digest.to_key();
-
-        // Fast path: hit. Hold the lock only for the tiny map op.
-        {
-            let mut cache = self
-                .seq_fd_cache
-                .lock()
-                .map_err(|_| anyhow!("seq fd cache mutex poisoned"))?;
-            if let Some(f) = cache.get(&key) {
-                return Ok(f);
-            }
-        }
-
-        // Miss: build the path and open OUTSIDE the lock (the open syscall must
-        // not serialize other readers).
         let local_path = self
             .local_path
             .as_ref()
@@ -2737,22 +3028,42 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
             .as_ref()
             .ok_or_else(|| anyhow!("No sequence data path template configured"))?;
         let full_path = local_path.join(Self::expand_template(digest, template));
+        self.get_cached_file(&full_path)
+    }
+
+    /// Return a shared handle to the file at `full_path`, opening and caching it
+    /// on a miss. The bounded LRU is keyed by path, so pack files and `.seq`
+    /// files share one pool of open handles.
+    pub(crate) fn get_cached_file(&self, full_path: &Path) -> Result<Arc<File>> {
+        // Fast path: hit. Hold the lock only for the tiny map op.
+        {
+            let mut cache = self
+                .seq_fd_cache
+                .lock()
+                .map_err(|_| anyhow!("seq fd cache mutex poisoned"))?;
+            if let Some(f) = cache.get(full_path) {
+                return Ok(f);
+            }
+        }
+
+        // Miss: open OUTSIDE the lock (the open syscall must not serialize
+        // other readers).
         let file = Arc::new(
-            File::open(&full_path)
-                .with_context(|| format!("Failed to open seq file {}", full_path.display()))?,
+            File::open(full_path)
+                .with_context(|| format!("Failed to open file {}", full_path.display()))?,
         );
 
         // Insert under the lock. A concurrent miss may have inserted the same
-        // digest meanwhile; that is harmless (both handles read the same
-        // immutable file) -- prefer the already-cached one to avoid duplicating.
+        // path meanwhile; that is harmless (both handles read the same immutable
+        // file) -- prefer the already-cached one to avoid duplicating.
         let mut cache = self
             .seq_fd_cache
             .lock()
             .map_err(|_| anyhow!("seq fd cache mutex poisoned"))?;
-        if let Some(existing) = cache.get(&key) {
+        if let Some(existing) = cache.get(full_path) {
             return Ok(existing);
         }
-        cache.insert(key, Arc::clone(&file));
+        cache.insert(full_path.to_path_buf(), Arc::clone(&file));
         Ok(file)
     }
 
@@ -2776,7 +3087,7 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
     /// flow 3, for caching).
     fn get_substring_from_remote(
         &self,
-        metadata: &SequenceMetadata,
+        metadata: &SeqCore,
         start: usize,
         end: usize,
     ) -> Result<Vec<u8>> {
@@ -2805,10 +3116,8 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
             .as_ref()
             .ok_or_else(|| anyhow!("Remote partial read requires a remote source"))?;
 
-        let relpath = self.resolve_seq_file_relpath(&metadata.sha512t24u)?;
-
-        // Compute the covering byte window. `.seq` files are headerless raw byte
-        // arrays, so byte offsets map directly to base positions.
+        // Compute the covering byte window. Sequence bytes are headerless raw
+        // byte arrays, so byte offsets map directly to base positions.
         let (byte_start, byte_end) = match self.mode {
             StorageMode::Encoded => {
                 let alphabet = lookup_alphabet(&metadata.alphabet);
@@ -2818,8 +3127,26 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
             StorageMode::Zstd => unreachable!("guarded above"),
         };
 
-        let mut reader =
-            open_remote_range(remote, &relpath, byte_start as u64, byte_end as u64)?;
+        // Resolve where the bytes live on the REMOTE, then range-fetch the
+        // covering window. Packed reads go through packs/<pack>.pack; standalone
+        // reads through the templated `.seq` path.
+        //
+        // NOTE (Phase 1): the remote packed path issues one direct HTTP range
+        // per read (no ranged block cache and no ranged sidecar binary search;
+        // the sidecar is fetched whole and cached in memory). See the report.
+        let (relpath, abs_start, abs_end) =
+            match self.resolve_location(&metadata.sha512t24u, StoreSide::Remote)? {
+                Location::Standalone { relpath } => {
+                    (relpath, byte_start as u64, byte_end as u64)
+                }
+                Location::Packed { pack, offset, .. } => (
+                    PathBuf::from(format!("packs/{}.pack", pack)),
+                    offset + byte_start as u64,
+                    offset + byte_end as u64,
+                ),
+            };
+
+        let mut reader = open_remote_range(remote, &relpath, abs_start, abs_end)?;
         let mut buf = Vec::with_capacity(byte_end - byte_start);
         reader
             .read_to_end(&mut buf)
@@ -2863,6 +3190,463 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
         Ok(relpath)
     }
 
+    // =====================================================================
+    // Packed layout: the single point of location resolution
+    // =====================================================================
+
+    /// THE single point where a digest becomes a byte location. All read-path
+    /// call sites go through here and branch on the returned [`Location`], never
+    /// on `layout`. Phase 2 (hybrid stores) will change ONLY this body.
+    pub(crate) fn resolve_location(&self, digest: &str, side: StoreSide) -> Result<Location> {
+        let layout = match side {
+            StoreSide::Local => self.layout,
+            StoreSide::Remote => self.remote_layout,
+        };
+        match layout {
+            Layout::Standalone => Ok(Location::Standalone {
+                relpath: self.resolve_seq_file_relpath(digest)?,
+            }),
+            Layout::Packed => {
+                let row = self
+                    .pack_index_lookup(digest, side)?
+                    .ok_or_else(|| anyhow!("sequence {} not in pack index", digest))?;
+                Ok(Location::Packed {
+                    pack: row.pack,
+                    offset: row.offset,
+                    len: row.len,
+                })
+            }
+        }
+    }
+
+    /// Look up a digest's pack location for `side`: the local side through
+    /// the per-row pack columns, the remote side by binary search of its
+    /// (fetched) sidecar.
+    fn pack_index_lookup(
+        &self,
+        digest: &str,
+        side: StoreSide,
+    ) -> Result<Option<super::packidx::PackRow>> {
+        match side {
+            StoreSide::Local => {
+                let Some(row) = self.catalog.find_sha(digest) else { return Ok(None) };
+                let cols = self.local_pack_cols()?;
+                Ok(cols.get(row).map(|(pack, offset, len)| super::packidx::PackRow { pack, offset, len }))
+            }
+            StoreSide::Remote => self.remote_pack_index_handle()?.lookup(digest),
+        }
+    }
+
+    /// The local pack columns, building them from `sequences.pack.idx` on
+    /// first use.
+    fn local_pack_cols(&self) -> Result<Arc<super::catalog::PackColumns>> {
+        if let Some(c) = self.pack_cols.lock().unwrap().as_ref() {
+            return Ok(Arc::clone(c));
+        }
+        let local_path = self
+            .local_path
+            .as_ref()
+            .ok_or_else(|| anyhow!("packed store requires a local path"))?;
+        let idx_path = local_path.join("sequences.pack.idx");
+        let bytes = match std::fs::read(&idx_path) {
+            Ok(b) => b,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+            Err(e) => return Err(e).with_context(|| format!("reading {}", idx_path.display())),
+        };
+        let cols = Arc::new(super::catalog::PackColumns::build(&self.catalog, &bytes)?);
+        let mut g = self.pack_cols.lock().unwrap();
+        if let Some(existing) = g.as_ref() {
+            return Ok(Arc::clone(existing));
+        }
+        *g = Some(Arc::clone(&cols));
+        Ok(cols)
+    }
+
+    /// The REMOTE side's sidecar, fetched whole on first use and binary
+    /// searched (the remote path is unchanged by the local pack columns).
+    fn remote_pack_index_handle(
+        &self,
+    ) -> Result<Arc<super::packidx::PackIndex<super::packidx::InMemory>>> {
+        {
+            let g = self.remote_pack_index.lock().unwrap();
+            if let Some(h) = g.as_ref() {
+                return Ok(Arc::clone(h));
+            }
+        }
+        let bytes = Self::fetch_file(
+            &self.local_path,
+            &self.remote_source,
+            "sequences.pack.idx",
+            false,
+            false,
+        )?;
+        let handle = Arc::new(super::packidx::in_memory_index(bytes)?);
+        let mut g = self.remote_pack_index.lock().unwrap();
+        if let Some(existing) = g.as_ref() {
+            return Ok(Arc::clone(existing));
+        }
+        *g = Some(Arc::clone(&handle));
+        Ok(handle)
+    }
+
+    /// Invalidate the cached local pack index (call after a commit that changed
+    /// the sidecar). The next resolution reloads from disk.
+    pub(crate) fn invalidate_pack_index(&self) {
+        *self.pack_cols.lock().unwrap() = None;
+        self.pack_lengths.lock().unwrap().clear();
+    }
+
+    /// The byte length of a pack file, cached (needed to clamp the final block
+    /// of a local block-cache read).
+    fn pack_file_len(&self, pack: &Arc<str>) -> Result<u64> {
+        if let Some(len) = self.pack_lengths.lock().unwrap().get(pack).copied() {
+            return Ok(len);
+        }
+        let local_path = self
+            .local_path
+            .as_ref()
+            .ok_or_else(|| anyhow!("packed read requires a local path"))?;
+        let path = local_path.join("packs").join(format!("{}.pack", pack));
+        let len = std::fs::metadata(&path)
+            .with_context(|| format!("stat {}", path.display()))?
+            .len();
+        self.pack_lengths.lock().unwrap().insert(Arc::clone(pack), len);
+        Ok(len)
+    }
+
+    /// Read `[abs_start, abs_end)` from a LOCAL pack file, through the coalescing
+    /// block cache. A span larger than the cache bypasses it (direct read).
+    fn read_pack_bytes_local(&self, pack: &Arc<str>, abs_start: u64, abs_end: u64) -> Result<Vec<u8>> {
+        let local_path = self
+            .local_path
+            .as_ref()
+            .ok_or_else(|| anyhow!("packed read requires a local path"))?;
+        let pack_path = local_path.join("packs").join(format!("{}.pack", pack));
+        let pack_len = self.pack_file_len(pack)?;
+        let file = self.get_cached_file(&pack_path)?;
+        let fetch = |off: u64, len: u64| -> Result<Vec<u8>> {
+            crate::posread::read_exact_window(&file, off as usize, len as usize)
+        };
+        self.pack_cache
+            .read_range(pack, pack_len, abs_start, abs_end, &fetch)
+    }
+
+    /// Set the per-pack size cap in bytes for new packs.
+    pub fn set_pack_cap_bytes(&mut self, cap: u64) {
+        self.pack_cap_bytes = cap.max(1);
+    }
+
+    /// Reconfigure the pack block cache capacity (in blocks).
+    pub fn set_pack_cache_blocks(&mut self, n: usize) {
+        self.pack_cache = super::packcache::PackBlockCache::new(n, self.pack_block_size);
+    }
+
+    /// Test-only: shrink the pack block size so coalescing/narrowing is
+    /// exercised with tiny fixtures.
+    #[cfg(all(test, feature = "filesystem"))]
+    pub(crate) fn set_pack_block_size_for_test(&mut self, block_size: u64) {
+        self.pack_block_size = block_size.max(1);
+        self.pack_cache = super::packcache::PackBlockCache::new(
+            super::packcache::DEFAULT_PACK_CACHE_BLOCKS,
+            self.pack_block_size,
+        );
+    }
+
+    // =====================================================================
+    // Packed incremental session pack (add_sequence_record path)
+    // =====================================================================
+
+    /// Append `bytes` (already in store-mode encoding) to the open session pack,
+    /// sealing the current pack first if it would exceed the cap.
+    fn session_pack_append(&self, digest: &str, bytes: &[u8]) -> Result<()> {
+        use sha2::Digest as _;
+        use std::io::Write as _;
+
+        let local_path = self
+            .local_path
+            .as_ref()
+            .ok_or_else(|| anyhow!("packed write requires a local path"))?;
+        let packs_dir = local_path.join("packs");
+
+        let mut guard = self.open_session_pack.lock().unwrap();
+        if guard.is_none() {
+            std::fs::create_dir_all(&packs_dir)?;
+            let ordinal = 0usize;
+            let tmp_path = packs_dir.join(format!(
+                ".rgstore.tmp.pack.session.{}.{}",
+                std::process::id(),
+                ordinal
+            ));
+            let file = std::fs::OpenOptions::new()
+                .create(true)
+                .truncate(true)
+                .read(true)
+                .write(true)
+                .open(&tmp_path)?;
+            *guard = Some(SessionPack {
+                packs_dir: packs_dir.clone(),
+                ordinal,
+                tmp_path,
+                file,
+                len: 0,
+                hasher: sha2::Sha256::new(),
+                rows: Vec::new(),
+                sealed: Vec::new(),
+            });
+        }
+
+        let session = guard.as_mut().unwrap();
+        let len = bytes.len() as u64;
+        // Seal-before-place at cap (a sequence never straddles two packs).
+        if session.len > 0 && session.len + len > self.pack_cap_bytes {
+            Self::seal_session_current(session)?;
+        }
+        let offset = session.len;
+        session.file.write_all(bytes)?;
+        session.hasher.update(bytes);
+        session.len += len;
+        session.rows.push((digest.to_string(), offset, len));
+        Ok(())
+    }
+
+    /// Seal the currently-open session sub-pack to its content-hash name and
+    /// open a fresh empty temp for continued writing. No-op on an empty pack.
+    fn seal_session_current(session: &mut SessionPack) -> Result<()> {
+        use sha2::Digest as _;
+        if session.len == 0 {
+            return Ok(());
+        }
+        let _ = session.file.sync_all();
+        let hasher = std::mem::replace(&mut session.hasher, sha2::Sha256::new());
+        let digest = hasher.finalize();
+        let name: String = digest[..16].iter().map(|b| format!("{:02x}", b)).collect();
+        let final_path = session.packs_dir.join(format!("{}.pack", name));
+        if final_path.exists() {
+            let _ = std::fs::remove_file(&session.tmp_path);
+        } else {
+            std::fs::rename(&session.tmp_path, &final_path)
+                .with_context(|| format!("sealing session pack {}", final_path.display()))?;
+        }
+        if let Ok(dir) = File::open(&session.packs_dir) {
+            let _ = dir.sync_all();
+        }
+        let name_arc: Arc<str> = Arc::from(name.as_str());
+        let rows = std::mem::take(&mut session.rows);
+        session.sealed.push(SessionSealed { name: name_arc, rows });
+
+        // Open a fresh temp for any further writes in this session.
+        session.ordinal += 1;
+        let tmp_path = session.packs_dir.join(format!(
+            ".rgstore.tmp.pack.session.{}.{}",
+            std::process::id(),
+            session.ordinal
+        ));
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .read(true)
+            .write(true)
+            .open(&tmp_path)?;
+        session.file = file;
+        session.tmp_path = tmp_path;
+        session.len = 0;
+        Ok(())
+    }
+
+    /// Seal any open incremental session pack and return its `(digest, PackRow)`
+    /// rows for the sidecar merge. Called by the commit path under the lock.
+    pub(crate) fn seal_open_session_pack(
+        &self,
+    ) -> Result<Vec<(String, super::packidx::PackRow)>> {
+        let mut guard = self.open_session_pack.lock().unwrap();
+        let Some(mut session) = guard.take() else {
+            return Ok(Vec::new());
+        };
+        if session.len > 0 {
+            Self::seal_session_current(&mut session)?;
+        }
+        let mut out = Vec::new();
+        for sealed in &session.sealed {
+            for (digest, offset, len) in &sealed.rows {
+                out.push((
+                    digest.clone(),
+                    super::packidx::PackRow {
+                        pack: Arc::clone(&sealed.name),
+                        offset: *offset,
+                        len: *len,
+                    },
+                ));
+            }
+        }
+        // Drop the trailing empty temp left open by the last seal/reopen.
+        let _ = std::fs::remove_file(&session.tmp_path);
+        Ok(out)
+    }
+
+    // =====================================================================
+    // Packed deletion accounting + compaction
+    // =====================================================================
+
+    /// Dead (unreferenced) bytes inside pack files:
+    /// `sum(pack sizes) - sum(live sidecar lengths)`. `Ok(0)` for a store with
+    /// no packs. Computed, not tracked.
+    pub fn packed_dead_bytes(&self) -> Result<u64> {
+        let local_path = self
+            .local_path
+            .as_ref()
+            .ok_or_else(|| anyhow!("packed_dead_bytes requires a local path"))?;
+        let packs_dir = local_path.join("packs");
+        let mut total_pack_bytes: u64 = 0;
+        if let Ok(entries) = fs::read_dir(&packs_dir) {
+            for entry in entries.filter_map(|e| e.ok()) {
+                if let Some(name) = entry.file_name().to_str() {
+                    if name.ends_with(".pack") {
+                        total_pack_bytes += entry.metadata().map(|m| m.len()).unwrap_or(0);
+                    }
+                }
+            }
+        }
+        let idx_path = local_path.join("sequences.pack.idx");
+        let live: u64 = match fs::read(&idx_path) {
+            Ok(bytes) => super::packidx::read_pack_idx_rows(&bytes)?
+                .values()
+                .map(|r| r.len)
+                .sum(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => 0,
+            Err(e) => return Err(e).with_context(|| format!("reading {}", idx_path.display())),
+        };
+        Ok(total_pack_bytes.saturating_sub(live))
+    }
+
+    /// Rewrite the live spans of a packed store into fresh sealed packs,
+    /// reclaiming dead bytes. Deterministic and locality-preserving (packs
+    /// visited by name, rows by offset). Retrieval is byte-identical before and
+    /// after.
+    pub fn compact(&mut self) -> Result<CompactReport> {
+        if self.layout != Layout::Packed {
+            return Err(anyhow!("compact() only applies to a packed store"));
+        }
+        let local_path = self
+            .local_path
+            .clone()
+            .ok_or_else(|| anyhow!("compact requires a local disk-backed store"))?;
+        self.lock_for_batch("compact")?;
+        let result = self.compact_inner(&local_path);
+        self.release_batch_lock();
+        result
+    }
+
+    fn compact_inner(&self, local_path: &Path) -> Result<CompactReport> {
+        use super::packidx::{read_pack_idx_rows, write_pack_idx, PackRow};
+        use std::collections::BTreeMap;
+
+        let packs_dir = local_path.join("packs");
+        let idx_path = local_path.join("sequences.pack.idx");
+
+        let old_rows: BTreeMap<String, PackRow> = match fs::read(&idx_path) {
+            Ok(bytes) => read_pack_idx_rows(&bytes)?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => BTreeMap::new(),
+            Err(e) => return Err(e).with_context(|| format!("reading {}", idx_path.display())),
+        };
+
+        let packs_before = Self::count_pack_files(&packs_dir);
+        let dead_before = self.packed_dead_bytes()?;
+
+        // Deterministic, locality-preserving order: packs by name, rows by offset.
+        let mut by_pack: BTreeMap<Arc<str>, Vec<(String, u64, u64)>> = BTreeMap::new();
+        for (digest, row) in &old_rows {
+            by_pack
+                .entry(Arc::clone(&row.pack))
+                .or_default()
+                .push((digest.clone(), row.offset, row.len));
+        }
+        for v in by_pack.values_mut() {
+            v.sort_by_key(|(_, off, _)| *off);
+        }
+
+        // Stream every live span through the session-pack builder into fresh
+        // sealed packs (reusing the incremental writer machinery).
+        for (pack_name, rows) in &by_pack {
+            let src_path = packs_dir.join(format!("{}.pack", pack_name));
+            let src = File::open(&src_path)
+                .with_context(|| format!("opening source pack {}", src_path.display()))?;
+            for (digest, offset, len) in rows {
+                let bytes =
+                    crate::posread::read_exact_window(&src, *offset as usize, *len as usize)?;
+                self.session_pack_append(digest, &bytes)?;
+            }
+        }
+        let new_rows: BTreeMap<String, PackRow> =
+            self.seal_open_session_pack()?.into_iter().collect();
+
+        // Publish the replacement sidecar, then drop old packs no longer used.
+        write_pack_idx(&idx_path, &new_rows)?;
+        self.invalidate_pack_index();
+
+        let new_pack_names: HashSet<String> =
+            new_rows.values().map(|r| r.pack.to_string()).collect();
+        if let Ok(entries) = fs::read_dir(&packs_dir) {
+            for entry in entries.filter_map(|e| e.ok()) {
+                if let Some(name) = entry.file_name().to_str() {
+                    if let Some(stem) = name.strip_suffix(".pack") {
+                        if !new_pack_names.contains(stem) {
+                            let _ = fs::remove_file(entry.path());
+                        }
+                    }
+                }
+            }
+        }
+
+        let dead_after = self.packed_dead_bytes()?;
+        Ok(CompactReport {
+            packs_before,
+            packs_after: new_pack_names.len(),
+            bytes_reclaimed: dead_before.saturating_sub(dead_after),
+        })
+    }
+
+    /// Unlink any `packs/*.pack` file no live sidecar row references. Called
+    /// after a deletion commit; the sidecar is the current on-disk one.
+    fn remove_fully_dead_packs(&self, local_path: &Path) -> Result<()> {
+        let packs_dir = local_path.join("packs");
+        let idx_path = local_path.join("sequences.pack.idx");
+        let live: HashSet<String> = match fs::read(&idx_path) {
+            Ok(bytes) => super::packidx::read_pack_idx_rows(&bytes)?
+                .values()
+                .map(|r| r.pack.to_string())
+                .collect(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => HashSet::new(),
+            Err(e) => return Err(e).with_context(|| format!("reading {}", idx_path.display())),
+        };
+        if let Ok(entries) = fs::read_dir(&packs_dir) {
+            for entry in entries.filter_map(|e| e.ok()) {
+                if let Some(name) = entry.file_name().to_str() {
+                    if let Some(stem) = name.strip_suffix(".pack") {
+                        if !live.contains(stem) {
+                            let _ = fs::remove_file(entry.path());
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Count `*.pack` files (excluding temp files) in a `packs/` directory.
+    fn count_pack_files(packs_dir: &Path) -> usize {
+        let mut n = 0;
+        if let Ok(entries) = fs::read_dir(packs_dir) {
+            for entry in entries.filter_map(|e| e.ok()) {
+                if let Some(name) = entry.file_name().to_str() {
+                    if name.ends_with(".pack") {
+                        n += 1;
+                    }
+                }
+            }
+        }
+        n
+    }
+
     /// Stream a (sub)sequence as decoded ASCII bases without loading the full
     /// sequence into memory.
     ///
@@ -2880,21 +3664,17 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
         end: Option<u64>,
     ) -> Result<Box<dyn Read + Send>> {
         // 1. Resolve digest (MD5 -> SHA512t24u fallback).
-        let digest_key = sha512_digest.to_key();
-        let actual_key = self
-            .md5_lookup
-            .get(&digest_key)
-            .copied()
-            .unwrap_or(digest_key);
-
-        // 2. Fetch metadata only (do not load bytes).
-        let record = self.sequence_store.get(&actual_key).ok_or_else(|| {
+        let actual_key = self.seq_row(sha512_digest.as_ref()).ok_or_else(|| {
             anyhow!(
                 "Sequence not found: {}",
                 String::from_utf8_lossy(sha512_digest.as_ref())
             )
         })?;
-        let metadata = record.metadata();
+
+        // 2. Fetch metadata only (do not load bytes).
+        let core = self.catalog.seq(actual_key).core();
+        let metadata = &core;
+        let owned = self.seq_bytes(actual_key);
 
         // 3. Resolve bounds.
         let length = metadata.length as u64;
@@ -2914,10 +3694,18 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
         // record (small CDC chunk) once and stream the requested ASCII slice.
         if self.mode == StorageMode::Zstd {
             let (s, e) = (start as usize, end as usize);
-            let ascii: Vec<u8> = match record {
-                SequenceRecord::Full { sequence, .. } => zstd::decode_all(&sequence[..])
+            let meta = metadata;
+            let ascii: Vec<u8> = match &owned {
+                Some(sequence) => zstd::decode_all(&sequence[..])
                     .context("zstd decompression of resident record failed")?,
-                SequenceRecord::Stub(meta) => {
+                None if self.layout == Layout::Packed => {
+                    let compressed = self
+                        .read_packed_record_bytes(&meta.sha512t24u)?
+                        .ok_or_else(|| anyhow!("packed store resolved a standalone sequence"))?;
+                    zstd::decode_all(&compressed[..])
+                        .context("zstd decompression of packed record failed")?
+                }
+                None => {
                     let relpath = self.resolve_seq_file_relpath(&meta.sha512t24u)?;
                     let local = self.local_path.as_ref().ok_or_else(|| {
                         anyhow!("streaming a Zstd stub requires a local disk-backed store")
@@ -2954,16 +3742,16 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
             return Ok(Box::new(std::io::empty()));
         }
 
-        let sha = metadata.sha512t24u.clone();
+        let sha = metadata.sha512t24u.to_string();
 
         // 6. Build the source reader. In-memory Full records are streamed
         // directly from their encoded byte buffer. Otherwise try the
         // on-disk path (local_path / remote_source).
-        if let SequenceRecord::Full { sequence, .. } = record {
+        if let Some(sequence) = owned {
             // Share ownership of the already-resident buffer instead of
             // cloning the byte range. This keeps peak allocation O(1) in
             // the sequence size.
-            let shared = Arc::clone(sequence);
+            let shared = sequence;
             let source: Box<dyn Read + Send> = Box::new(ArcSliceReader::new(
                 shared,
                 byte_start as usize,
@@ -2984,37 +3772,64 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
             };
         }
 
-        let relpath = self.resolve_seq_file_relpath(&sha)?;
-
-        let source: Box<dyn Read + Send> = if let Some(local) = self.local_path.as_ref() {
-            let full = local.join(&relpath);
-            if full.exists() {
-                let mut file = File::open(&full)
-                    .with_context(|| format!("Failed to open local seq file: {}", full.display()))?;
-                file.seek(SeekFrom::Start(byte_start))
-                    .context("Failed to seek in local seq file")?;
-                let file_len = file.metadata()
-                    .with_context(|| format!("Failed to stat local seq file: {}", full.display()))?.len();
-                if file_len < byte_start + byte_len {
+        // Open a bounded window on a local file (seek + take), verifying it is
+        // long enough. Shared by the standalone `.seq` and packed-pack paths.
+        let open_local_window =
+            |full: &Path, at: u64| -> Result<Box<dyn Read + Send>> {
+                let mut file = File::open(full)
+                    .with_context(|| format!("Failed to open local file: {}", full.display()))?;
+                file.seek(SeekFrom::Start(at))
+                    .context("Failed to seek in local file")?;
+                let file_len = file
+                    .metadata()
+                    .with_context(|| format!("Failed to stat local file: {}", full.display()))?
+                    .len();
+                if file_len < at + byte_len {
                     return Err(anyhow!(
-                        "Local seq file is too short to satisfy the requested byte range \
+                        "Local file is too short to satisfy the requested byte range \
                          [{}..{}) (file has {} bytes): {}",
-                        byte_start, byte_start + byte_len,
+                        at,
+                        at + byte_len,
                         file_len,
                         full.display()
                     ));
                 }
-                Box::new(BufReader::new(file).take(byte_len))
-            } else if let Some(remote) = self.remote_source.as_ref() {
-                open_remote_range(remote, &relpath, byte_start, byte_end)?
-            } else {
-                return Err(anyhow!(
-                    "Sequence file missing locally and no remote source: {}",
-                    full.display()
-                ));
+                Ok(Box::new(BufReader::new(file).take(byte_len)))
+            };
+
+        // Prefer a locally-present file; the local side of a remote packed store
+        // is standalone, so its cached `.seq` is used when present.
+        let local_source: Option<Box<dyn Read + Send>> = if let Some(local) = self.local_path.as_ref() {
+            match self.resolve_location(&sha, StoreSide::Local)? {
+                Location::Standalone { relpath } => {
+                    let full = local.join(&relpath);
+                    if full.exists() {
+                        Some(open_local_window(&full, byte_start)?)
+                    } else {
+                        None
+                    }
+                }
+                Location::Packed { pack, offset, .. } => {
+                    let full = local.join("packs").join(format!("{}.pack", pack));
+                    Some(open_local_window(&full, offset + byte_start)?)
+                }
             }
+        } else {
+            None
+        };
+
+        let source: Box<dyn Read + Send> = if let Some(s) = local_source {
+            s
         } else if let Some(remote) = self.remote_source.as_ref() {
-            open_remote_range(remote, &relpath, byte_start, byte_end)?
+            match self.resolve_location(&sha, StoreSide::Remote)? {
+                Location::Standalone { relpath } => {
+                    open_remote_range(remote, &relpath, byte_start, byte_end)?
+                }
+                Location::Packed { pack, offset, .. } => {
+                    let relpath = PathBuf::from(format!("packs/{}.pack", pack));
+                    open_remote_range(remote, &relpath, offset + byte_start, offset + byte_end)?
+                }
+            }
         } else {
             return Err(anyhow!("No backing source configured for sequence {}", sha));
         };
@@ -3150,131 +3965,18 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
         ))
     }
 
-    /// Ensure a collection is loaded into the store
-    pub(crate) fn ensure_collection_loaded(&mut self, collection_digest: &DigestKey) -> Result<()> {
-        if self.name_lookup.contains_key(collection_digest) {
+    /// Ensure a collection's member list is loaded into the catalog.
+    pub(crate) fn ensure_collection_loaded(&mut self, collection_digest: &str) -> Result<()> {
+        let existing = self.catalog.find_coll(collection_digest);
+        if existing.is_some_and(|c| self.catalog.is_loaded(c)) {
             return Ok(());
         }
-
-        let needs_fetch = match self.collections.get(collection_digest) {
-            Some(SequenceCollectionRecord::Stub(_)) => true,
-            Some(SequenceCollectionRecord::Full { .. }) => false,
-            None => true,
+        let digest_str = match existing {
+            Some(c) => self.catalog.coll_meta(c).digest.clone(),
+            None => collection_digest.to_string(),
         };
 
-        if needs_fetch {
-            let digest_str = if let Some(SequenceCollectionRecord::Stub(meta)) =
-                self.collections.get(collection_digest)
-            {
-                meta.digest.clone()
-            } else {
-                key_to_digest_string(collection_digest)
-            };
-
-            let relative_path = format!("collections/{}.rgsi", digest_str);
-
-            if !self.quiet {
-                let cached = self
-                    .local_path
-                    .as_ref()
-                    .map(|p| p.join(&relative_path).exists())
-                    .unwrap_or(false);
-                let verb = if cached { "Loading" } else { "Downloading" };
-                eprintln!("{} collection metadata {}...", verb, digest_str);
-            }
-            let _collection_data =
-                Self::fetch_file(&self.local_path, &self.remote_source, &relative_path, true, false)?;
-
-            let local_path = self
-                .local_path
-                .as_ref()
-                .ok_or_else(|| anyhow!("No local path configured"))?;
-
-            let collection_file_path = local_path.join(&relative_path);
-
-            let collection = read_rgsi_file(&collection_file_path)?;
-
-            let loaded_digest = collection.metadata.digest.to_key();
-            if loaded_digest != *collection_digest {
-                return Err(anyhow!(
-                    "Collection digest mismatch: expected {}, got {}",
-                    key_to_digest_string(collection_digest),
-                    key_to_digest_string(&loaded_digest)
-                ));
-            }
-
-            let mut name_map = IndexMap::new();
-            for sequence_record in &collection.sequences {
-                let metadata = sequence_record.metadata();
-                let sha512_key = metadata.sha512t24u.to_key();
-                name_map.insert(metadata.name.clone(), sha512_key);
-
-                if !self.sequence_store.contains_key(&sha512_key) {
-                    self.sequence_store
-                        .insert(sha512_key, SequenceRecord::Stub(metadata.clone()));
-                    let md5_key = metadata.md5.to_key();
-                    self.md5_lookup.insert(md5_key, sha512_key);
-                }
-            }
-            self.name_lookup.insert(*collection_digest, name_map);
-
-            let record = SequenceCollectionRecord::from(collection);
-            self.collections.insert(*collection_digest, record);
-        } else {
-            let sequences_data: Vec<(SequenceMetadata, DigestKey, DigestKey)> =
-                if let Some(SequenceCollectionRecord::Full { sequences, .. }) =
-                    self.collections.get(collection_digest)
-                {
-                    sequences
-                        .iter()
-                        .map(|seq| {
-                            let metadata = seq.metadata().clone();
-                            let sha512_key = metadata.sha512t24u.to_key();
-                            let md5_key = metadata.md5.to_key();
-                            (metadata, sha512_key, md5_key)
-                        })
-                        .collect()
-                } else {
-                    Vec::new()
-                };
-
-            let mut name_map = IndexMap::new();
-            for (metadata, sha512_key, md5_key) in sequences_data {
-                name_map.insert(metadata.name.clone(), sha512_key);
-
-                if !self.sequence_store.contains_key(&sha512_key) {
-                    self.sequence_store
-                        .insert(sha512_key, SequenceRecord::Stub(metadata));
-                    self.md5_lookup.insert(md5_key, sha512_key);
-                }
-            }
-            self.name_lookup.insert(*collection_digest, name_map);
-        }
-
-        Ok(())
-    }
-
-    /// Ensure a sequence is loaded into memory
-    pub(crate) fn ensure_sequence_loaded(&mut self, digest: &DigestKey) -> Result<()> {
-        let record = self
-            .sequence_store
-            .get(digest)
-            .ok_or_else(|| anyhow!("Sequence not found in store"))?;
-
-        // Already loaded (Full or Mmap)
-        if record.is_loaded() {
-            return Ok(());
-        }
-
-        let digest_str = &record.metadata().sha512t24u;
-        let template = self
-            .seqdata_path_template
-            .as_ref()
-            .ok_or_else(|| anyhow!("No sequence data path template configured"))?;
-
-        let relative_path = Self::expand_template(digest_str, template)
-            .to_string_lossy()
-            .into_owned();
+        let relative_path = format!("collections/{}.rgsi", digest_str);
 
         if !self.quiet {
             let cached = self
@@ -3283,19 +3985,93 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
                 .map(|p| p.join(&relative_path).exists())
                 .unwrap_or(false);
             let verb = if cached { "Loading" } else { "Downloading" };
-            eprintln!("{} sequence {}...", verb, digest_str);
+            eprintln!("{} collection metadata {}...", verb, digest_str);
         }
-        let data = Self::fetch_file(
-            &self.local_path,
-            &self.remote_source,
-            &relative_path,
-            self.persist_to_disk,
-            false,
-        )?;
+        let _collection_data =
+            Self::fetch_file(&self.local_path, &self.remote_source, &relative_path, true, false)?;
 
-        self.sequence_store.entry(*digest).and_modify(|r| {
-            r.load_data(data);
-        });
+        let local_path = self
+            .local_path
+            .as_ref()
+            .ok_or_else(|| anyhow!("No local path configured"))?;
+
+        let collection_file_path = local_path.join(&relative_path);
+        self.load_collection_rgsi(&collection_file_path, Some(collection_digest))?;
+        Ok(())
+    }
+
+    /// Ensure a sequence is loaded into memory
+    pub(crate) fn ensure_sequence_loaded(&mut self, row: SeqRow) -> Result<()> {
+        // Already loaded
+        if self.loaded.contains_key(&row) {
+            return Ok(());
+        }
+
+        let meta = self.catalog.seq(row).to_metadata();
+        let sha = meta.sha512t24u.clone();
+
+        // Whole-sequence bytes, resolved by layout. The write-through cache of a
+        // remote store stays STANDALONE (cache-asymmetry rule).
+        let data: Vec<u8> = if self.layout == Layout::Packed {
+            // Purely-local packed store: read the whole span from its pack.
+            match self.resolve_location(&sha, StoreSide::Local)? {
+                Location::Packed { pack, offset, len } => {
+                    self.read_pack_bytes_local(&pack, offset, offset + len)?
+                }
+                Location::Standalone { .. } => {
+                    unreachable!("packed local store resolved standalone")
+                }
+            }
+        } else if self.remote_layout == Layout::Packed && self.remote_source.is_some() {
+            // Remote packed store: fetch the whole span from the remote pack,
+            // then write-through cache it as a STANDALONE `.seq`.
+            let bytes = match self.resolve_location(&sha, StoreSide::Remote)? {
+                Location::Packed { pack, offset, len } => {
+                    let remote = self.remote_source.as_ref().unwrap();
+                    let relpath = PathBuf::from(format!("packs/{}.pack", pack));
+                    let mut reader = open_remote_range(remote, &relpath, offset, offset + len)?;
+                    let mut buf = Vec::with_capacity(len as usize);
+                    reader
+                        .read_to_end(&mut buf)
+                        .context("Failed to read remote pack byte range")?;
+                    buf
+                }
+                Location::Standalone { .. } => {
+                    unreachable!("packed remote store resolved standalone")
+                }
+            };
+            if self.persist_to_disk {
+                self.write_sequence_to_disk_single(&meta, &bytes)?;
+            }
+            bytes
+        } else {
+            // Standalone: whole-file fetch (local read, or remote download+cache).
+            let template = self
+                .seqdata_path_template
+                .as_ref()
+                .ok_or_else(|| anyhow!("No sequence data path template configured"))?;
+            let relative_path = Self::expand_template(&sha, template)
+                .to_string_lossy()
+                .into_owned();
+            if !self.quiet {
+                let cached = self
+                    .local_path
+                    .as_ref()
+                    .map(|p| p.join(&relative_path).exists())
+                    .unwrap_or(false);
+                let verb = if cached { "Loading" } else { "Downloading" };
+                eprintln!("{} sequence {}...", verb, sha);
+            }
+            Self::fetch_file(
+                &self.local_path,
+                &self.remote_source,
+                &relative_path,
+                self.persist_to_disk,
+                false,
+            )?
+        };
+
+        self.loaded.insert(row, Arc::new(data));
 
         Ok(())
     }
@@ -3342,23 +4118,51 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
         let collections_dir = root_path.join("collections");
         fs::create_dir_all(&collections_dir)?;
 
-        for record in self.sequence_store.values() {
-            match record {
+        for row in self.catalog.seq_rows() {
+            let record = self.seq_record(row);
+            match &record {
                 SequenceRecord::Full { metadata, .. } => {
                     let rel_path = Self::expand_template(&metadata.sha512t24u, template);
                     let full_path = root_path.join(&rel_path);
                     record.to_file(full_path)?;
                 }
-                SequenceRecord::Stub(_) => {
-                    continue;
+                SequenceRecord::Stub(metadata) => {
+                    // A PACKED source has no resident bytes; export each sequence
+                    // as a STANDALONE `.seq` by reading its whole span from the
+                    // pack via `resolve_location`. This is also the practical
+                    // "convert a packed store" escape hatch.
+                    if self.layout == Layout::Packed && self.local_path.is_some() {
+                        let bytes = match self
+                            .resolve_location(&metadata.sha512t24u, StoreSide::Local)?
+                        {
+                            Location::Packed { pack, offset, len } => {
+                                self.read_pack_bytes_local(&pack, offset, offset + len)?
+                            }
+                            Location::Standalone { .. } => {
+                                unreachable!("packed store resolved standalone on export")
+                            }
+                        };
+                        let rel_path = Self::expand_template(&metadata.sha512t24u, template);
+                        let full_path = root_path.join(&rel_path);
+                        if let Some(parent) = full_path.parent() {
+                            fs::create_dir_all(parent)?;
+                        }
+                        super::atomic::publish_bytes_nosync(&full_path, &bytes)?;
+                    } else {
+                        continue;
+                    }
                 }
             }
         }
 
-        for record in self.collections.values() {
-            let collection_file_path =
-                root_path.join(format!("collections/{}.rgsi", record.metadata().digest));
-            record.write_collection_rgsi(&collection_file_path)?;
+        for c in self.catalog.coll_rows() {
+            let meta = self.catalog.coll_meta(c);
+            let collection_file_path = root_path.join(format!("collections/{}.rgsi", meta.digest));
+            crate::collection::write_collection_rgsi_rows(
+                &collection_file_path,
+                meta,
+                self.catalog.members(c).map(|m| m.to_metadata()),
+            )?;
         }
 
         let sequence_index_path = root_path.join("sequences.rgsi");
@@ -3382,22 +4186,23 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
     /// The `*_in_memory` fields are a RAM-residency snapshot, not a record of
     /// what any import run did; see [`StoreStats`].
     pub fn stats(&self) -> StoreStats {
-        let n_sequences = self.sequence_store.len();
-        let n_sequences_in_memory = self
-            .sequence_store
-            .values()
-            .filter(|record| record.is_loaded())
-            .count();
-        let n_collections = self.collections.len();
+        let n_sequences = self.catalog.n_sequences();
+        let n_sequences_in_memory = self.loaded.len();
+        let n_collections = self.catalog.n_collections();
         let n_collections_in_memory = self
-            .collections
-            .values()
-            .filter(|record| record.has_sequences())
+            .catalog
+            .coll_rows()
+            .filter(|&c| self.catalog.is_loaded(c))
             .count();
         let mode_str = match self.mode {
             StorageMode::Raw => "Raw",
             StorageMode::Encoded => "Encoded",
             StorageMode::Zstd => "Zstd",
+        };
+        let packed_dead_bytes = if self.layout == Layout::Packed {
+            self.packed_dead_bytes().ok()
+        } else {
+            None
         };
         StoreStats {
             n_sequences,
@@ -3406,6 +4211,7 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
             n_collections_in_memory,
             storage_mode: mode_str.to_string(),
             logical_sequence_bytes: self.logical_sequence_bytes() as u64,
+            packed_dead_bytes,
         }
     }
 
@@ -3425,66 +4231,56 @@ impl Display for ReadonlyRefgetStore {
         writeln!(f, "ReadonlyRefgetStore object:")?;
         writeln!(f, "  Mode: {:?}", self.mode)?;
         writeln!(f, "  Disk size: {} ({} bytes)", size_str, total_size)?;
-        writeln!(f, ">Sequences (n={}):", self.sequence_store.len())?;
-        for (i, (sha512_digest, sequence_record)) in self.sequence_store.iter().take(10).enumerate()
-        {
-            let metadata = sequence_record.metadata();
-            let first_8_chars = match sequence_record {
-                SequenceRecord::Stub(_) => "<stub>".to_string(),
-                SequenceRecord::Full {
-                    metadata,
-                    sequence: seq,
-                } => {
-                    match self.mode {
-                        StorageMode::Encoded => {
-                            let alphabet = lookup_alphabet(&metadata.alphabet);
-                            let decoded = decode_substring_from_bytes(
-                                seq,
-                                0,
-                                8.min(metadata.length),
-                                alphabet,
-                            );
-                            String::from_utf8(decoded).unwrap_or_else(|_| "???".to_string())
-                        }
-                        StorageMode::Raw => String::from_utf8(seq[0..8.min(seq.len())].to_vec())
-                            .unwrap_or_else(|_| "???".to_string()),
-                        StorageMode::Zstd => zstd::decode_all(&seq[..])
-                            .ok()
-                            .and_then(|ascii| {
-                                String::from_utf8(ascii[0..8.min(ascii.len())].to_vec()).ok()
-                            })
-                            .unwrap_or_else(|| "???".to_string()),
+        writeln!(f, ">Sequences (n={}):", self.catalog.n_sequences())?;
+        for (i, view) in self.sequence_views().take(10).enumerate() {
+            let first_8_chars = match self.seq_bytes(view.row()) {
+                None => "<stub>".to_string(),
+                Some(seq) => match self.mode {
+                    StorageMode::Encoded => {
+                        let alphabet = lookup_alphabet(&view.alphabet());
+                        let decoded =
+                            decode_substring_from_bytes(&seq, 0, 8.min(view.length()), alphabet);
+                        String::from_utf8(decoded).unwrap_or_else(|_| "???".to_string())
                     }
-                }
+                    StorageMode::Raw => String::from_utf8(seq[0..8.min(seq.len())].to_vec())
+                        .unwrap_or_else(|_| "???".to_string()),
+                    StorageMode::Zstd => zstd::decode_all(&seq[..])
+                        .ok()
+                        .and_then(|ascii| {
+                            String::from_utf8(ascii[0..8.min(ascii.len())].to_vec()).ok()
+                        })
+                        .unwrap_or_else(|| "???".to_string()),
+                },
             };
 
             writeln!(
                 f,
                 "   - {}. {:02x?}, MD5: {:02x?}, Length: {}, Alphabet: {:?}, Start: {}",
                 i + 1,
-                key_to_digest_string(sha512_digest),
-                &metadata.md5,
-                &metadata.length,
-                &metadata.alphabet,
+                view.sha512t24u().as_str(),
+                view.md5().as_str(),
+                view.length(),
+                view.alphabet(),
                 first_8_chars
             )?;
         }
-        writeln!(f, ">Collections (n={:?}):", self.name_lookup.len())?;
-        for (i, (digest, name_map)) in self.name_lookup.iter().enumerate() {
-            let seqcol_digest_str = key_to_digest_string(digest);
+        let loaded: Vec<CollRow> =
+            self.catalog.coll_rows().filter(|&c| self.catalog.is_loaded(c)).collect();
+        writeln!(f, ">Collections (n={:?}):", loaded.len())?;
+        for (i, &c) in loaded.iter().enumerate() {
+            let n = self.catalog.n_members(c);
             writeln!(
                 f,
                 "  {}. Collection Digest: {:02x?} ({} sequences)",
                 i + 1,
-                seqcol_digest_str,
-                name_map.len()
+                self.catalog.coll_meta(c).digest,
+                n
             )?;
-            for (name, sha512_digest) in name_map.iter().take(5) {
-                let sha512_str = key_to_digest_string(sha512_digest);
-                writeln!(f, "   - Name: {}, SHA512: {:02x?}", name, sha512_str)?;
+            for m in self.catalog.members(c).take(5) {
+                writeln!(f, "   - Name: {}, SHA512: {:02x?}", m.name(), m.seq().sha512t24u().as_str())?;
             }
-            if name_map.len() > 5 {
-                writeln!(f, "   - ... and {} more", name_map.len() - 5)?;
+            if n > 5 {
+                writeln!(f, "   - ... and {} more", n - 5)?;
             }
         }
 
@@ -3492,8 +4288,6 @@ impl Display for ReadonlyRefgetStore {
     }
 }
 
-// Extension traits used by collection.rs
-use crate::collection::SequenceCollectionRecordExt;
 
 #[cfg(all(test, feature = "http"))]
 mod open_remote_range_tests {
@@ -3676,9 +4470,7 @@ mod remote_partial_read_tests {
         store.remote_source = Some(remote.to_string());
         store.seqdata_path_template = Some(DEFAULT_SEQDATA_PATH_TEMPLATE.to_string());
         let meta = record.metadata().clone();
-        store
-            .sequence_store
-            .insert(meta.sha512t24u.to_key(), SequenceRecord::Stub(meta));
+        store.catalog.add_sequence(&meta).unwrap();
         store
     }
 
@@ -3733,7 +4525,7 @@ mod remote_partial_read_tests {
         assert!(store.local_path.is_none());
         assert!(
             matches!(
-                store.sequence_store.get(&meta.sha512t24u.to_key()).unwrap(),
+                store.t_seq(&meta.sha512t24u.to_key()).unwrap(),
                 SequenceRecord::Stub(_)
             ),
             "remote partial read must not promote the record to Full (no caching)"
@@ -3762,9 +4554,7 @@ mod remote_partial_read_tests {
         store.remote_source = Some(base_url);
         store.seqdata_path_template = Some(DEFAULT_SEQDATA_PATH_TEMPLATE.to_string());
         store.local_path = Some(cache_dir.clone());
-        store
-            .sequence_store
-            .insert(meta.sha512t24u.to_key(), SequenceRecord::Stub(meta.clone()));
+        store.catalog.add_sequence(&meta.clone()).unwrap();
 
         let cached_path = cache_dir.join(ReadonlyRefgetStore::expand_template(
             &meta.sha512t24u,

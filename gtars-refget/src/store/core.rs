@@ -68,6 +68,48 @@ impl RefgetStore {
         }
     }
 
+    /// Create a disk-backed RefgetStore with the PACKED sequence layout.
+    ///
+    /// Sequences are concatenated into sealed, size-capped pack files under
+    /// `packs/`, resolved via the `sequences.pack.idx` sidecar, instead of one
+    /// `.seq` file per digest. Mirrors [`Self::on_disk`] but sets
+    /// `layout = Packed` and creates `packs/`.
+    ///
+    /// Opening an EXISTING store: the layout always comes from its manifest.
+    /// Calling `on_disk_packed` on an existing STANDALONE store is an error —
+    /// there is no in-place conversion in Phase 1 (export a standalone image
+    /// instead). Calling it on an existing packed store just opens it.
+    pub fn on_disk_packed<P: AsRef<Path>>(cache_path: P) -> Result<Self> {
+        let cache_path = cache_path.as_ref();
+        let index_path = cache_path.join("rgstore.json");
+
+        if index_path.exists() {
+            let store = Self::open_local(cache_path)?;
+            if store.inner.layout != Layout::Packed {
+                return Err(anyhow::anyhow!(
+                    "store at {} already exists with a standalone layout; \
+                     on_disk_packed cannot convert it in place. Create a fresh \
+                     packed store and export/re-import, or open it with on_disk.",
+                    cache_path.display()
+                ));
+            }
+            Ok(store)
+        } else {
+            let mode = StorageMode::Encoded;
+            create_dir_all(cache_path)?;
+            let mut inner = ReadonlyRefgetStore::new(mode);
+            inner.local_path = Some(cache_path.to_path_buf());
+            inner.seqdata_path_template = Some(DEFAULT_SEQDATA_PATH_TEMPLATE.to_string());
+            inner.persist_to_disk = true;
+            inner.layout = Layout::Packed;
+            create_dir_all(cache_path.join("sequences"))?;
+            create_dir_all(cache_path.join("collections"))?;
+            create_dir_all(cache_path.join("fhr"))?;
+            create_dir_all(cache_path.join("packs"))?;
+            Ok(Self { inner })
+        }
+    }
+
     /// Create an in-memory RefgetStore.
     pub fn in_memory() -> Self {
         Self {
@@ -189,7 +231,7 @@ impl RefgetStore {
         if !self.inner.is_sequence_loaded(&canonical_digest) {
             self.inner.load_sequence(&canonical_digest)?;
         }
-        Ok(self.inner.get_sequence(&canonical_digest)?.clone())
+        self.inner.get_sequence(&canonical_digest)
     }
 
     /// Retrieve a named sequence from a collection, loading only that
@@ -268,16 +310,12 @@ impl RefgetStore {
         collection_digest: &str,
         opts: &VerifyOptions,
     ) -> Result<VerifyReport> {
-        use crate::hashkeyable::HashKeyable;
-
         self.inner.ensure_sequence_index_loaded()?;
-        let collection_key = collection_digest.to_key();
-        self.inner.ensure_collection_loaded(&collection_key)?;
+        self.inner.ensure_collection_loaded(collection_digest)?;
         let mut digests: Vec<String> = self
             .inner
-            .collection_sequence_metadata(&collection_key)?
-            .iter()
-            .map(|record| record.metadata().sha512t24u.clone())
+            .collection_members(collection_digest)?
+            .map(|m| m.seq().sha512t24u().to_string())
             .collect();
         digests.sort();
         digests.dedup();
@@ -296,19 +334,15 @@ impl RefgetStore {
         sequence_names: Option<Vec<&str>>,
         line_width: Option<usize>,
     ) -> Result<()> {
-        use crate::hashkeyable::HashKeyable;
-
-        let collection_key = collection_digest.as_ref().to_key();
-        self.inner.ensure_collection_loaded(&collection_key)?;
+        let collection_str = String::from_utf8_lossy(collection_digest.as_ref()).into_owned();
+        self.inner.ensure_collection_loaded(&collection_str)?;
         let wanted: Option<std::collections::HashSet<&str>> =
             sequence_names.as_ref().map(|names| names.iter().copied().collect());
         let to_load: Vec<String> = self
             .inner
-            .collection_sequence_metadata(&collection_key)?
-            .iter()
-            .map(|record| record.metadata())
-            .filter(|meta| wanted.as_ref().is_none_or(|w| w.contains(meta.name.as_str())))
-            .map(|meta| meta.sha512t24u.clone())
+            .collection_members(&collection_str)?
+            .filter(|m| wanted.as_ref().is_none_or(|w| w.contains(m.name())))
+            .map(|m| m.seq().sha512t24u().to_string())
             .collect();
         for digest in &to_load {
             self.inner.load_sequence(digest)?;
@@ -358,6 +392,17 @@ impl RefgetStore {
         self.inner.set_encoding_mode(new_mode)
     }
 
+    /// Set the per-pack size cap in bytes (packed layout).
+    pub fn set_pack_cap_bytes(&mut self, cap: u64) {
+        self.inner.set_pack_cap_bytes(cap);
+    }
+
+    /// Reclaim dead bytes in a packed store by rewriting live spans into fresh
+    /// sealed packs. Byte-identical retrieval before and after.
+    pub fn compact(&mut self) -> Result<super::CompactReport> {
+        self.inner.compact()
+    }
+
     /// Enable 2-bit encoding for space efficiency.
     pub fn enable_encoding(&mut self) -> Result<()> {
         self.inner.enable_encoding()
@@ -376,16 +421,6 @@ impl RefgetStore {
     /// Disable disk persistence for this store.
     pub fn disable_persistence(&mut self) {
         self.inner.disable_persistence();
-    }
-
-    /// Add a sequence to the store.
-    pub fn add_sequence<T: Into<Option<DigestKey>>>(
-        &mut self,
-        sequence_record: SequenceRecord,
-        collection_digest: T,
-        force: bool,
-    ) -> Result<()> {
-        self.inner.add_sequence(sequence_record, collection_digest, force)
     }
 
     /// Digest and insert raw sequence bytes without a collection association.

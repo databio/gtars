@@ -292,7 +292,7 @@ impl ReadonlyRefgetStore {
         metadata: FhrMetadata,
     ) -> Result<()> {
         let key = collection_digest.to_key();
-        if !self.collections.contains_key(&key) {
+        if self.catalog.find_coll(collection_digest).is_none() {
             return Err(anyhow::anyhow!("Collection not found: {}", collection_digest));
         }
         if self.persist_to_disk {
@@ -378,9 +378,9 @@ impl RefgetStore {
             Some(d) => vec![d.to_string()],
             None => self
                 .inner
-                .collections
-                .values()
-                .map(|r| r.metadata().digest.to_string())
+                .catalog
+                .coll_rows()
+                .map(|c| self.inner.catalog.coll_meta(c).digest.to_string())
                 .collect(),
         };
 
@@ -992,9 +992,6 @@ mod tests {
         store.inner.remote_source = Some(base_url);
 
         // Inject a minimal stub collection so pull_fhr iterates over it.
-        use crate::hashkeyable::HashKeyable;
-        use crate::digest::SequenceCollectionRecord;
-        let key = fake_digest.to_key();
         let stub = crate::digest::SequenceCollectionMetadata {
             digest: fake_digest.to_string(),
             n_sequences: 0,
@@ -1006,7 +1003,7 @@ mod tests {
             sorted_sequences_digest: None,
             file_path: None,
         };
-        store.inner.collections.insert(key, SequenceCollectionRecord::Stub(stub));
+        store.inner.catalog.upsert_collection(stub).unwrap();
 
         // First pull: FHR sidecar not yet local → should be pulled.
         let result = store.pull_fhr(Some(fake_digest), SyncStrategy::KeepOurs).unwrap();

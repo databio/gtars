@@ -55,7 +55,6 @@ pub use digest::{
     SeqColDigestLvl1,
     SequenceCollection,
     SequenceCollectionMetadata,
-    SequenceCollectionRecord,
     SequenceEncoder,
     SequenceMetadata,
     SequenceNameMatch,

@@ -462,17 +462,17 @@ impl ReadonlyRefgetStore {
     }
 
     /// Resolve a sequence alias to sequence metadata (no data loading).
-    pub fn get_sequence_metadata_by_alias(&self, namespace: &str, alias: &str) -> Option<&crate::digest::SequenceMetadata> {
+    pub fn get_sequence_metadata_by_alias(&self, namespace: &str, alias: &str) -> Option<crate::digest::SequenceMetadata> {
         let key = self.aliases.resolve_sequence(namespace, alias)?;
-        self.sequence_store.get(&key).map(|rec| rec.metadata())
+        self.get_sequence_metadata(key_to_digest_string(&key))
     }
 
-    /// Resolve a sequence alias and return the loaded sequence record.
-    pub fn get_sequence_by_alias(&self, namespace: &str, alias: &str) -> Result<&crate::digest::SequenceRecord> {
+    /// Resolve a sequence alias and return the sequence record.
+    pub fn get_sequence_by_alias(&self, namespace: &str, alias: &str) -> Result<crate::digest::SequenceRecord> {
         let key = self.aliases.resolve_sequence(namespace, alias)
             .ok_or_else(|| anyhow::anyhow!("Sequence alias not found: {}/{}", namespace, alias))?;
-        self.sequence_store.get(&key)
-            .ok_or_else(|| anyhow::anyhow!("Sequence not found for alias {}/{}", namespace, alias))
+        self.get_sequence(key_to_digest_string(&key))
+            .map_err(|_| anyhow::anyhow!("Sequence not found for alias {}/{}", namespace, alias))
     }
 
     /// Reverse lookup: find all aliases pointing to this sequence digest.
@@ -699,7 +699,7 @@ impl ReadonlyRefgetStore {
     /// Resolve a collection alias to collection metadata.
     pub fn get_collection_metadata_by_alias(&self, namespace: &str, alias: &str) -> Option<&crate::digest::SequenceCollectionMetadata> {
         let key = self.aliases.resolve_collection(namespace, alias)?;
-        self.collections.get(&key).map(|rec| rec.metadata())
+        self.get_collection_metadata(key_to_digest_string(&key))
     }
 
     /// Resolve a collection alias and return the loaded collection.
@@ -1583,7 +1583,7 @@ mod tests {
         let seq_digest = key_to_digest_string(&store.sequence_digests().next().unwrap());
         store.add_sequence_alias("ncbi", "NC_000001.11", &seq_digest).unwrap();
         let coll_digest = {
-            let key = *store.collections.keys().next().unwrap();
+            let key = store.t_coll_keys()[0];
             key_to_digest_string(&key)
         };
         store.add_collection_alias("ucsc", "hg38", &coll_digest).unwrap();

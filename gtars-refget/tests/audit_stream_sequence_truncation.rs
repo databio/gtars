@@ -63,7 +63,7 @@ fn build_raw_disk_store(
 
     // Grab the single sequence's digest + length from the readonly view.
     let ro = store.into_readonly();
-    let metas: Vec<_> = ro.sequence_metadata().cloned().collect();
+    let metas: Vec<_> = ro.sequence_metadata().collect();
     assert_eq!(metas.len(), 1, "expected exactly one sequence");
     let digest = metas[0].sha512t24u.clone();
     let length = metas[0].length;
