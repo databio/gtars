@@ -3,7 +3,7 @@
 
 mod common;
 
-use common::txome::{Layout, TxomeSpec, build_txome_store, txome, write_txome_sources};
+use common::txome::{TxomeSpec, build_txome_store, txome, write_txome_sources};
 use common::*;
 use gtars_refget::store::StorageMode;
 use gtars_rgblast::api::{ViewRequest, view};

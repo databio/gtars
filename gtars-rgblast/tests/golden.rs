@@ -219,7 +219,13 @@ fn byte_identity_over_100_volumes() {
     let fasta = d.path().join("many.fa");
     std::fs::write(&fasta, fa).unwrap();
     let store = d.path().join("store");
-    build_store_from_fasta(&store, &fasta, "many", StorageMode::Encoded);
+    build_store_from_fasta(
+        &store,
+        &fasta,
+        "many",
+        StorageMode::Encoded,
+        Layout::Standalone,
+    );
     build_pair(&store.display().to_string(), d.path(), Some(150), 2);
     let ours = d.path().join("ours/db");
     assert!(DbReader::open(&ours).unwrap().volumes.len() > 100);

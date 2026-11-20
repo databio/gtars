@@ -25,13 +25,6 @@ fn colls(keys: &[&str]) -> Selection {
     Selection::explicit(keys)
 }
 
-/// A manifest's JSON without its `store` field.
-fn manifest_sans_store(b: &[u8]) -> serde_json::Value {
-    let mut v: serde_json::Value = serde_json::from_slice(b).unwrap();
-    v.as_object_mut().unwrap().remove("store");
-    v
-}
-
 /// Build the whole encoded fixture store into `<tmp>/db` once per test that asks.
 fn build_all(dir: &Path) -> std::path::PathBuf {
     let out = dir.join("db");
@@ -92,21 +85,6 @@ fn remote_build_equals_local_build() {
     same_database(local.path(), remote.path());
     // the selection was pulled into the cache and read from there
     assert!(!no_files_under(&cache.path().join("c/sequences")));
-}
-
-/// Every database file identical; manifests equal apart from where the store is.
-fn same_database(a: &Path, b: &Path) {
-    let (a, b) = (files_in(a), files_in(b));
-    assert_eq!(a.len(), b.len());
-    for ((n1, b1), (n2, b2)) in a.iter().zip(&b) {
-        assert_eq!(n1, n2);
-        if n1.ends_with(".manifest.json") {
-            let (ma, mb) = (manifest_sans_store(b1), manifest_sans_store(b2));
-            assert_eq!(ma, mb, "manifest beyond the store location");
-            continue;
-        }
-        assert!(b1 == b2, "{n1} differs between the two builds");
-    }
 }
 
 /// True when `dir` holds no files (it may be missing or hold empty folders).

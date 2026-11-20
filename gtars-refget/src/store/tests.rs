@@ -6902,6 +6902,68 @@ mod packed_layout {
         }
     }
 
+    /// `stored_span` on a packed store points at pack spans holding exactly
+    /// the bytes of the same store's standalone `.seq` files, and
+    /// `read_local_stored_bytes` returns those bytes in both layouts.
+    #[test]
+    fn stored_span_reads_the_standalone_bytes() {
+        use std::os::unix::fs::FileExt;
+        for mode in [StorageMode::Raw, StorageMode::Encoded, StorageMode::Zstd] {
+            let dir = tempdir().unwrap();
+            let fasta = dir.path().join("p.fa");
+            fs::write(&fasta, PACKED_FASTA).unwrap();
+            let packed_dir = dir.path().join("packed");
+            {
+                let mut s = RefgetStore::on_disk_packed(&packed_dir).unwrap();
+                s.set_quiet(true);
+                s.set_encoding_mode(mode).unwrap();
+                // small packs, so some records sit past the start of theirs
+                s.set_pack_cap_bytes(64);
+                s.add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new().jobs(1))
+                    .unwrap();
+                s.write().unwrap();
+            }
+            let standalone_dir = dir.path().join("standalone");
+            {
+                let mut s = RefgetStore::on_disk(&standalone_dir).unwrap();
+                s.set_quiet(true);
+                s.set_encoding_mode(mode).unwrap();
+                s.add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new().jobs(1))
+                    .unwrap();
+                s.write().unwrap();
+            }
+            let mut packed = RefgetStore::open_local(&packed_dir).unwrap();
+            packed.load_sequence_index().unwrap();
+            let mut standalone = RefgetStore::open_local(&standalone_dir).unwrap();
+            standalone.load_sequence_index().unwrap();
+
+            let mut past_start = 0;
+            for (sha, _) in expected_by_digest(&packed) {
+                let seq_path = standalone.sequence_file_path(&sha).unwrap();
+                let want = fs::read(&seq_path).unwrap();
+
+                let span = packed.stored_span(&sha).unwrap();
+                let len = span.len.expect("a packed record is a span");
+                assert!(span.path.starts_with(packed_dir.join("packs")), "{mode:?}: {span:?}");
+                assert!(span.path.is_file(), "{mode:?}: {span:?}");
+                let mut got = vec![0u8; len as usize];
+                fs::File::open(&span.path).unwrap().read_exact_at(&mut got, span.offset).unwrap();
+                assert_eq!(got, want, "{mode:?} {sha}: pack span differs from the .seq file");
+                past_start += (span.offset > 0) as usize;
+
+                assert_eq!(
+                    standalone.stored_span(&sha).unwrap(),
+                    StoredSpan { path: seq_path, offset: 0, len: None },
+                    "{mode:?}"
+                );
+                assert_eq!(packed.read_local_stored_bytes(&sha).unwrap(), want, "{mode:?} packed");
+                assert_eq!(standalone.read_local_stored_bytes(&sha).unwrap(), want, "{mode:?} standalone");
+            }
+            assert!(past_start > 0, "{mode:?}: every record starts its pack");
+            assert!(packed.stored_span("not-a-digest").is_err());
+        }
+    }
+
     /// Parse FASTA text into `(header, sequence)` pairs.
     fn fasta_records(text: &str) -> Vec<(String, String)> {
         text.split('>')
@@ -7008,6 +7070,13 @@ mod packed_layout {
             for (sha, _) in &expected {
                 let p = s.sequence_file_path(sha).unwrap();
                 assert!(p.exists(), "{mode:?}: {} not cached", p.display());
+                // the local side of a remote store is standalone: a whole cache file
+                assert_eq!(
+                    s.stored_span(sha).unwrap(),
+                    StoredSpan { path: p.clone(), offset: 0, len: None },
+                    "{mode:?}"
+                );
+                assert_eq!(s.read_local_stored_bytes(sha).unwrap(), fs::read(&p).unwrap(), "{mode:?}");
             }
             drop(s);
 

@@ -8,7 +8,8 @@
 //!
 //! The representatives are A1 and B1 (most-shared; B1 is larger) and C1 (only).
 
-use gtars_refget::store::{FastaImportOptions, RefgetStore, StorageMode};
+use super::store::{Layout, open_small};
+use gtars_refget::store::{FastaImportOptions, StorageMode};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -154,11 +155,11 @@ fn fasta(records: &[(&str, String)]) -> String {
         .collect()
 }
 
-/// Build the store at `dir` (which must not exist) and write the queries to `queries`.
-pub fn build_origin_store(dir: &Path, queries_path: &Path) {
+/// Build the store at `dir` (which must not exist) in `layout` and write the queries to
+/// `queries`.
+pub fn build_origin_store(dir: &Path, queries_path: &Path, layout: Layout) {
     let s = seqs();
-    let mut st = RefgetStore::on_disk(dir).unwrap();
-    st.set_quiet(true);
+    let mut st = open_small(dir, layout);
     st.set_encoding_mode(StorageMode::Encoded).unwrap();
     let src = dir.with_extension("src");
     std::fs::create_dir_all(&src).unwrap();
@@ -194,14 +195,24 @@ pub struct OriginFixture {
     pub queries: PathBuf,
 }
 
-/// The origin store, built once per test binary.
+/// The origin store (standalone), built once per test binary.
 pub fn origin_store() -> &'static OriginFixture {
-    static F: OnceLock<OriginFixture> = OnceLock::new();
-    F.get_or_init(|| {
+    origin_store_in(Layout::Standalone)
+}
+
+/// The origin store in a layout, built once per test binary. The store directory is called
+/// `origin_store` in both layouts.
+pub fn origin_store_in(layout: Layout) -> &'static OriginFixture {
+    static F: [OnceLock<OriginFixture>; 2] = [OnceLock::new(), OnceLock::new()];
+    let l = super::store::LAYOUTS
+        .iter()
+        .position(|x| *x == layout)
+        .unwrap();
+    F[l].get_or_init(|| {
         let dir = super::store::tempdir();
         let store = dir.path().join("origin_store");
         let queries = dir.path().join("queries.fa");
-        build_origin_store(&store, &queries);
+        build_origin_store(&store, &queries, layout);
         OriginFixture {
             _dir: dir,
             store,

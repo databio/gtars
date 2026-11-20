@@ -15,50 +15,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::Ordering;
 
-/// Queries over sequences of a FASTA set: exact slices, substitution mutants and reverse
-/// complements of up to `take` sequences, plus one random no-hit query.
-fn queries_from(fastas: &[PathBuf], take: usize, seed: u64) -> Vec<u8> {
-    let mut rng = Lcg(seed);
-    let mut fa = Vec::new();
-    let mut n = 0;
-    let mut picked = 0;
-    for p in fastas {
-        for (name, s) in read_fasta(p) {
-            if picked >= take {
-                break;
-            }
-            if s.len() < 300 {
-                continue;
-            }
-            picked += 1;
-            let a = (rng.next() as usize) % (s.len() / 3);
-            let b = (a + 150 + (rng.next() as usize) % 250).min(s.len());
-            n += 1;
-            push_query(&mut fa, &format!("q{n:03}_{name}_exact"), &s[a..b]);
-            let mut m = s[a..b].to_vec();
-            for _ in 0..(m.len() / 25) {
-                let p = (rng.next() as usize) % m.len();
-                m[p] = b"ACGT"[(rng.next() % 4) as usize];
-            }
-            n += 1;
-            push_query(&mut fa, &format!("q{n:03}_{name}_mut"), &m);
-            if picked % 2 == 0 {
-                n += 1;
-                push_query(
-                    &mut fa,
-                    &format!("q{n:03}_{name}_rc"),
-                    &rc_letters(&s[a..b]),
-                );
-            }
-        }
-    }
-    let random: Vec<u8> = (0..400)
-        .map(|_| b"ACGT"[(rng.next() % 4) as usize])
-        .collect();
-    push_query(&mut fa, "q_random no hit expected", &random);
-    fa
-}
-
 /// The shuffle switch is process-wide; runs that set it are serialised here.
 static SHUFFLE: Mutex<()> = Mutex::new(());
 
@@ -201,77 +157,10 @@ fn threads_and_batches_do_not_change_output() {
     );
 }
 
-/// A store with subjects longer than `MAX_DBSEQ_LEN` (5 Mbp), so the search decodes them chunk
-/// by chunk: a 12.4 Mbp sequence (3 chunks) with planted copies of the query material across
-/// the chunk boundaries and N runs (so it is 3-bit, its second chunk starts mid-group and the
-/// random fill carries over from chunk to chunk), a 5.2 Mbp one (2 chunks) and a short one; the
-/// same sequences also as raw and zstd stores beside it (`raw/`, `zstd/`).
-fn long_subject_store(dir: &Path) -> (String, PathBuf) {
-    let mut rng = Lcg(2024);
-    let mut seq =
-        |n: usize| -> Vec<u8> { (0..n).map(|_| b"ACGT"[(rng.next() % 4) as usize]).collect() };
-    let unit: Vec<u8> = seq(900);
-    let mut long = seq(12_400_000);
-    let step = 5_000_000 - 100;
-    // copies inside each chunk, one straddling every chunk boundary and one in the overlap
-    for at in [
-        1_000,
-        2_500_000,
-        step - 450,
-        step + 20,
-        7_000_000,
-        2 * step - 450,
-        9_900_000,
-        12_398_000,
-    ] {
-        let end = (at + unit.len()).min(long.len());
-        long[at..end].copy_from_slice(&unit[..end - at]);
-    }
-    for (at, n) in [
-        (500, 300),
-        (3_000_003, 5_000),
-        (6_000_001, 100),
-        (11_000_000, 7),
-    ] {
-        long[at..at + n].fill(b'N');
-    }
-    let mut mid = seq(5_200_000);
-    for at in [3_000, step - 300, 5_100_000] {
-        mid[at..at + unit.len()].copy_from_slice(&unit);
-    }
-    let mut short = seq(20_000);
-    short[5_000..5_900].copy_from_slice(&unit);
-    let mut fa = Vec::new();
-    push_query(&mut fa, "longA planted copies", &long);
-    push_query(&mut fa, "midB two chunks", &mid);
-    push_query(&mut fa, "shortC", &short);
-    let fasta = dir.join("long.fa");
-    std::fs::write(&fasta, &fa).unwrap();
-    let store = dir.join("store");
-    build_store_from_fasta(&store, &fasta, "long", StorageMode::Encoded);
-    for (name, mode) in [("raw", StorageMode::Raw), ("zstd", StorageMode::Zstd)] {
-        build_store_from_fasta(&dir.join(name), &fasta, "long", mode);
-    }
-    let mut qfa = Vec::new();
-    push_query(&mut qfa, "u_exact", &unit);
-    let mut m = unit.clone();
-    for p in (0..m.len()).step_by(37) {
-        m[p] = if m[p] == b'A' { b'C' } else { b'A' };
-    }
-    push_query(&mut qfa, "u_mut", &m);
-    push_query(&mut qfa, "u_rc", &rc_letters(&unit));
-    push_query(&mut qfa, "u_half", &unit[200..650]);
-    // the boundary region itself, so a hit spans the overlap
-    push_query(&mut qfa, "boundary", &long[step - 700..step + 300]);
-    let q = dir.join("q_long.fa");
-    std::fs::write(&q, &qfa).unwrap();
-    (store.display().to_string(), q)
-}
-
 #[test]
 fn chunked_subjects_do_not_depend_on_threads() {
     let dir = tempdir();
-    let (store, q) = long_subject_store(dir.path());
+    let (store, q) = long_subject_store(dir.path(), Layout::Standalone);
     let (_, plan) = plan_for(&store, &gtars_rgblast::select::Selection::all());
     let lengths: Vec<u32> = plan.subjects.iter().map(|s| s.length).collect();
     let items = build_work_items(&lengths, default_batch_letters(17_620_000, 1));
@@ -404,7 +293,7 @@ fn remote_rgblastn_equals_local() {
 #[test]
 fn decoding_once_does_not_change_output() {
     let dir = tempdir();
-    let (long, q_long) = long_subject_store(dir.path());
+    let (long, q_long) = long_subject_store(dir.path(), Layout::Standalone);
     let f = encoded();
     let q = dir.path().join("q_fixture.fa");
     let fixtures = Path::new(FIXTURES);

@@ -1,6 +1,6 @@
 //! The subjects a search reads (`BlastSeqSrc` in BLAST+, see
-//! `algo/blast/api/seqsrc_seqdb.cpp`): the foundation's `SubjectPlan` over the store's mapped
-//! files (`store::access::MappedFiles`).
+//! `algo/blast/api/seqsrc_seqdb.cpp`): the foundation's `SubjectPlan` over the store's stored
+//! records, each a `.seq` file or a pack span (`store::access::MappedFiles`).
 //!
 //! `for_each_chunk` decodes a subject to ncbi2na (makeblastdb's layout with the random fill
 //! for ambiguous bases, `convert::Pieces`) one chunk at a time, padded so the scanners may
@@ -38,7 +38,7 @@ pub struct DbStatsOverride {
     pub total_length: u64,
 }
 
-/// The plan + mapped files the engine searches.
+/// The plan + mapped records the engine searches.
 pub struct StoreSubjects {
     pub plan: Arc<SubjectPlan>,
     access: MappedFiles,
@@ -144,11 +144,11 @@ impl StoreSubjects {
                 let alphabet = (self.mode == StorageMode::Encoded).then_some(s.alphabet);
                 let mut pieces = Pieces::new(alphabet, n as usize, s.length)?;
                 let bits = pieces.bits;
-                let mut file = self.access.open(oid)?;
+                let reader = self.access.reader(oid)?;
                 body(&mut |r, seq| {
                     let b = r.start as u64 * bits / 8;
                     stored.resize(((r.end as u64 * bits).div_ceil(8) - b) as usize, 0);
-                    self.access.read_at(oid, &mut file, b, stored)?;
+                    self.access.read_at(oid, &reader, b, stored)?;
                     pieces.next(stored, b as usize, r.end, seq)
                 })
             }

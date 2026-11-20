@@ -4,7 +4,8 @@
 //! A remote store is never streamed: the sequences a command needs are first pulled into the
 //! cache with gtars-refget's own pull steps (`load_collections`, `pull_fhr`,
 //! `cache_sequences`, as `refget store pull` does), then read from local files like a local
-//! store's.
+//! store's. A local store's records are `.seq` files or, in a packed store, spans of pack
+//! files.
 
 pub mod access;
 pub mod decode;

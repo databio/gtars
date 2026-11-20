@@ -1,5 +1,6 @@
-//! Where subjects' stored bytes come from: the store's own sequence files (a local store) or
-//! the cache a remote store's selection was pulled into ([`OpenedStore::pull`]).
+//! Where subjects' stored bytes come from: the store's own records (a local store's `.seq`
+//! files or pack spans) or the cache a remote store's selection was pulled into
+//! ([`OpenedStore::pull`]).
 //!
 //! [`OpenedStore::pull`]: super::OpenedStore::pull
 
@@ -40,8 +41,9 @@ impl AsRef<[u8]> for Held {
     }
 }
 
-/// The one real [`SeqFetch`]: each sequence's file in the store (local) or in the cache
-/// (remote). A remote sequence that was not pulled yet is pulled first, on its own.
+/// The one real [`SeqFetch`]: each sequence's stored record, a `.seq` file or a pack span in
+/// the store (local) or a cache copy (remote). A remote sequence that was not pulled yet is
+/// pulled first, on its own.
 pub struct StoreFiles<'a> {
     store: &'a ReadonlyRefgetStore,
     remote: bool,
@@ -59,16 +61,11 @@ impl<'a> StoreFiles<'a> {
 
 impl SeqFetch for StoreFiles<'_> {
     fn read(&self, digest: &str) -> Result<StoredBytes, Error> {
-        let path = |s: &ReadonlyRefgetStore| {
-            s.sequence_file_path(digest)
-                .ok_or_else(|| Error::sequence(digest, "the store has no file for it"))
-        };
-        let mut p = path(self.store)?;
-        if self.remote && !p.is_file() {
+        let err = |e: anyhow::Error| Error::sequence(digest, format!("{e:#}"));
+        if self.remote && !self.store.stored_span(digest).map_err(err)?.path.is_file() {
             super::pull(self.store, &[digest.to_string()])?;
-            p = path(self.store)?;
         }
-        std::fs::read(&p).map_err(|e| Error::io(&p, e))
+        self.store.read_local_stored_bytes(digest).map_err(err)
     }
 
     /// gtars-refget's prefetch: 8 reader threads holding at most 1 GiB, in request order.

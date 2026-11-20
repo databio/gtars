@@ -384,6 +384,7 @@ fn query_batching_matches_blastn() {
         &Path::new(FIXTURES).join("hg38_batch_slices.fa"),
         "hg38_slices",
         StorageMode::Encoded,
+        Layout::Standalone,
     );
     let spec = store.display().to_string();
     reference_db_all(&blast, &spec, work);

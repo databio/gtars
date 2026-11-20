@@ -105,6 +105,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   into the shared cache first (`--cache-dir`, `--resume`, `--fetch-jobs`).
 - `gtars-refget`: `ReadonlyRefgetStore::sequence_relative_path` is now public
   (the store-relative path of a sequence's `.seq` record).
+- `gtars-refget`: `ReadonlyRefgetStore::stored_span` (and `StoredSpan`) says
+  where a sequence's stored bytes sit on this machine: a `.seq` file, or a span
+  of a pack file. `read_local_stored_bytes` reads them in any layout, without
+  the network or the pack block cache. `sequence_file_path` is documented as
+  the standalone template path, where no file exists on a packed store.
 
 ### Fixed
 
@@ -116,6 +121,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every exported sequence held in memory and never released. Exports leave
   the store's loaded state unchanged and never write a remote store's `.seq`
   files into the local cache.
+- `gtars-rgblast`: `rgblastn`, `rgblast search` and `rgblast origin` search
+  packed stores (`RefgetStore::on_disk_packed`), reading each subject's pack
+  span in place. `rgmakeblastdb verify`, `nstats` and `--max-n-fraction` work
+  on packed stores too. Remote packed stores were already supported (subjects
+  are pulled into the shared cache as `.seq` files).
 
 ## [0.12.0] -- 2026-11-20
 

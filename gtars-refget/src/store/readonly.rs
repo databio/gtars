@@ -525,6 +525,19 @@ pub(crate) enum StoreSide {
     Remote,
 }
 
+/// Where one sequence's stored bytes sit on this machine (see
+/// [`ReadonlyRefgetStore::stored_span`]): a whole `.seq` file, or a span of a
+/// pack file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StoredSpan {
+    /// The `.seq` file or the pack file.
+    pub path: PathBuf,
+    /// Byte offset of the record in `path` (0 for a `.seq` file).
+    pub offset: u64,
+    /// Exact record length for a pack span; `None` = the whole file.
+    pub len: Option<u64>,
+}
+
 /// Path of a sealed pack file, relative to the store root.
 pub(crate) fn pack_relpath(pack: &str) -> PathBuf {
     PathBuf::from(format!("packs/{}.pack", pack))
@@ -3778,12 +3791,16 @@ impl ReadonlyRefgetStore {
         PathBuf::from(path_str)
     }
 
-    /// Return the full filesystem path to a sequence `.seq` file for the given digest.
+    /// Return the full filesystem path where a standalone `.seq` file for the
+    /// given digest would be.
     ///
     /// For a remote store this is the file's place in the shared cache, which
     /// depends on the sequence's alphabet, so the digest must be known (`None`
-    /// otherwise). For a local store it is the store's own file. Returns `None`
-    /// if the store has no local path or no seqdata path template.
+    /// otherwise). For a local store it is the store's own template path. On a
+    /// packed store no file exists there: the bytes sit in a pack, so readers
+    /// should use [`stored_span`](Self::stored_span) or
+    /// [`read_local_stored_bytes`](Self::read_local_stored_bytes). Returns
+    /// `None` if the store has no local path or no seqdata path template.
     pub fn sequence_file_path(&self, seq_digest: &str) -> Option<PathBuf> {
         if self.seq_cache.is_some() {
             let view = self.sequence_view(seq_digest)?;
@@ -3792,6 +3809,60 @@ impl ReadonlyRefgetStore {
         let local_path = self.local_path.as_ref()?;
         self.seqdata_path_template.as_ref()?;
         Some(local_path.join(self.sequence_relative_path(seq_digest).ok()?))
+    }
+
+    /// Where one sequence's stored bytes sit on this machine: a whole `.seq`
+    /// file (standalone store, or a remote store's copy in the shared cache)
+    /// or a span of a pack file (packed local store). The bytes are the
+    /// store's own form (2/3/4-bit codes, ASCII, or one zstd frame); a pack
+    /// adds no compression, so a span reads like a `.seq` file at an offset.
+    ///
+    /// The file is not checked for existence: a remote store's cache copy may
+    /// not be pulled yet. A packed store needs its sequence index loaded.
+    pub fn stored_span(&self, digest: &str) -> Result<StoredSpan> {
+        let view = self
+            .sequence_view(digest)
+            .ok_or_else(|| anyhow!("Sequence not found: {}", digest))?;
+        let sha = view.sha512t24u().to_string();
+        let whole = |path: PathBuf| StoredSpan { path, offset: 0, len: None };
+        if self.seq_cache.is_some() {
+            return self
+                .local_seq_path_parts(&sha, view.alphabet())
+                .map(whole)
+                .ok_or_else(|| anyhow!("No cache path for sequence {}", sha));
+        }
+        let local_path = self
+            .local_path
+            .as_ref()
+            .ok_or_else(|| anyhow!("Sequence {} has no local file: the store is in memory", sha))?;
+        match self.pack_row(&sha, StoreSide::Local)? {
+            Some(row) => Ok(StoredSpan {
+                path: local_path.join(pack_relpath(&row.pack)),
+                offset: row.offset,
+                len: Some(row.len),
+            }),
+            None => Ok(whole(local_path.join(self.sequence_relative_path(&sha)?))),
+        }
+    }
+
+    /// The stored bytes (2/3/4-bit codes, ASCII, or one zstd frame) of one
+    /// sequence, read from this machine in any layout: its pack span, its
+    /// `.seq` file, or a remote store's copy in the shared cache. Never
+    /// touches the network and bypasses the pack block cache; a pack's open
+    /// handle comes from the store's fd cache.
+    pub fn read_local_stored_bytes(&self, digest: &str) -> Result<Vec<u8>> {
+        let span = self.stored_span(digest)?;
+        match span.len {
+            Some(len) => {
+                let file = self.get_cached_file(&span.path)?;
+                crate::posread::read_exact_window(&file, span.offset as usize, len as usize)
+                    .with_context(|| {
+                        format!("read {len} bytes at {} of {}", span.offset, span.path.display())
+                    })
+            }
+            None => fs::read(&span.path)
+                .with_context(|| format!("Failed to read seq file {}", span.path.display())),
+        }
     }
 
     /// Return the full filesystem path to a collection RGSI file for the given digest.

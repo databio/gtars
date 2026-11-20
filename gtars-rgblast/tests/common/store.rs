@@ -1,5 +1,5 @@
 //! Fixture stores built from `tests/data/fixtures` with the gtars-refget API, once per
-//! storage mode per test binary, and helpers to build databases from them.
+//! storage mode and layout per test binary, and helpers to build databases from them.
 
 use gtars_refget::store::{FastaImportOptions, RefgetStore, StorageMode};
 use gtars_rgblast::plan::{PlanOptions, SubjectPlan};
@@ -103,10 +103,75 @@ fn alias_spec_in(p: &Path) -> Vec<[String; 5]> {
         .collect()
 }
 
-/// Build the fixture store in `dir` (which must not exist yet) in `mode`.
-pub fn build_fixture_store(dir: &Path, mode: StorageMode) -> (HashMap<String, String>, String) {
-    let mut s = RefgetStore::on_disk(dir).unwrap();
+/// How sequences are laid out on disk: one `.seq` file per sequence, or records concatenated
+/// into pack files (`RefgetStore::on_disk_packed`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Layout {
+    Standalone,
+    Packed,
+}
+
+pub const LAYOUTS: [Layout; 2] = [Layout::Standalone, Layout::Packed];
+
+/// The pack size cap of the small packed fixtures, so their records spread over several
+/// packs and most sit at a nonzero, unaligned offset.
+pub const PACK_CAP: u64 = 64 << 10;
+
+/// A new store in `dir` (which must not exist yet) in `layout`, with gtars-refget's default
+/// pack cap.
+pub fn open_layout(dir: &Path, layout: Layout) -> RefgetStore {
+    let mut s = match layout {
+        Layout::Standalone => RefgetStore::on_disk(dir).unwrap(),
+        Layout::Packed => RefgetStore::on_disk_packed(dir).unwrap(),
+    };
     s.set_quiet(true);
+    s
+}
+
+/// `open_layout` with small packs (`PACK_CAP`).
+pub fn open_small(dir: &Path, layout: Layout) -> RefgetStore {
+    let mut s = open_layout(dir, layout);
+    if layout == Layout::Packed {
+        s.set_pack_cap_bytes(PACK_CAP);
+    }
+    s
+}
+
+/// The store at `dir` is packed: no `.seq` file under `sequences/`, at least one pack, and the
+/// manifest says so.
+pub fn assert_packed(dir: &Path) {
+    fn seq_files(d: &Path) -> usize {
+        std::fs::read_dir(d).map_or(0, |rd| {
+            rd.flatten()
+                .map(|e| {
+                    let p = e.path();
+                    if p.is_dir() {
+                        seq_files(&p)
+                    } else {
+                        p.extension().is_some_and(|x| x == "seq") as usize
+                    }
+                })
+                .sum()
+        })
+    }
+    assert_eq!(seq_files(&dir.join("sequences")), 0, "{}", dir.display());
+    let packs = std::fs::read_dir(dir.join("packs"))
+        .unwrap()
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == "pack"))
+        .count();
+    assert!(packs > 0, "{}: no packs", dir.display());
+    let manifest = std::fs::read_to_string(dir.join("rgstore.json")).unwrap();
+    assert!(manifest.contains("\"layout\": \"packed\""), "{manifest}");
+}
+
+/// Build the fixture store in `dir` (which must not exist yet) in `mode` and `layout`.
+pub fn build_fixture_store(
+    dir: &Path,
+    mode: StorageMode,
+    layout: Layout,
+) -> (HashMap<String, String>, String) {
+    let mut s = open_small(dir, layout);
     s.set_encoding_mode(mode).unwrap();
     let src = dir.with_extension("src");
     fixture_copies(
@@ -154,9 +219,14 @@ pub fn build_fixture_store(dir: &Path, mode: StorageMode) -> (HashMap<String, St
 
 /// Build a store in `dir` (which must not exist yet) holding one collection imported from
 /// `fasta` with the `name:` alias `alias`; returns the collection digest.
-pub fn build_store_from_fasta(dir: &Path, fasta: &Path, alias: &str, mode: StorageMode) -> String {
-    let mut s = RefgetStore::on_disk(dir).unwrap();
-    s.set_quiet(true);
+pub fn build_store_from_fasta(
+    dir: &Path,
+    fasta: &Path,
+    alias: &str,
+    mode: StorageMode,
+    layout: Layout,
+) -> String {
+    let mut s = open_layout(dir, layout);
     s.set_encoding_mode(mode).unwrap();
     let (m, _) = s
         .add_sequence_collection_from_fasta(
@@ -168,12 +238,15 @@ pub fn build_store_from_fasta(dir: &Path, fasta: &Path, alias: &str, mode: Stora
     m.digest.clone()
 }
 
-/// Build the `taxa` fixture store in `dir` (which must not exist yet) in `mode`: one collection
-/// per FASTA (no alias at import), the aliases of `taxa/aliases.tsv` in file order, the FHR of
-/// `taxa/fhr/<collection>.json`, and the orphan.
-pub fn build_taxa_store(dir: &Path, mode: StorageMode) -> (HashMap<String, String>, String) {
-    let mut s = RefgetStore::on_disk(dir).unwrap();
-    s.set_quiet(true);
+/// Build the `taxa` fixture store in `dir` (which must not exist yet) in `mode` and `layout`:
+/// one collection per FASTA (no alias at import), the aliases of `taxa/aliases.tsv` in file
+/// order, the FHR of `taxa/fhr/<collection>.json`, and the orphan.
+pub fn build_taxa_store(
+    dir: &Path,
+    mode: StorageMode,
+    layout: Layout,
+) -> (HashMap<String, String>, String) {
+    let mut s = open_small(dir, layout);
     s.set_encoding_mode(mode).unwrap();
     let src = dir.with_extension("src");
     std::fs::create_dir_all(&src).unwrap();
@@ -215,19 +288,41 @@ pub fn build_taxa_store(dir: &Path, mode: StorageMode) -> (HashMap<String, Strin
     (digests, orphan)
 }
 
-static TAXA_BY_MODE: [OnceLock<Fixture>; 3] = [OnceLock::new(), OnceLock::new(), OnceLock::new()];
-
-/// The `taxa` fixture store in a storage mode, built once per test binary.
-pub fn taxa(mode: StorageMode) -> &'static Fixture {
-    let i = match mode {
+/// Index of a (mode, layout) fixture cache slot.
+fn slot(mode: StorageMode, layout: Layout) -> (usize, usize) {
+    let m = match mode {
         StorageMode::Encoded => 0,
         StorageMode::Raw => 1,
         StorageMode::Zstd => 2,
     };
-    TAXA_BY_MODE[i].get_or_init(|| {
+    (m, LAYOUTS.iter().position(|l| *l == layout).unwrap())
+}
+
+type Slots = [[OnceLock<Fixture>; 2]; 3];
+
+const fn slots() -> Slots {
+    [
+        [OnceLock::new(), OnceLock::new()],
+        [OnceLock::new(), OnceLock::new()],
+        [OnceLock::new(), OnceLock::new()],
+    ]
+}
+
+static TAXA_BY_MODE: Slots = slots();
+
+/// The `taxa` fixture store (standalone) in a storage mode, built once per test binary.
+pub fn taxa(mode: StorageMode) -> &'static Fixture {
+    taxa_in(mode, Layout::Standalone)
+}
+
+/// The `taxa` fixture store in a storage mode and layout, built once per test binary. The
+/// store directory is called `taxa` in both layouts.
+pub fn taxa_in(mode: StorageMode, layout: Layout) -> &'static Fixture {
+    let (m, l) = slot(mode, layout);
+    TAXA_BY_MODE[m][l].get_or_init(|| {
         let dir = tempdir();
         let path = dir.path().join("taxa");
-        let (digests, orphan) = build_taxa_store(&path, mode);
+        let (digests, orphan) = build_taxa_store(&path, mode, layout);
         RefgetStore::open_local(&path).unwrap();
         Fixture {
             _dir: dir,
@@ -262,20 +357,21 @@ pub fn nstats_opts() -> NstatsOptions {
     }
 }
 
-static FIXTURES_BY_MODE: [OnceLock<Fixture>; 3] =
-    [OnceLock::new(), OnceLock::new(), OnceLock::new()];
+static FIXTURES_BY_MODE: Slots = slots();
 
-/// The fixture store in a storage mode, built once per test binary.
+/// The fixture store (standalone) in a storage mode, built once per test binary.
 pub fn fixture(mode: StorageMode) -> &'static Fixture {
-    let i = match mode {
-        StorageMode::Encoded => 0,
-        StorageMode::Raw => 1,
-        StorageMode::Zstd => 2,
-    };
-    FIXTURES_BY_MODE[i].get_or_init(|| {
+    fixture_in(mode, Layout::Standalone)
+}
+
+/// The fixture store in a storage mode and layout, built once per test binary. The store
+/// directory is called `fixture` in both layouts, so labels and manifests match.
+pub fn fixture_in(mode: StorageMode, layout: Layout) -> &'static Fixture {
+    let (m, l) = slot(mode, layout);
+    FIXTURES_BY_MODE[m][l].get_or_init(|| {
         let dir = tempdir();
         let path = dir.path().join("fixture");
-        let (digests, orphan) = build_fixture_store(&path, mode);
+        let (digests, orphan) = build_fixture_store(&path, mode, layout);
         // reopen, so reads go through disk
         RefgetStore::open_local(&path).unwrap();
         Fixture {
@@ -360,6 +456,28 @@ pub fn plan_with(
             .unwrap();
     let plan = gtars_rgblast::api::plan_for_selection(&mut st, &sel, o).unwrap();
     (st, plan)
+}
+
+/// A database manifest without the store field (where the store is, and its digests).
+pub fn manifest_sans_store(b: &[u8]) -> serde_json::Value {
+    let mut v: serde_json::Value = serde_json::from_slice(b).unwrap();
+    v.as_object_mut().unwrap().remove("store");
+    v
+}
+
+/// Every database file identical; manifests equal apart from where the store is.
+pub fn same_database(a: &Path, b: &Path) {
+    let (a, b) = (files_in(a), files_in(b));
+    assert_eq!(a.len(), b.len());
+    for ((n1, b1), (n2, b2)) in a.iter().zip(&b) {
+        assert_eq!(n1, n2);
+        if n1.ends_with(".manifest.json") {
+            let (ma, mb) = (manifest_sans_store(b1), manifest_sans_store(b2));
+            assert_eq!(ma, mb, "manifest beyond the store location");
+            continue;
+        }
+        assert!(b1 == b2, "{n1} differs between the two builds");
+    }
 }
 
 /// Every file in a directory, by name.

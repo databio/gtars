@@ -13,20 +13,12 @@
 //!   looks ids up by bare tag) can express the taxa for the canary; the many-bins spec repeats
 //!   names across bins instead, as assembler output does.
 
-use super::store::{Fixture, tempdir};
+use super::store::{Fixture, LAYOUTS, Layout, open_small, tempdir};
 use gtars_refget::store::{FastaImportOptions, RefgetStore, StorageMode};
 use std::collections::HashMap;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-
-/// How sequences are laid out on disk. Only the standalone layout (one `.seq` file per
-/// sequence) exists today; the packed layout (plan 8 step 18) adds a variant here and to the
-/// fixture cache key.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Layout {
-    Standalone,
-}
 
 /// What the generator writes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -243,10 +235,7 @@ pub fn build_txome_store(
     layout: Layout,
     spec: &TxomeSpec,
 ) -> HashMap<String, String> {
-    let mut s = match layout {
-        Layout::Standalone => RefgetStore::on_disk(dir).unwrap(),
-    };
-    s.set_quiet(true);
+    let mut s = open_small(dir, layout);
     s.set_encoding_mode(mode).unwrap();
     let mut digests = HashMap::new();
     for src in write_txome_sources(&dir.with_extension("src"), spec) {
@@ -266,10 +255,11 @@ pub fn build_txome_store(
 }
 
 const MODES: [StorageMode; 3] = [StorageMode::Encoded, StorageMode::Raw, StorageMode::Zstd];
-const LAYOUTS: [Layout; 1] = [Layout::Standalone];
-
-static TXOME: [[OnceLock<Fixture>; 1]; 3] =
-    [[OnceLock::new()], [OnceLock::new()], [OnceLock::new()]];
+static TXOME: [[OnceLock<Fixture>; 2]; 3] = [
+    [OnceLock::new(), OnceLock::new()],
+    [OnceLock::new(), OnceLock::new()],
+    [OnceLock::new(), OnceLock::new()],
+];
 
 /// The `txome` fixture store in a storage mode and layout, built once per test binary.
 pub fn txome_in(mode: StorageMode, layout: Layout) -> &'static Fixture {
