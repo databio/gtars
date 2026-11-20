@@ -284,60 +284,83 @@ impl RefgetStore {
         self.inner.verify_sequences(Some(&digests), opts)
     }
 
-    /// Lazy-loading export_fasta. Loads the collection and only the sequence
-    /// bodies it will write (every record whose name is requested, or all of
-    /// the collection's when `sequence_names` is `None`), never the whole
-    /// store. Name validation is left to the readonly implementation.
+    /// Export sequences to FASTA (or stdout with `"-"`), loading only the
+    /// metadata the export needs: the sequence index, the selected collections
+    /// (every collection for `All` when the label uses a collection field),
+    /// and, for a remote store, the alias namespaces the label uses.
+    ///
+    /// Exports stream one sequence at a time and leave the store's loaded
+    /// state unchanged. See [`ReadonlyRefgetStore::export_fasta`].
     #[cfg(feature = "filesystem")]
-    pub fn export_fasta<K: AsRef<[u8]>, P: AsRef<Path>>(
+    pub fn export_fasta<P: AsRef<Path>>(
         &mut self,
-        collection_digest: K,
+        selection: &ExportSelection,
         output_path: P,
-        sequence_names: Option<Vec<&str>>,
-        line_width: Option<usize>,
-    ) -> Result<()> {
-        use crate::hashkeyable::HashKeyable;
-
-        let collection_key = collection_digest.as_ref().to_key();
-        self.inner.ensure_collection_loaded(&collection_key)?;
-        let wanted: Option<std::collections::HashSet<&str>> =
-            sequence_names.as_ref().map(|names| names.iter().copied().collect());
-        let to_load: Vec<String> = self
-            .inner
-            .collection_sequence_metadata(&collection_key)?
-            .iter()
-            .map(|record| record.metadata())
-            .filter(|meta| wanted.as_ref().is_none_or(|w| w.contains(meta.name.as_str())))
-            .map(|meta| meta.sha512t24u.clone())
-            .collect();
-        for digest in &to_load {
-            self.inner.load_sequence(digest)?;
-        }
-
-        self.inner
-            .export_fasta(collection_digest, output_path, sequence_names, line_width)
+        opts: &ExportOptions,
+    ) -> Result<ExportSummary> {
+        self.prepare_export(selection, &opts.label)?;
+        self.inner.export_fasta(selection, output_path, opts)
     }
 
-    /// Lazy-loading export_fasta_by_digests. Loads any requested sequence
-    /// digest that is not yet [`Self::is_sequence_loaded`], then delegates to
-    /// the readonly implementation. There is no collection context here, so
-    /// each digest is loaded directly (no name resolution needed).
+    /// Export BED regions to FASTA, loading the collection and any alias
+    /// namespaces the label uses first.
     #[cfg(feature = "filesystem")]
-    pub fn export_fasta_by_digests<P: AsRef<Path>>(
+    pub fn export_fasta_from_regions(
         &mut self,
-        seq_digests: Vec<&str>,
-        output_path: P,
-        line_width: Option<usize>,
-    ) -> Result<()> {
+        collection_digest: &str,
+        bed_file_path: &str,
+        output_file_path: &str,
+        label: &LabelTemplate,
+    ) -> Result<ExportSummary> {
+        let selection = ExportSelection::Collections {
+            digests: vec![collection_digest.to_string()],
+            names: None,
+        };
+        self.prepare_export(&selection, label)?;
+        self.inner
+            .export_fasta_from_regions(collection_digest, bed_file_path, output_file_path, label)
+    }
+
+    #[cfg(feature = "filesystem")]
+    fn prepare_export(&mut self, selection: &ExportSelection, label: &LabelTemplate) -> Result<()> {
+        use crate::hashkeyable::HashKeyable;
+
         self.inner.ensure_sequence_index_loaded()?;
-        for digest in seq_digests.iter() {
-            if !self.inner.is_sequence_loaded(*digest) {
-                self.inner.load_sequence(digest)?;
+        match selection {
+            ExportSelection::Collections { digests, .. } => {
+                for d in digests {
+                    self.inner.ensure_collection_loaded(&d.to_key())?;
+                }
             }
+            ExportSelection::All if label.needs_collection() => self.inner.load_all_collections()?,
+            _ => {}
         }
 
-        self.inner
-            .export_fasta_by_digests(seq_digests, output_path, line_width)
+        // A remote store lists alias namespaces it has not downloaded yet.
+        if self.inner.remote_source.is_some() {
+            let loaded_seq = self.inner.list_sequence_alias_namespaces();
+            let loaded_col = self.inner.list_collection_alias_namespaces();
+            let mut to_pull: Vec<String> = Vec::new();
+            for ns in label.namespaces(LabelObject::Seq) {
+                if !loaded_seq.contains(&ns)
+                    && self.inner.available_sequence_alias_namespaces.contains(&ns)
+                {
+                    to_pull.push(ns);
+                }
+            }
+            for ns in label.namespaces(LabelObject::Col) {
+                if !loaded_col.contains(&ns)
+                    && self.inner.available_collection_alias_namespaces.contains(&ns)
+                    && !to_pull.contains(&ns)
+                {
+                    to_pull.push(ns);
+                }
+            }
+            for ns in to_pull {
+                self.pull_aliases(Some(&ns), SyncStrategy::KeepOurs)?;
+            }
+        }
+        Ok(())
     }
 
     // =====================================================================

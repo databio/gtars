@@ -8,7 +8,8 @@ get_seqs_bed_file_store(
   store_ptr,
   collection_digest,
   bed_file_path,
-  output_file_path
+  output_file_path,
+  label
 )
 }
 \arguments{
@@ -18,7 +19,9 @@ get_seqs_bed_file_store(
 
 \item{bed_file_path}{Path to BED file}
 
-\item{output_file_path}{Path to output FASTA file}
+\item{output_file_path}{Path to output FASTA file, or "-" for stdout}
+
+\item{label}{Label template; ":start-end" is appended to each label}
 }
 \description{
 Extract BED file sequences from store as FASTA
