@@ -2,12 +2,12 @@
 % Please edit documentation in R/RegionSet-methods.R
 \name{pintersect}
 \alias{pintersect}
-\alias{pintersect,ANY-method}
+\alias{pintersect,ANY,ANY-method}
 \title{Pairwise intersection by position}
 \usage{
 pintersect(x, y, ...)
 
-\S4method{pintersect}{ANY}(x, y, ...)
+\S4method{pintersect}{ANY,ANY}(x, y, ...)
 }
 \arguments{
 \item{x}{A RegionSet, GRanges, file path, or data.frame}

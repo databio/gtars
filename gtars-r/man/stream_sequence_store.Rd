@@ -2,7 +2,7 @@
 % Please edit documentation in R/extendr-wrappers.R
 \name{stream_sequence_store}
 \alias{stream_sequence_store}
-\title{Stream a (sub)sequence's decoded bases (flow 2)}
+\title{Stream a (sub)sequence's decoded bases (flow 2).}
 \usage{
 stream_sequence_store(store_ptr, seq_digest, start, end)
 }
@@ -16,5 +16,10 @@ stream_sequence_store(store_ptr, seq_digest, start, end)
 \item{end}{End position (0-based, exclusive) or NULL}
 }
 \description{
-Stream a (sub)sequence's decoded bases (flow 2)
+Reads only the bytes covering the region from resident memory, a local
+\code{.seq} file, or a remote HTTP byte-range, decoding it using bounded
+intermediate buffers, and returns the decoded region as a single string
+(so peak memory is O(region length), the size of the returned string). Pass
+NULL for \code{start}/\code{end} to stream the whole sequence. Works on remote-backed
+stores without any preload.
 }

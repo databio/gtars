@@ -305,7 +305,9 @@ test_that("blast_search and blast_origin with blastn on a database", {
     r1 <- run()
     expect_equal(r1$exit_code, 0)
     expect_true(nzchar(r1$output))
-    expect_equal(normalizePath(r1$db), normalizePath(db))
+    # db is a base path, not a file: normalize its folder
+    base_path <- function(p) file.path(normalizePath(dirname(p)), basename(p))
+    expect_equal(base_path(r1$db), base_path(db))
     expect_error(run(args = c("-task", "nonsense")), class = "gtars_rgblast_engine_failed")
     o <- blast_origin(query = d$query, engine = "blastn", db = db, blastn = bp, progress = FALSE)
     expect_equal(as.character(o$summary$query), "q1")

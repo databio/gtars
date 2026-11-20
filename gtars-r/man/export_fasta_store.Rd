@@ -35,6 +35,8 @@ export_fasta_store(
 \item{molecule}{NULL, "dna" or "protein"}
 
 \item{line_width}{Bases per line (0 = unwrapped, negative = default 80)}
+
+\item{write_cache}{Write sequences downloaded from a remote store to the shared cache}
 }
 \description{
 Export sequences to FASTA (a file, or stdout with "-")

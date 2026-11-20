@@ -2,7 +2,7 @@
 % Please edit documentation in R/extendr-wrappers.R
 \name{load_all_sequences_store}
 \alias{load_all_sequences_store}
-\title{Download and cache every sequence in the store (flow 3, in bulk)}
+\title{Download and cache every sequence in the store (flow 3, in bulk).}
 \usage{
 load_all_sequences_store(store_ptr)
 }
@@ -10,5 +10,5 @@ load_all_sequences_store(store_ptr)
 \item{store_ptr}{External pointer to RefgetStore}
 }
 \description{
-Download and cache every sequence in the store (flow 3, in bulk)
+Download and cache every sequence in the store (flow 3, in bulk).
 }

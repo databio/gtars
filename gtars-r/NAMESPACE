@@ -235,26 +235,32 @@ exportMethods(show)
 exportMethods(trim)
 exportMethods(union)
 exportMethods(widths)
-importFrom(BiocGenerics,end)
-importFrom(BiocGenerics,intersect)
-importFrom(BiocGenerics,setdiff)
-importFrom(BiocGenerics,start)
-importFrom(BiocGenerics,union)
-importFrom(IRanges,countOverlaps)
-importFrom(IRanges,disjoin)
-importFrom(IRanges,findOverlaps)
-importFrom(IRanges,flank)
-importFrom(IRanges,gaps)
-importFrom(IRanges,narrow)
-importFrom(IRanges,promoters)
-importFrom(IRanges,reduce)
-importFrom(IRanges,resize)
-importFrom(IRanges,shift)
-importFrom(IRanges,trim)
-importFrom(methods,is)
-importFrom(methods,new)
-importFrom(methods,setClass)
-importFrom(methods,setGeneric)
-importFrom(methods,setMethod)
-importFrom(methods,show)
+importFrom(BiocGenerics,
+  end,
+  intersect,
+  setdiff,
+  start,
+  union
+)
+importFrom(IRanges,
+  countOverlaps,
+  disjoin,
+  findOverlaps,
+  flank,
+  gaps,
+  narrow,
+  promoters,
+  reduce,
+  resize,
+  shift,
+  trim
+)
+importFrom(methods,
+  is,
+  new,
+  setClass,
+  setGeneric,
+  setMethod,
+  show
+)
 useDynLib(gtars, .registration = TRUE)

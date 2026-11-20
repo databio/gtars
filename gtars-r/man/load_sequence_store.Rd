@@ -2,7 +2,7 @@
 % Please edit documentation in R/extendr-wrappers.R
 \name{load_sequence_store}
 \alias{load_sequence_store}
-\title{Download and cache a single sequence's whole byte data (flow 3)}
+\title{Download and cache a single sequence's whole byte data (flow 3).}
 \usage{
 load_sequence_store(store_ptr, digest)
 }
@@ -12,5 +12,8 @@ load_sequence_store(store_ptr, digest)
 \item{digest}{Sequence digest (optionally "SQ."-prefixed)}
 }
 \description{
-Download and cache a single sequence's whole byte data (flow 3)
+Opt-in for repeat-heavy workloads: after this the sequence is resident (and
+persisted to the local cache dir when the store persists), so subsequent
+\code{get_substring}/\code{stream_sequence} calls are served from memory with no
+further I/O.
 }

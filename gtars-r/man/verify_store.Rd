@@ -25,10 +25,18 @@ recorded (default TRUE).}
 \value{
 A list with n_checked, n_ok, n_failed, and failures (a data.frame
 with columns digest, name, alphabet, length, kind,
+computed_sha512t24u, stored_md5, computed_md5, error).
+
+A list with n_checked, n_ok, n_failed, and failures (a data.frame
+with columns digest, name, alphabet, length, kind,
 computed_sha512t24u, stored_md5, computed_md5, error -- one row per
 failing sequence).
 }
 \description{
+Streams each sequence's decoded bytes through the normal decode path and
+recomputes its sha512t24u (and md5, when one is stored) to check that the
+stored bytes still hash to the digest they are stored under.
+
 Streams each sequence's decoded bytes through the normal decode path and
 recomputes its sha512t24u (and md5, when one is stored) to check that the
 stored bytes still hash to the digest they are stored under.

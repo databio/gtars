@@ -480,6 +480,29 @@ regionsetlist_concat <- function(rsl) .Call(wrap__r_regionsetlist_concat, rsl)
 #' @param rsl ExternalPtr to RegionSetList
 regionsetlist_names <- function(rsl) .Call(wrap__r_regionsetlist_names, rsl)
 
+#' Start one verb on a worker thread. `argv` starts with the verb, as after `gtars blast`.
+#' Returns list(ok = TRUE, value = <job>); option errors come back from `blast_poll_rs`.
+#' @param argv The verb and its flags
+#' @noRd
+blast_start_rs <- function(argv) .Call(wrap__blast_start_rs, argv)
+
+#' Wait up to `wait_ms` for the job's next message: list(kind = "event", event = <list>),
+#' list(kind = "done", result = <ok/fail list>) or list(kind = "none").
+#' @noRd
+blast_poll_rs <- function(job, wait_ms) .Call(wrap__blast_poll_rs, job, wait_ms)
+
+#' Cancel a job and wait for it to clean up (the library removes partial output).
+#' @noRd
+blast_cancel_rs <- function(job) .Call(wrap__blast_cancel_rs, job)
+
+#' The blastn `-outfmt 6/7` fields that `blast_search()` appends for `blast_report()`.
+#' @noRd
+blast_report_fields_rs <- function() .Call(wrap__blast_report_fields_rs)
+
+#' The columns of the TSV summary, in order.
+#' @noRd
+blast_summary_columns_rs <- function() .Call(wrap__blast_summary_columns_rs)
+
 #' Create sha512t24u digest
 #' @export
 #' @param readable A readable string representing a sequence.
@@ -621,19 +644,31 @@ get_sequence_metadata_store <- function(store_ptr, digest) .Call(wrap__get_seque
 #' @param end End position
 get_substring_store <- function(store_ptr, seq_digest, start, end) .Call(wrap__get_substring_store, store_ptr, seq_digest, start, end)
 
-#' Stream a (sub)sequence's decoded bases (flow 2)
+#' Stream a (sub)sequence's decoded bases (flow 2).
+#'
+#' Reads only the bytes covering the region from resident memory, a local
+#' `.seq` file, or a remote HTTP byte-range, decoding it using bounded
+#' intermediate buffers, and returns the decoded region as a single string
+#' (so peak memory is O(region length), the size of the returned string). Pass
+#' NULL for `start`/`end` to stream the whole sequence. Works on remote-backed
+#' stores without any preload.
 #' @param store_ptr External pointer to RefgetStore
 #' @param seq_digest Sequence digest (optionally "SQ."-prefixed)
 #' @param start Start position (0-based, inclusive) or NULL
 #' @param end End position (0-based, exclusive) or NULL
 stream_sequence_store <- function(store_ptr, seq_digest, start, end) .Call(wrap__stream_sequence_store, store_ptr, seq_digest, start, end)
 
-#' Download and cache a single sequence's whole byte data (flow 3)
+#' Download and cache a single sequence's whole byte data (flow 3).
+#'
+#' Opt-in for repeat-heavy workloads: after this the sequence is resident (and
+#' persisted to the local cache dir when the store persists), so subsequent
+#' `get_substring`/`stream_sequence` calls are served from memory with no
+#' further I/O.
 #' @param store_ptr External pointer to RefgetStore
 #' @param digest Sequence digest (optionally "SQ."-prefixed)
 load_sequence_store <- function(store_ptr, digest) .Call(wrap__load_sequence_store, store_ptr, digest)
 
-#' Download and cache every sequence in the store (flow 3, in bulk)
+#' Download and cache every sequence in the store (flow 3, in bulk).
 #' @param store_ptr External pointer to RefgetStore
 load_all_sequences_store <- function(store_ptr) .Call(wrap__load_all_sequences_store, store_ptr)
 
@@ -673,10 +708,22 @@ iter_sequences_store <- function(store_ptr) .Call(wrap__iter_sequences_store, st
 stats_store <- function(store_ptr) .Call(wrap__stats_store, store_ptr)
 
 #' Verify sequences against their stored digests.
+#'
+#' Streams each sequence's decoded bytes through the normal decode path and
+#' recomputes its sha512t24u (and md5, when one is stored) to check that the
+#' stored bytes still hash to the digest they are stored under.
+#'
 #' @param store_ptr External pointer to RefgetStore
-#' @param digests Optional character vector of sequence digests to verify (NULL = all)
-#' @param jobs Worker threads (0 = auto)
-#' @param check_md5 Also recompute and compare md5 when the store has one recorded
+#' @param digests Optional character vector of sequence digests (sha512t24u
+#'   or md5) to verify. NULL (the default) verifies every sequence in the
+#'   store.
+#' @param jobs Worker threads. 0 (default) = auto, 1 = serial.
+#' @param check_md5 Also recompute and compare md5 when the store has one
+#'   recorded (default TRUE).
+#' @return A list with n_checked, n_ok, n_failed, and failures (a data.frame
+#'   with columns digest, name, alphabet, length, kind,
+#'   computed_sha512t24u, stored_md5, computed_md5, error).
+#' @export
 verify_store <- function(store_ptr, digests, jobs, check_md5) .Call(wrap__verify_store, store_ptr, digests, jobs, check_md5)
 
 #' Get level 1 representation (attribute digests) for a collection
@@ -761,6 +808,7 @@ set_pack_cache_store <- function(store_ptr, megabytes) .Call(wrap__set_pack_cach
 #' @param label Label template, e.g. "{seq}", "{name}", "{col}/{name}"
 #' @param molecule NULL, "dna" or "protein"
 #' @param line_width Bases per line (0 = unwrapped, negative = default 80)
+#' @param write_cache Write sequences downloaded from a remote store to the shared cache
 export_fasta_store <- function(store_ptr, output_path, collections, names, seq_digests, all, label, molecule, line_width, write_cache) .Call(wrap__export_fasta_store, store_ptr, output_path, collections, names, seq_digests, all, label, molecule, line_width, write_cache)
 
 #' Extract BED file sequences from store as FASTA
@@ -899,17 +947,6 @@ list_fhr_metadata_store <- function(store_ptr) .Call(wrap__list_fhr_metadata_sto
 #' @param collection_digest Collection digest
 #' @param path Path to JSON file
 load_fhr_metadata_store <- function(store_ptr, collection_digest, path) .Call(wrap__load_fhr_metadata_store, store_ptr, collection_digest, path)
-
-
-blast_start_rs <- function(argv) .Call(wrap__blast_start_rs, argv)
-
-blast_poll_rs <- function(job, wait_ms) .Call(wrap__blast_poll_rs, job, wait_ms)
-
-blast_cancel_rs <- function(job) invisible(.Call(wrap__blast_cancel_rs, job))
-
-blast_report_fields_rs <- function() .Call(wrap__blast_report_fields_rs)
-
-blast_summary_columns_rs <- function() .Call(wrap__blast_summary_columns_rs)
 
 
 # nolint end
