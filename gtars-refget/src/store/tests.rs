@@ -6422,6 +6422,31 @@ mod packed_layout {
         assert!(!collect_packs(pdir.path()).is_empty(), "packed import should succeed");
     }
 
+    // Test 6b: re-importing a FASTA the store already holds must not count
+    // its sequences twice against the standalone gate.
+    #[test]
+    fn count_gate_ignores_reimported_sequences() {
+        let work = tempdir().unwrap();
+        let fasta = work.path().join("in.fa");
+        fs::write(&fasta, ">a\nACGT\n>b\nGGGG\n>c\nTTTT\n").unwrap();
+
+        let dir = tempdir().unwrap();
+        let mut s = RefgetStore::on_disk(dir.path()).unwrap();
+        s.set_quiet(true);
+        s.add_sequence_collection_from_fasta(
+            &fasta,
+            FastaImportOptions::new().standalone_file_limit(4),
+        )
+        .unwrap();
+        assert!(work.path().join("in.rgsi").exists(), "first import writes .rgsi");
+        // 3 existing + 3 re-imported would exceed 4 if double-counted.
+        s.add_sequence_collection_from_fasta(
+            &fasta,
+            FastaImportOptions::new().standalone_file_limit(4),
+        )
+        .expect("re-import of present sequences must pass the gate");
+    }
+
     // Test 7a: deletion accounting + compact (default cap: dead bytes remain).
     #[test]
     fn deletion_dead_bytes_and_compact() {

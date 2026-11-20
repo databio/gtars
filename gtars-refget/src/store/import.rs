@@ -814,16 +814,22 @@ fn count_fasta_records(path: &Path) -> Result<usize> {
     Ok(n)
 }
 
-/// Count data rows (non-comment, non-blank) in an `.rgsi` sidecar — the cached
-/// per-file sequence count, reused for free by the pre-flight count gate.
-fn count_rgsi_rows(path: &Path) -> Result<usize> {
+/// Count the `.rgsi` sidecar rows whose sequence is NOT already in the store.
+/// Used by the pre-flight count gate, so re-importing a FASTA the store
+/// already holds adds nothing to the count.
+fn count_new_rgsi_rows(path: &Path, is_present: impl Fn(&str) -> bool) -> Result<usize> {
     use std::io::BufRead;
     let file = std::fs::File::open(path)?;
     let mut n = 0usize;
     for line in std::io::BufReader::new(file).lines() {
         let line = line?;
-        if !line.starts_with('#') && !line.trim().is_empty() {
-            n += 1;
+        if line.starts_with('#') {
+            continue;
+        }
+        if let Some(f) = crate::digest::types::parse_rgsi_fields(&line) {
+            if !is_present(f.sha512t24u) {
+                n += 1;
+            }
         }
     }
     Ok(n)
@@ -937,8 +943,10 @@ impl ReadonlyRefgetStore {
             let mut counted = 0usize;
             for file in files {
                 let rgsi = file.replace_exts_with("rgsi");
+                // The sidecar lists digests, so count only sequences the store
+                // lacks. Without it we cannot tell, so count every record.
                 let n = if self.local_path.is_some() && rgsi.exists() {
-                    count_rgsi_rows(&rgsi).unwrap_or(0)
+                    count_new_rgsi_rows(&rgsi, |d| self.seq_row(d).is_some()).unwrap_or(0)
                 } else {
                     count_fasta_records(file)?
                 };
