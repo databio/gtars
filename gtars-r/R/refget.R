@@ -289,20 +289,27 @@ refget_store <- function(mode = "encoded") {
 
 #' @title Create a disk-backed RefgetStore
 #'
-#' @description Create a RefgetStore that persists to disk.
+#' @description Create a RefgetStore that persists to disk, or open the one
+#' already at \code{path}.
 #'
 #' @param path Directory path for storing sequences and metadata
+#' @param packed Create the store with the packed layout (alpha): sequences are
+#'   written into a few large pack files under \code{packs/} instead of one
+#'   \code{.seq} file each. A store's layout is fixed when it is created;
+#'   opening an existing standalone store with \code{packed = TRUE} is an
+#'   error. The packed format may change before it is declared stable.
 #'
 #' @return A RefgetStore object
 #'
 #' @examples
 #' \dontrun{
 #' store <- refget_store_on_disk("/path/to/store")
+#' packed <- refget_store_on_disk("/path/to/packed_store", packed = TRUE)
 #' }
 #'
 #' @export
-refget_store_on_disk <- function(path) {
-  result <- .Call(wrap__on_disk_store, path)
+refget_store_on_disk <- function(path, packed = FALSE) {
+  result <- .Call(wrap__on_disk_store, path, packed)
   invisible(new('RefgetStore', ptr = result))
 }
 
@@ -429,11 +436,24 @@ setMethod('import_fasta', 'RefgetStore', function(store, file_path) {
   invisible(store)
 })
 
+#' Add a FASTA file to a store.
+#'
+#' @param store A RefgetStore object
+#' @param file_path Path to the FASTA file
+#' @param force Replace collections and aliases that already exist
+#' @param standalone_file_limit Most \code{.seq} files a standard on-disk
+#'   store may hold after the import. \code{NULL} (the default) means 500,000.
+#'   The import stops before writing anything if it would go over. 0 is not
+#'   special; pass a large number to lift the limit. \code{force} does not
+#'   skip it. Packed stores ignore it.
+#' @return A named list describing the collection, with \code{was_new}
 #' @export
-setGeneric('add_fasta', function(store, file_path, force = FALSE) standardGeneric('add_fasta'))
-setMethod('add_fasta', 'RefgetStore', function(store, file_path, force = FALSE) {
-  result <- .Call(wrap__add_fasta_store, store@ptr, file_path, force)
-  result
+setGeneric('add_fasta', function(store, file_path, force = FALSE, standalone_file_limit = NULL) standardGeneric('add_fasta'))
+setMethod('add_fasta', 'RefgetStore', function(store, file_path, force = FALSE, standalone_file_limit = NULL) {
+  if (!is.null(standalone_file_limit)) {
+    standalone_file_limit <- as.numeric(standalone_file_limit)
+  }
+  .Call(wrap__add_fasta_store, store@ptr, file_path, force, standalone_file_limit)
 })
 
 # =========================================================================
@@ -709,6 +729,20 @@ setMethod('write_store', 'RefgetStore', function(store) {
   invisible(store)
 })
 
+#' Reclaim dead bytes in a packed store (alpha).
+#'
+#' Removing collections leaves their bytes inside pack files. This rewrites
+#' the live sequences into fresh packs and deletes the old ones. Reads return
+#' the same bases before and after. Errors on a store that is not packed.
+#'
+#' @param store A RefgetStore object created with \code{packed = TRUE}
+#' @return A named list: packs_before, packs_after, bytes_reclaimed
+#' @export
+setGeneric('compact', function(store) standardGeneric('compact'))
+setMethod('compact', 'RefgetStore', function(store) {
+  .Call(wrap__compact_store, store@ptr)
+})
+
 #' Export sequences as FASTA, to a file or to stdout.
 #'
 #' Choose records with exactly one of \code{collections}, \code{seq_digests}
@@ -742,17 +776,19 @@ setMethod('export_fasta', 'RefgetStore', function(store, output_path, collection
 #' Export BED regions from a collection as FASTA.
 #'
 #' Writes one record per region, labeled by \code{label} (see
-#' \code{export_fasta}) with \code{:start-end} appended.
+#' \code{export_fasta}) with \code{:start-end} appended. The default label is
+#' the sequence name, so headers look like \code{>chr1:0-10}.
 #'
 #' @param store A RefgetStore object
 #' @param collection_digest Sequence collection digest
 #' @param bed_file_path Path to BED file
 #' @param output_file_path Output FASTA path, or "-" for stdout
-#' @param label Label template (default "{seq}")
+#' @param label Label template (default "{name}"); "{seq}" labels regions by
+#'   sequence digest
 #' @return A named list of counts
 #' @export
-setGeneric('get_seqs_bed_file', function(store, collection_digest, bed_file_path, output_file_path, label = "{seq}") standardGeneric('get_seqs_bed_file'))
-setMethod('get_seqs_bed_file', 'RefgetStore', function(store, collection_digest, bed_file_path, output_file_path, label = "{seq}") {
+setGeneric('get_seqs_bed_file', function(store, collection_digest, bed_file_path, output_file_path, label = "{name}") standardGeneric('get_seqs_bed_file'))
+setMethod('get_seqs_bed_file', 'RefgetStore', function(store, collection_digest, bed_file_path, output_file_path, label = "{name}") {
   invisible(.Call(wrap__get_seqs_bed_file_store, store@ptr, collection_digest, bed_file_path, output_file_path, label))
 })
 

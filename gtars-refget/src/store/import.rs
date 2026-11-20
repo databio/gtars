@@ -185,7 +185,8 @@ impl PackAssigner {
 /// single shared handle per ordinal is enough.
 struct PackWriters {
     packs_dir: PathBuf,
-    pid: u32,
+    /// Names this import's temp packs, so no other writer opens the same file.
+    token: String,
     files: Mutex<HashMap<usize, std::sync::Arc<std::fs::File>>>,
 }
 
@@ -193,37 +194,32 @@ impl PackWriters {
     fn new(packs_dir: PathBuf) -> Self {
         PackWriters {
             packs_dir,
-            pid: std::process::id(),
+            token: super::atomic::unique_temp_token(),
             files: Mutex::new(HashMap::new()),
         }
     }
 
     fn tmp_path(&self, ordinal: usize) -> PathBuf {
         self.packs_dir
-            .join(format!(".rgstore.tmp.pack.{}.{}", self.pid, ordinal))
+            .join(format!(".rgstore.tmp.pack.{}.{}", self.token, ordinal))
     }
 
     fn get_or_create(&self, ordinal: usize) -> Result<std::sync::Arc<std::fs::File>> {
-        {
-            let g = self.files.lock().unwrap();
-            if let Some(f) = g.get(&ordinal) {
-                return Ok(std::sync::Arc::clone(f));
-            }
+        // Held across the create so two writer threads cannot both create the
+        // same ordinal (the second `create_new` would fail).
+        let mut g = self.files.lock().unwrap();
+        if let Some(f) = g.get(&ordinal) {
+            return Ok(std::sync::Arc::clone(f));
         }
         std::fs::create_dir_all(&self.packs_dir)?;
         let path = self.tmp_path(ordinal);
-        let file = std::sync::Arc::new(
-            std::fs::OpenOptions::new()
-                .create(true)
-                .truncate(false)
-                .read(true)
-                .write(true)
-                .open(&path)?,
-        );
-        let mut g = self.files.lock().unwrap();
-        if let Some(existing) = g.get(&ordinal) {
-            return Ok(std::sync::Arc::clone(existing));
-        }
+        let file = std::fs::OpenOptions::new()
+            .create_new(true)
+            .read(true)
+            .write(true)
+            .open(&path)
+            .with_context(|| format!("creating temp pack {}", path.display()))?;
+        let file = std::sync::Arc::new(file);
         g.insert(ordinal, std::sync::Arc::clone(&file));
         Ok(file)
     }
@@ -931,12 +927,10 @@ impl ReadonlyRefgetStore {
         let jobs = jobs.min(files.len()).max(1);
 
         // Pre-flight count gate (STANDALONE disk imports only). Packed stores
-        // bypass it; `force` overrides it. Checked BEFORE any bytes are written,
-        // via a cheap counting pass (no digesting, no encoding).
-        if self.persist_to_disk
-            && self.layout == Layout::Standalone
-            && !opts.force
-        {
+        // bypass it; `standalone_file_limit` sets the ceiling. Checked BEFORE
+        // any bytes are written, via a cheap counting pass (no digesting, no
+        // encoding).
+        if self.persist_to_disk && self.layout == Layout::Standalone {
             use crate::utils::PathExtension;
             let existing = self.catalog.n_sequences();
             let limit = opts.standalone_file_limit;
@@ -954,9 +948,10 @@ impl ReadonlyRefgetStore {
                 if existing + counted > limit {
                     return Err(anyhow!(
                         "importing {} sequences would put the store at {} standalone .seq \
-                         files, over the limit of {}. Re-create the store with --packed \
-                         (RefgetStore::on_disk_packed) for a packed layout, or pass force \
-                         to override.",
+                         files, over the limit of {}. Re-create the store with the packed \
+                         layout (CLI `--packed`, Python `RefgetStore.on_disk(path, \
+                         packed=True)`, R `refget_store_on_disk(path, packed = TRUE)`), \
+                         or raise standalone_file_limit.",
                         counted,
                         existing + counted,
                         limit
@@ -1339,11 +1334,14 @@ impl ReadonlyRefgetStore {
             // SEAL the packs (packed layout): every dispatched positional write
             // has landed. Seal each open/filled pack to its final content-hash
             // name. Writer-completion order affected no byte, so this is
-            // deterministic.
-            if packed {
-                sealed_packs = assigner.finish();
+            // deterministic. A failed write leaves a hole in its pack, whose
+            // bytes then no longer match the content-hash name, so nothing is
+            // sealed after a write error. `sealed_packs` lists only packs that
+            // are on disk under their final name.
+            let write_failed = write_err_ref.lock().unwrap().is_some();
+            if packed && !write_failed {
                 if let Some(pw) = pack_writers_ref {
-                    for sp in &sealed_packs {
+                    for sp in assigner.finish() {
                         let tmp = pw.tmp_path(sp.ordinal);
                         let final_path = pw.packs_dir.join(format!("{}.pack", sp.hash32));
                         if final_path.exists() {
@@ -1358,6 +1356,7 @@ impl ReadonlyRefgetStore {
                                 format!("sealing pack {}", final_path.display())
                             })?;
                         }
+                        sealed_packs.push(sp);
                     }
                     if let Ok(dir) = std::fs::File::open(&pw.packs_dir) {
                         let _ = dir.sync_all();
@@ -1367,11 +1366,66 @@ impl ReadonlyRefgetStore {
             Ok(())
         });
 
+        // Stage a sidecar row for every new sequence whose pack is sealed. This
+        // runs before the error returns below: a collection that finalized
+        // stays staged after a later file fails, and a later commit on this
+        // handle must publish its pack rows with it. A row whose pack was not
+        // sealed points at bytes that are not on disk; its key is kept so the
+        // error path can drop the sequence and every collection using it.
+        let mut unwritten: HashSet<DigestKey> = HashSet::new();
+        if packed && !pending_pack_rows.is_empty() {
+            let ord_to_name: HashMap<usize, std::sync::Arc<str>> = sealed_packs
+                .iter()
+                .map(|sp| (sp.ordinal, std::sync::Arc::from(sp.hash32.as_str())))
+                .collect();
+            let mut pending = self.pending.lock().unwrap();
+            for row in &pending_pack_rows {
+                match ord_to_name.get(&row.ordinal) {
+                    Some(name) => {
+                        pending.pack_rows.insert(
+                            row.key,
+                            super::packidx::PackRow {
+                                pack: std::sync::Arc::clone(name),
+                                offset: row.offset,
+                                len: row.len,
+                            },
+                        );
+                    }
+                    None => {
+                        unwritten.insert(row.key);
+                    }
+                }
+            }
+        } else if !packed
+            && writer_disk_backed
+            && (scope_result.is_err() || write_err.lock().unwrap().is_some())
+        {
+            // Standalone: a write that failed, or was still queued when the
+            // writers stopped, left no `.seq` file (writes are temp + rename),
+            // yet a collection naming that sequence may have finalized. A file
+            // present under the digest's path holds the right bytes, so only
+            // missing files count.
+            let staged: Vec<DigestKey> =
+                self.pending.lock().unwrap().sequences.iter().copied().collect();
+            for key in staged {
+                let digest = crate::hashkeyable::key_to_digest_string(&key);
+                if self.sequence_file_path(&digest).is_some_and(|p| !p.exists()) {
+                    unwritten.insert(key);
+                }
+            }
+        }
+
         // Helper: clean up orphan sequences (and temp packs) on any failure path.
+        // Sequences of a file that never finalized, and sequences whose bytes
+        // never reached disk (with the collections that use them), are dropped
+        // along with their staged pack rows and aliases.
         let cleanup_on_err = |store: &mut ReadonlyRefgetStore| {
+            if !unwritten.is_empty() {
+                store.forget_collections_using(&unwritten);
+            }
             store.remove_orphan_seq_files();
-            if packed {
-                store.remove_orphan_temp_packs();
+            if let Some(pw) = &pack_writers {
+                store.remove_orphan_temp_packs(&pw.token);
             }
         };
 
@@ -1411,30 +1465,6 @@ impl ReadonlyRefgetStore {
         // the collection digests) is unaffected -- only `name`/`description`,
         // which are advisory in this file. The authoritative per-collection names
         // live in each collections/<digest>.rgsi.
-        // Packed layout: convert the inserter's recorded pack rows into sidecar
-        // rows (ordinal -> final content-hash name) and stage them so the commit
-        // publishes `sequences.pack.idx` alongside the other indexes.
-        if packed && !pending_pack_rows.is_empty() {
-            let mut ord_to_name: HashMap<usize, std::sync::Arc<str>> = HashMap::new();
-            for sp in &sealed_packs {
-                ord_to_name.insert(sp.ordinal, std::sync::Arc::from(sp.hash32.as_str()));
-            }
-            let mut pending = self.pending.lock().unwrap();
-            for row in &pending_pack_rows {
-                let name = ord_to_name
-                    .get(&row.ordinal)
-                    .ok_or_else(|| anyhow!("internal: pack ordinal {} not sealed", row.ordinal))?;
-                pending.pack_rows.insert(
-                    row.key,
-                    super::packidx::PackRow {
-                        pack: std::sync::Arc::clone(name),
-                        offset: row.offset,
-                        len: row.len,
-                    },
-                );
-            }
-        }
-
         if self.persist_to_disk && self.local_path.is_some() {
             self.write_index_files()?;
         }

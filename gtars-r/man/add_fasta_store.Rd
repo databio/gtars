@@ -4,7 +4,7 @@
 \alias{add_fasta_store}
 \title{Add a FASTA file with force option}
 \usage{
-add_fasta_store(store_ptr, file_path, force)
+add_fasta_store(store_ptr, file_path, force, standalone_file_limit)
 }
 \arguments{
 \item{store_ptr}{External pointer to RefgetStore}
@@ -12,6 +12,9 @@ add_fasta_store(store_ptr, file_path, force)
 \item{file_path}{Path to FASTA file}
 
 \item{force}{Whether to overwrite existing sequences/collections}
+
+\item{standalone_file_limit}{Most .seq files a standalone store may hold
+after the import (NULL for the default, 500,000)}
 }
 \description{
 Add a FASTA file with force option

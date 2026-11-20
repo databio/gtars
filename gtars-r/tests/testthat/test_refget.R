@@ -55,6 +55,33 @@ test_that("refget_store_on_disk creates disk-backed store", {
   expect_s4_class(store, "RefgetStore")
 })
 
+test_that("packed store round-trips and compacts", {
+  skip_if_no_fasta()
+  store_dir <- file.path(tempdir(), "test_packed_store")
+  on.exit(unlink(store_dir, recursive = TRUE))
+
+  store <- refget_store_on_disk(store_dir, packed = TRUE)
+  set_quiet(store, TRUE)
+  import_fasta(store, fasta_path)
+  expect_length(list.files(store_dir, pattern = "\\.seq$", recursive = TRUE), 0)
+  expect_true(length(list.files(file.path(store_dir, "packs"), pattern = "\\.pack$")) > 0)
+
+  bases <- c(chrX = "TTGGGGAA", chr1 = "GGAA", chr2 = "GCGC")
+  expected <- digest_fasta(fasta_path)
+  reopened <- refget_store_open_local(store_dir)
+  for (rec in expected@sequences) {
+    meta <- rec@metadata
+    expect_equal(get_substring(reopened, meta@sha512t24u, 0, meta@length), bases[[meta@name]])
+  }
+
+  report <- compact(reopened)
+  expect_setequal(names(report), c("packs_before", "packs_after", "bytes_reclaimed"))
+  for (rec in expected@sequences) {
+    meta <- rec@metadata
+    expect_equal(get_substring(reopened, meta@sha512t24u, 0, meta@length), bases[[meta@name]])
+  }
+})
+
 # =========================================================================
 # Store configuration
 # =========================================================================
@@ -536,10 +563,31 @@ test_that("BED file sequence extraction to FASTA works", {
 
   writeLines(c("chr1\t0\t4", "chr2\t0\t4"), temp_bed)
 
-  get_seqs_bed_file(store, result@digest, temp_bed, temp_out, label = "name")
+  # The default label is the sequence name.
+  get_seqs_bed_file(store, result@digest, temp_bed, temp_out)
   expect_true(file.exists(temp_out))
   output_content <- readLines(temp_out)
   expect_equal(output_content[1], ">chr1:0-4")
+
+  chr1 <- Filter(function(s) s@metadata@name == "chr1", result@sequences)[[1]]
+  get_seqs_bed_file(store, result@digest, temp_bed, temp_out, label = "{seq}")
+  output_content <- readLines(temp_out)
+  expect_equal(output_content[1], paste0(">SQ.", chr1@metadata@sha512t24u, ":0-4"))
+})
+
+test_that("add_fasta honors standalone_file_limit, and force does not skip it", {
+  skip_if_no_fasta()
+  store_dir <- file.path(tempdir(), "test_file_limit_store")
+  on.exit(unlink(store_dir, recursive = TRUE))
+
+  store <- refget_store_on_disk(store_dir)
+  set_quiet(store, TRUE)
+  expect_error(
+    add_fasta(store, fasta_path, force = TRUE, standalone_file_limit = 2),
+    "standalone_file_limit"
+  )
+  result <- add_fasta(store, fasta_path, standalone_file_limit = 3)
+  expect_true(result$was_new)
 })
 
 test_that("BED file sequence extraction to vector works", {

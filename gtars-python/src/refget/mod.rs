@@ -17,7 +17,7 @@ use gtars_refget::digest::{
 };
 use gtars_refget::digest::{md5, sha512t24u, strip_sq_prefix, AlphabetType};
 use gtars_refget::fasta::FaiRecord;
-use gtars_refget::store::{ExportOptions, ExportSelection, ExportSummary, FastaImportOptions, ImportReport, LabelError, LabelTemplate, Molecule, ReadonlyRefgetStore, RefgetStore, StorageMode, SyncStrategy, VerifyFailure, VerifyOptions, VerifyReport};
+use gtars_refget::store::{ExportOptions, ExportSelection, ExportSummary, FastaImportOptions, ImportReport, LabelError, LabelTemplate, Layout, Molecule, ReadonlyRefgetStore, RefgetStore, StorageMode, SyncStrategy, VerifyFailure, VerifyOptions, VerifyReport};
 use gtars_refget::{expand_fasta_inputs, FastaInputs};
 // use gtars::refget::store::RetrievedSequence; // This is the Rust-native struct
 
@@ -1547,14 +1547,19 @@ impl PyRefgetStore {
         }
     }
 
-    /// Create a disk-backed RefgetStore.
+    /// Create a disk-backed RefgetStore, or open the one already at the path.
     ///
     /// Sequences are written to disk immediately and loaded on-demand (lazy loading).
     /// Only metadata is kept in memory.
     ///
     /// Args:
     ///     cache_path (str or Path): Directory for storing sequences and metadata
-    ///     mode: Storage mode (StorageMode.Raw or StorageMode.Encoded)
+    ///     packed (bool, optional): Create the store with the packed layout
+    ///         (alpha): sequences are written into a few large pack files
+    ///         under ``packs/`` instead of one ``.seq`` file each. A store's
+    ///         layout is fixed when it is created; opening an existing
+    ///         standalone store with ``packed=True`` is an error. The packed
+    ///         format may change before it is declared stable.
     ///
     /// Returns:
     ///     RefgetStore: A configured disk-backed store
@@ -1563,10 +1568,19 @@ impl PyRefgetStore {
     ///     >>> from gtars.refget import RefgetStore
     ///     >>> store = RefgetStore.on_disk("/data/store")
     ///     >>> store.add_sequence_collection_from_fasta("genome.fa")
+    ///     >>> packed = RefgetStore.on_disk("/data/packed_store", packed=True)
     #[classmethod]
-    fn on_disk(_cls: &Bound<'_, PyType>, cache_path: &Bound<'_, PyAny>) -> PyResult<Self> {
+    #[pyo3(signature = (cache_path, packed=false))]
+    fn on_disk(_cls: &Bound<'_, PyType>, cache_path: &Bound<'_, PyAny>, packed: bool) -> PyResult<Self> {
         let cache_path = cache_path.to_string();
-        let store = _cls.py().detach(|| RefgetStore::on_disk(cache_path)).map_err(|e| {
+        let store = _cls.py().detach(|| {
+            if packed {
+                RefgetStore::on_disk_packed(cache_path)
+            } else {
+                RefgetStore::on_disk(cache_path)
+            }
+        });
+        let store = store.map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
                 "Error with disk-backed store: {}",
                 e
@@ -1769,6 +1783,11 @@ impl PyRefgetStore {
     ///         this collection alias, as "NAMESPACE:ALIAS" (e.g. "ucsc:hg38").
     ///         Errors if the alias already names a different collection, unless
     ///         ``force`` is set.
+    ///     standalone_file_limit (int, optional): Most ``.seq`` files a standard
+    ///         on-disk store may hold after the import (default 500,000). The
+    ///         import stops before writing anything if it would go over. 0 is
+    ///         not special; pass a large number to lift the limit. ``force``
+    ///         does not skip it. Packed stores ignore it.
     ///
     /// Returns:
     ///     tuple[SequenceCollectionMetadata, bool]: A tuple containing:
@@ -1776,13 +1795,14 @@ impl PyRefgetStore {
     ///         - bool: True if the collection was newly added, False if it already existed
     ///
     /// Raises:
-    ///     IOError: If the file cannot be read or processed.
+    ///     IOError: If the file cannot be read or processed, or the import
+    ///         would go over ``standalone_file_limit``.
     ///
     /// Example:
     ///     >>> store = RefgetStore.in_memory()
     ///     >>> metadata, was_new = store.add_sequence_collection_from_fasta("genome.fa")
     ///     >>> print(f"{'Added' if was_new else 'Skipped'}: {metadata.digest} ({metadata.n_sequences} seqs)")
-    #[pyo3(signature = (file_path, force=false, namespaces=None, collection_alias=None))]
+    #[pyo3(signature = (file_path, force=false, namespaces=None, collection_alias=None, standalone_file_limit=None))]
     fn add_sequence_collection_from_fasta(
         &self,
         py: Python<'_>,
@@ -1790,6 +1810,7 @@ impl PyRefgetStore {
         force: bool,
         namespaces: Option<Vec<String>>,
         collection_alias: Option<String>,
+        standalone_file_limit: Option<usize>,
     ) -> PyResult<(PySequenceCollectionMetadata, bool)> {
         let file_path = file_path.to_string();
         let ns_refs: Vec<&str> = namespaces
@@ -1813,6 +1834,9 @@ impl PyRefgetStore {
             .namespaces(&ns_refs);
         if let Some((ns, alias)) = alias_parts {
             opts = opts.collection_alias(ns, alias);
+        }
+        if let Some(limit) = standalone_file_limit {
+            opts = opts.standalone_file_limit(limit);
         }
         let result =
             self.with_store(py, |s| s.add_sequence_collection_from_fasta(file_path, opts));
@@ -1843,6 +1867,11 @@ impl PyRefgetStore {
     ///     jobs (int, optional): Files imported concurrently (0 = auto, 1 = serial).
     ///     force (bool, optional): If True, overwrite existing collections/sequences.
     ///     namespaces (list[str], optional): Namespace prefixes to extract aliases from headers.
+    ///     standalone_file_limit (int, optional): Most ``.seq`` files a standard
+    ///         on-disk store may hold after the import (default 500,000). The
+    ///         import stops before writing anything if it would go over. 0 is
+    ///         not special; pass a large number to lift the limit. ``force``
+    ///         does not skip it. Packed stores ignore it.
     ///
     /// Returns:
     ///     ImportReport: `.collections` holds the per-file
@@ -1860,7 +1889,8 @@ impl PyRefgetStore {
     ///     >>> store = RefgetStore.in_memory()
     ///     >>> report = store.add_sequence_collections_from_fastas("data/*.fa.gz", jobs=4)
     ///     >>> print(report.n_collections_new, report.n_sequences_written)
-    #[pyo3(signature = (fastas, file_list=None, jobs=0, force=false, namespaces=None))]
+    #[pyo3(signature = (fastas, file_list=None, jobs=0, force=false, namespaces=None, standalone_file_limit=None))]
+    #[allow(clippy::too_many_arguments)]
     fn add_sequence_collections_from_fastas(
         &self,
         py: Python<'_>,
@@ -1869,6 +1899,7 @@ impl PyRefgetStore {
         jobs: usize,
         force: bool,
         namespaces: Option<Vec<String>>,
+        standalone_file_limit: Option<usize>,
     ) -> PyResult<PyImportReport> {
         // Normalize `fastas` into a Vec<PathBuf>. Accept a single str/PathLike
         // or a list/tuple of them. `expand_fasta_inputs` handles glob/dir/file
@@ -1904,10 +1935,13 @@ impl PyRefgetStore {
             .as_ref()
             .map(|v| v.iter().map(|s| s.as_str()).collect())
             .unwrap_or_default();
-        let opts = FastaImportOptions::new()
+        let mut opts = FastaImportOptions::new()
             .force(force)
             .namespaces(&ns_refs)
             .jobs(jobs);
+        if let Some(limit) = standalone_file_limit {
+            opts = opts.standalone_file_limit(limit);
+        }
 
         self.with_store(py, |s| s.add_sequence_collections_from_fastas(&expanded, opts))
             .map(PyImportReport::from)
@@ -2176,6 +2210,42 @@ impl PyRefgetStore {
     #[getter]
     fn storage_mode(&self, py: Python<'_>) -> PyStorageMode {
         self.lock(py).storage_mode().into()
+    }
+
+    /// On-disk layout of sequence bytes: "packed" or "standalone".
+    #[getter]
+    fn layout(&self, py: Python<'_>) -> &'static str {
+        match self.lock(py).layout() {
+            Layout::Packed => "packed",
+            Layout::Standalone => "standalone",
+        }
+    }
+
+    /// Reclaim dead bytes in a packed store (alpha).
+    ///
+    /// Removing collections leaves their bytes inside pack files. This
+    /// rewrites the live sequences into fresh packs and deletes the old ones.
+    /// Reads return the same bases before and after.
+    ///
+    /// Returns:
+    ///     dict: ``packs_before``, ``packs_after`` and ``bytes_reclaimed``.
+    ///
+    /// Raises:
+    ///     IOError: If the store is not a packed disk-backed store, or the
+    ///         rewrite fails.
+    ///
+    /// Example:
+    ///     >>> store = RefgetStore.open_local("/data/packed_store")
+    ///     >>> store.compact()["bytes_reclaimed"]
+    fn compact<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, pyo3::types::PyDict>> {
+        let report = self.with_store(py, |s| s.compact()).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error compacting store: {}", e))
+        })?;
+        let d = pyo3::types::PyDict::new(py);
+        d.set_item("packs_before", report.packs_before)?;
+        d.set_item("packs_after", report.packs_after)?;
+        d.set_item("bytes_reclaimed", report.bytes_reclaimed)?;
+        Ok(d)
     }
 
     /// Eagerly load all Stub collections to Full.
@@ -2935,13 +3005,15 @@ impl PyRefgetStore {
     /// Export sequences from BED file regions to a FASTA file.
     ///
     /// Reads a BED file defining genomic regions and writes one record per
-    /// region, labeled by `label` with `:start-end` appended.
+    /// region, labeled by `label` with `:start-end` appended. The default
+    /// label is the sequence name, so headers look like `>chr1:0-10`.
     ///
     /// Args:
     ///     collection_digest: The collection's SHA-512/24u digest.
     ///     bed_file_path: Path to BED file defining regions.
     ///     output_file_path: Path to write the output FASTA file; "-" writes to stdout.
-    ///     label: Label template (default "{seq}"); see `export_fasta`.
+    ///     label: Label template (default "{name}"); see `export_fasta`.
+    ///         Pass "{seq}" to label regions by sequence digest.
     ///
     /// Returns:
     ///     dict: Summary counts (n_records, n_bases, n_fallbacks, n_deduplicated).
@@ -2955,9 +3027,8 @@ impl PyRefgetStore {
     ///     ...     "uC_UorBNf3YUu1YIDainBhI94CedlNeH",
     ///     ...     "regions.bed",
     ///     ...     "output.fa",
-    ///     ...     label="name",
     ///     ... )
-    #[pyo3(signature = (collection_digest, bed_file_path, output_file_path, label="{seq}"))]
+    #[pyo3(signature = (collection_digest, bed_file_path, output_file_path, label="{name}"))]
     fn export_fasta_from_regions<'py>(
         &self,
         py: Python<'py>,

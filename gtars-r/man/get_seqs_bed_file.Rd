@@ -9,7 +9,7 @@ get_seqs_bed_file(
   collection_digest,
   bed_file_path,
   output_file_path,
-  label = "{seq}"
+  label = "{name}"
 )
 }
 \arguments{
@@ -21,12 +21,14 @@ get_seqs_bed_file(
 
 \item{output_file_path}{Output FASTA path, or "-" for stdout}
 
-\item{label}{Label template (default "{seq}")}
+\item{label}{Label template (default "{name}"); "{seq}" labels regions by
+sequence digest}
 }
 \value{
 A named list of counts
 }
 \description{
 Writes one record per region, labeled by \code{label} (see
-\code{export_fasta}) with \code{:start-end} appended.
+\code{export_fasta}) with \code{:start-end} appended. The default label is
+the sequence name, so headers look like \code{>chr1:0-10}.
 }

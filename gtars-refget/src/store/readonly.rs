@@ -440,9 +440,11 @@ pub(crate) struct SessionSealed {
 pub(crate) struct SessionPack {
     /// Directory `packs/` under the store.
     pub(crate) packs_dir: PathBuf,
+    /// Names this session's temp packs, so no other writer opens the same file.
+    pub(crate) token: String,
     /// Ordinal of the current open sub-pack (for temp-file naming).
     pub(crate) ordinal: usize,
-    /// Temp file path `packs/.rgstore.tmp.pack.session.<pid>.<ordinal>`.
+    /// Temp file path `packs/.rgstore.tmp.pack.session.<token>.<ordinal>`.
     pub(crate) tmp_path: PathBuf,
     /// Open handle to the temp pack.
     pub(crate) file: File,
@@ -454,6 +456,30 @@ pub(crate) struct SessionPack {
     pub(crate) rows: Vec<(String, u64, u64)>,
     /// Packs already sealed earlier in this session (cap reached mid-session).
     pub(crate) sealed: Vec<SessionSealed>,
+}
+
+impl SessionPack {
+    /// Create the temp file for sub-pack `ordinal`. `create_new`, so a name
+    /// another writer already holds is an error instead of a shared file.
+    fn create_temp(packs_dir: &Path, token: &str, ordinal: usize) -> Result<(PathBuf, File)> {
+        let tmp_path = packs_dir.join(format!(".rgstore.tmp.pack.session.{}.{}", token, ordinal));
+        let file = std::fs::OpenOptions::new()
+            .create_new(true)
+            .read(true)
+            .write(true)
+            .open(&tmp_path)
+            .with_context(|| format!("creating temp pack {}", tmp_path.display()))?;
+        Ok((tmp_path, file))
+    }
+}
+
+/// A session pack that is dropped without being sealed (the store handle went
+/// away before a commit) leaves no temp file behind. After a seal, `tmp_path`
+/// names the fresh empty temp, or a path already renamed away.
+impl Drop for SessionPack {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.tmp_path);
+    }
 }
 
 /// Which side of a (possibly remote-backed) store a resolution targets. The
@@ -577,6 +603,7 @@ impl PendingChanges {
     /// sequence rows are content-addressed and therefore shared.
     pub(crate) fn forget_sequences(&mut self, keys: &HashSet<DigestKey>) {
         self.sequences.retain(|k| !keys.contains(k));
+        self.pack_rows.retain(|k, _| !keys.contains(k));
     }
 
     pub(crate) fn add_alias(&mut self, kind: AliasKind, namespace: &str, alias: &str) {
@@ -1788,11 +1815,19 @@ impl ReadonlyRefgetStore {
         }
 
         // Which sequences to unlink, decided under the lock from the live set
-        // computed under the same lock.
+        // computed under the same lock. A sequence that a loaded collection
+        // still uses is kept even when the on-disk index does not list that
+        // collection: the removed collection's members are already dropped
+        // above, so any remaining reference comes from another collection.
         let orphans: Vec<DigestKey> = if remove_orphan_sequences {
             orphan_candidates
                 .into_iter()
                 .filter(|k| !still_referenced.contains(k))
+                .filter(|k| {
+                    self.catalog
+                        .find_sha(key_to_digest_string(k))
+                        .is_none_or(|r| self.catalog.seq_refcount(r) == 0)
+                })
                 .collect()
         } else {
             Vec::new()
@@ -1822,14 +1857,20 @@ impl ReadonlyRefgetStore {
         // collection that no longer exists. That second state is exactly what the
         // pre-delta implementation produced.
         if self.persist_to_disk {
+            // The packs the sidecar lists before this commit, read under the
+            // lock this removal holds: the only packs it may unlink.
+            let packs_before = match (&self.local_path, self.layout) {
+                (Some(local_path), Layout::Packed) => Self::sidecar_pack_names(local_path)?,
+                _ => HashSet::new(),
+            };
             self.write_index_files()?;
 
             if self.layout == Layout::Packed {
                 // Packed: no per-`.seq` unlink. Orphan rows were already dropped
                 // from the sidecar by the commit above; here we eagerly unlink
-                // any pack file that no live sidecar row references any more.
+                // any listed pack that no live sidecar row references any more.
                 if let Some(local_path) = self.local_path.clone() {
-                    self.remove_fully_dead_packs(&local_path)?;
+                    self.remove_fully_dead_packs(&local_path, &packs_before)?;
                 }
             } else if let (Some(local_path), Some(template)) =
                 (self.local_path.clone(), self.seqdata_path_template.clone())
@@ -1934,6 +1975,7 @@ impl ReadonlyRefgetStore {
         // different writer legitimately published, since sequence rows are
         // content-addressed and therefore shared between collections.
         self.record(|p| p.forget_sequences(&orphan_set));
+        self.forget_staged_aliases(AliasKind::Sequence, &orphan_set);
 
         // Best-effort remove on-disk `.seq` files.
         if self.persist_to_disk {
@@ -1966,15 +2008,92 @@ impl ReadonlyRefgetStore {
         }
     }
 
-    /// Remove leftover temp pack files (`packs/.rgstore.tmp.pack.<pid>.*`) from
-    /// THIS process, used on a failed packed import so no partial pack survives.
+    /// Drop every collection this handle staged that has a member in `seqs`,
+    /// with the collection aliases staged for it, without recording a removal.
+    ///
+    /// Used after a failed import for sequences whose bytes never reached disk
+    /// (no sealed pack, or no `.seq` file): a collection that names them cannot
+    /// be committed.
+    /// [`Self::remove_orphan_seq_files`] then drops the sequences themselves.
     #[cfg_attr(not(feature = "filesystem"), allow(dead_code))]
-    pub(crate) fn remove_orphan_temp_packs(&self) {
+    pub(crate) fn forget_collections_using(&mut self, seqs: &HashSet<DigestKey>) {
+        let staged = self.pending.lock().unwrap().collections.clone();
+        let doomed: Vec<CollRow> = self
+            .catalog
+            .coll_rows()
+            .filter(|&c| staged.contains(&self.catalog.coll_meta(c).digest.to_key()))
+            .filter(|&c| {
+                self.catalog
+                    .members(c)
+                    .any(|m| seqs.contains(&m.seq().sha512t24u().to_key()))
+            })
+            .collect();
+        let keys: HashSet<DigestKey> = doomed
+            .iter()
+            .map(|&c| self.catalog.coll_meta(c).digest.to_key())
+            .collect();
+        for c in doomed {
+            self.catalog.remove_collection(c);
+        }
+        self.pending
+            .lock()
+            .unwrap()
+            .collections
+            .retain(|k| !keys.contains(k));
+        self.forget_staged_aliases(AliasKind::Collection, &keys);
+
+        // Each collection's `.rgsi` was written when it finalized. Remove it
+        // unless the published index lists the collection (another writer
+        // committed the same one): a store whose index lists no collections
+        // loads them from `collections/` on open.
+        if let (true, Some(local_path)) = (self.persist_to_disk, &self.local_path) {
+            let index = local_path.join("collections.rgci");
+            if let Ok(published) = super::persistence::read_collections_rgci_rows(&index) {
+                for key in keys.iter().filter(|k| !published.contains_key(*k)) {
+                    let rgsi = format!("collections/{}.rgsi", key_to_digest_string(key));
+                    let _ = fs::remove_file(local_path.join(rgsi));
+                }
+            }
+        }
+    }
+
+    /// Unbind the aliases of `kind` this handle staged but never published whose
+    /// target is in `targets`, without recording a removal.
+    fn forget_staged_aliases(&mut self, kind: AliasKind, targets: &HashSet<DigestKey>) {
+        let mut pending = self.pending.lock().unwrap();
+        let doomed: Vec<(AliasKind, String, String)> = pending
+            .aliases
+            .iter()
+            .filter(|(k, ns, alias)| {
+                *k == kind
+                    && match kind {
+                        AliasKind::Sequence => self.aliases.resolve_sequence(ns, alias),
+                        AliasKind::Collection => self.aliases.resolve_collection(ns, alias),
+                    }
+                    .is_some_and(|t| targets.contains(&t))
+            })
+            .cloned()
+            .collect();
+        for entry in doomed {
+            match kind {
+                AliasKind::Sequence => self.aliases.remove_sequence(&entry.1, &entry.2),
+                AliasKind::Collection => self.aliases.remove_collection(&entry.1, &entry.2),
+            };
+            pending.forced_aliases.remove(&entry);
+            pending.aliases.remove(&entry);
+        }
+    }
+
+    /// Remove the temp pack files (`packs/.rgstore.tmp.pack.<token>.*`) of the
+    /// writer that owns `token`, used on a failed packed import so no partial
+    /// pack survives. Other writers' temp files are left alone.
+    #[cfg_attr(not(feature = "filesystem"), allow(dead_code))]
+    pub(crate) fn remove_orphan_temp_packs(&self, token: &str) {
         let Some(local_path) = &self.local_path else {
             return;
         };
         let packs_dir = local_path.join("packs");
-        let prefix = format!(".rgstore.tmp.pack.{}.", std::process::id());
+        let prefix = format!(".rgstore.tmp.pack.{}.", token);
         if let Ok(entries) = fs::read_dir(&packs_dir) {
             for entry in entries.filter_map(|e| e.ok()) {
                 if let Some(name) = entry.file_name().to_str() {
@@ -1997,11 +2116,12 @@ impl ReadonlyRefgetStore {
     /// The source store must have the collection loaded (call
     /// `load_collection()` or `load_all_collections()` first).
     pub fn import_collection(&mut self, source: &ReadonlyRefgetStore, digest: &str) -> Result<()> {
-        // Store-to-store copy of packed stores is out of scope for Phase 1.
+        // Store-to-store copy does not handle packed stores.
         if self.layout == Layout::Packed || source.layout == Layout::Packed {
             return Err(anyhow!(
-                "import_collection does not support packed stores in Phase 1 \
-                 (store-to-store copy of packed layouts is not implemented)"
+                "import_collection does not support packed stores: copying a \
+                 collection into or out of a packed store is not implemented. \
+                 Export it to FASTA and import that instead."
             ));
         }
         // Both stores must be disk-backed with same mode
@@ -2576,6 +2696,12 @@ impl ReadonlyRefgetStore {
     /// Returns the storage mode used by this store
     pub fn storage_mode(&self) -> StorageMode {
         self.mode
+    }
+
+    /// Returns the physical layout of this store's sequence bytes, fixed when
+    /// the store was created.
+    pub fn layout(&self) -> Layout {
+        self.layout
     }
 
     // =========================================================================
@@ -3388,19 +3514,11 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
         if guard.is_none() {
             std::fs::create_dir_all(&packs_dir)?;
             let ordinal = 0usize;
-            let tmp_path = packs_dir.join(format!(
-                ".rgstore.tmp.pack.session.{}.{}",
-                std::process::id(),
-                ordinal
-            ));
-            let file = std::fs::OpenOptions::new()
-                .create(true)
-                .truncate(true)
-                .read(true)
-                .write(true)
-                .open(&tmp_path)?;
+            let token = super::atomic::unique_temp_token();
+            let (tmp_path, file) = SessionPack::create_temp(&packs_dir, &token, ordinal)?;
             *guard = Some(SessionPack {
                 packs_dir: packs_dir.clone(),
+                token,
                 ordinal,
                 tmp_path,
                 file,
@@ -3427,21 +3545,26 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
 
     /// Seal the currently-open session sub-pack to its content-hash name and
     /// open a fresh empty temp for continued writing. No-op on an empty pack.
+    ///
+    /// On error the session is unchanged (same open temp, rows and hash), so
+    /// the seal can be retried. The next temp is created before the rename for
+    /// that reason: after the rename nothing can fail.
     fn seal_session_current(session: &mut SessionPack) -> Result<()> {
         use sha2::Digest as _;
         if session.len == 0 {
             return Ok(());
         }
         let _ = session.file.sync_all();
-        let hasher = std::mem::replace(&mut session.hasher, sha2::Sha256::new());
-        let digest = hasher.finalize();
+        let digest = session.hasher.clone().finalize();
         let name: String = digest[..16].iter().map(|b| format!("{:02x}", b)).collect();
         let final_path = session.packs_dir.join(format!("{}.pack", name));
+        let (next_tmp, next_file) =
+            SessionPack::create_temp(&session.packs_dir, &session.token, session.ordinal + 1)?;
         if final_path.exists() {
             let _ = std::fs::remove_file(&session.tmp_path);
-        } else {
-            std::fs::rename(&session.tmp_path, &final_path)
-                .with_context(|| format!("sealing session pack {}", final_path.display()))?;
+        } else if let Err(e) = std::fs::rename(&session.tmp_path, &final_path) {
+            let _ = std::fs::remove_file(&next_tmp);
+            return Err(e).with_context(|| format!("sealing session pack {}", final_path.display()));
         }
         if let Ok(dir) = File::open(&session.packs_dir) {
             let _ = dir.sync_all();
@@ -3450,22 +3573,12 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
         let rows = std::mem::take(&mut session.rows);
         session.sealed.push(SessionSealed { name: name_arc, rows });
 
-        // Open a fresh temp for any further writes in this session.
+        // Continue in the fresh temp.
         session.ordinal += 1;
-        let tmp_path = session.packs_dir.join(format!(
-            ".rgstore.tmp.pack.session.{}.{}",
-            std::process::id(),
-            session.ordinal
-        ));
-        let file = std::fs::OpenOptions::new()
-            .create(true)
-            .truncate(true)
-            .read(true)
-            .write(true)
-            .open(&tmp_path)?;
-        session.file = file;
-        session.tmp_path = tmp_path;
+        session.file = next_file;
+        session.tmp_path = next_tmp;
         session.len = 0;
+        session.hasher = sha2::Sha256::new();
         Ok(())
     }
 
@@ -3479,7 +3592,12 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
             return Ok(Vec::new());
         };
         if session.len > 0 {
-            Self::seal_session_current(&mut session)?;
+            if let Err(e) = Self::seal_session_current(&mut session) {
+                // Keep the session, with the rows of sub-packs it already
+                // sealed, so a later commit can retry instead of losing them.
+                *guard = Some(session);
+                return Err(e);
+            }
         }
         let mut out = Vec::new();
         for sealed in &session.sealed {
@@ -3546,9 +3664,13 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
             .local_path
             .clone()
             .ok_or_else(|| anyhow!("compact requires a local disk-backed store"))?;
+        // A batch lock the caller already holds stays held.
+        let held = self.holds_batch_lock();
         self.lock_for_batch("compact")?;
         let result = self.compact_inner(&local_path);
-        self.release_batch_lock();
+        if !held {
+            self.release_batch_lock();
+        }
         result
     }
 
@@ -3595,23 +3717,17 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
         let new_rows: BTreeMap<String, PackRow> =
             self.seal_open_session_pack()?.into_iter().collect();
 
-        // Publish the replacement sidecar, then drop old packs no longer used.
+        // Publish the replacement sidecar, then drop the old packs it no longer
+        // uses. Only packs the old sidecar listed are dropped; see
+        // `remove_fully_dead_packs`.
         write_pack_idx(&idx_path, &new_rows)?;
         self.invalidate_pack_index();
+        let old_pack_names: HashSet<String> =
+            old_rows.values().map(|r| r.pack.to_string()).collect();
+        self.remove_fully_dead_packs(local_path, &old_pack_names)?;
 
         let new_pack_names: HashSet<String> =
             new_rows.values().map(|r| r.pack.to_string()).collect();
-        if let Ok(entries) = fs::read_dir(&packs_dir) {
-            for entry in entries.filter_map(|e| e.ok()) {
-                if let Some(name) = entry.file_name().to_str() {
-                    if let Some(stem) = name.strip_suffix(".pack") {
-                        if !new_pack_names.contains(stem) {
-                            let _ = fs::remove_file(entry.path());
-                        }
-                    }
-                }
-            }
-        }
 
         let dead_after = self.packed_dead_bytes()?;
         Ok(CompactReport {
@@ -3621,29 +3737,31 @@ StorageMode::Raw => Ok(sequence[start..end].to_vec()),
         })
     }
 
-    /// Unlink any `packs/*.pack` file no live sidecar row references. Called
-    /// after a deletion commit; the sidecar is the current on-disk one.
-    fn remove_fully_dead_packs(&self, local_path: &Path) -> Result<()> {
-        let packs_dir = local_path.join("packs");
+    /// Names of the packs the on-disk sidecar references.
+    fn sidecar_pack_names(local_path: &Path) -> Result<HashSet<String>> {
         let idx_path = local_path.join("sequences.pack.idx");
-        let live: HashSet<String> = match fs::read(&idx_path) {
-            Ok(bytes) => super::packidx::read_pack_idx_rows(&bytes)?
+        match fs::read(&idx_path) {
+            Ok(bytes) => Ok(super::packidx::read_pack_idx_rows(&bytes)?
                 .values()
                 .map(|r| r.pack.to_string())
-                .collect(),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => HashSet::new(),
-            Err(e) => return Err(e).with_context(|| format!("reading {}", idx_path.display())),
-        };
-        if let Ok(entries) = fs::read_dir(&packs_dir) {
-            for entry in entries.filter_map(|e| e.ok()) {
-                if let Some(name) = entry.file_name().to_str() {
-                    if let Some(stem) = name.strip_suffix(".pack") {
-                        if !live.contains(stem) {
-                            let _ = fs::remove_file(entry.path());
-                        }
-                    }
-                }
-            }
+                .collect()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(HashSet::new()),
+            Err(e) => Err(e).with_context(|| format!("reading {}", idx_path.display())),
+        }
+    }
+
+    /// Unlink each pack in `candidates` that the current sidecar no longer
+    /// references. Called under the store lock after the sidecar dropped rows.
+    ///
+    /// Only packs the caller saw listed in the sidecar, read earlier under the
+    /// same lock, are candidates. A pack the sidecar has never listed may have
+    /// been sealed by another writer that has not committed yet, so it is never
+    /// deleted here, even though nothing references it.
+    fn remove_fully_dead_packs(&self, local_path: &Path, candidates: &HashSet<String>) -> Result<()> {
+        let live = Self::sidecar_pack_names(local_path)?;
+        let packs_dir = local_path.join("packs");
+        for name in candidates.difference(&live) {
+            let _ = fs::remove_file(packs_dir.join(format!("{}.pack", name)));
         }
         Ok(())
     }

@@ -343,8 +343,32 @@ impl ReadonlyRefgetStore {
             Err(e) => return Err(e).with_context(|| format!("reading {}", idx_path.display())),
         };
 
+        // Every pack a new row points at must still be on disk. A writer whose
+        // pack had the same content-hash name as an existing one reuses that
+        // file instead of writing its own, and another writer's removal can
+        // have unlinked it since. Packs are only unlinked under this lock, so a
+        // pack present now stays present through this commit.
+        let packs_dir = local_path.join("packs");
+        let check_packs = |new_rows: &mut dyn Iterator<Item = &PackRow>| -> Result<()> {
+            let mut seen: HashSet<&str> = HashSet::new();
+            for row in new_rows {
+                if seen.insert(&row.pack) && !packs_dir.join(format!("{}.pack", row.pack)).exists() {
+                    anyhow::bail!(
+                        "cannot commit: pack {} is no longer in the store. Another writer \
+                         removed it while this handle was writing. Reopen the store and \
+                         re-run the import.",
+                        row.pack
+                    );
+                }
+            }
+            Ok(())
+        };
+        check_packs(&mut pending.pack_rows.values())?;
+
         // Seal any open incremental session pack and fold in its rows.
-        for (digest, row) in self.seal_open_session_pack()? {
+        let session_rows = self.seal_open_session_pack()?;
+        check_packs(&mut session_rows.iter().map(|(_, row)| row))?;
+        for (digest, row) in session_rows {
             rows.insert(digest, row);
         }
 

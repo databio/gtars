@@ -4,20 +4,28 @@
 \alias{refget_store_on_disk}
 \title{Create a disk-backed RefgetStore}
 \usage{
-refget_store_on_disk(path)
+refget_store_on_disk(path, packed = FALSE)
 }
 \arguments{
 \item{path}{Directory path for storing sequences and metadata}
+
+\item{packed}{Create the store with the packed layout (alpha): sequences are
+written into a few large pack files under \code{packs/} instead of one
+\code{.seq} file each. A store's layout is fixed when it is created;
+opening an existing standalone store with \code{packed = TRUE} is an
+error. The packed format may change before it is declared stable.}
 }
 \value{
 A RefgetStore object
 }
 \description{
-Create a RefgetStore that persists to disk.
+Create a RefgetStore that persists to disk, or open the one
+already at \code{path}.
 }
 \examples{
 \dontrun{
 store <- refget_store_on_disk("/path/to/store")
+packed <- refget_store_on_disk("/path/to/packed_store", packed = TRUE)
 }
 
 }

@@ -88,9 +88,15 @@ pub fn refget_store_raw(mode: &str) -> extendr_api::Result<Robj> {
 /// Create a disk-backed RefgetStore
 /// @export
 /// @param path Path for storing sequences and metadata
+/// @param packed Create the store with the packed layout (alpha)
 #[extendr]
-pub fn on_disk_store(path: &str) -> extendr_api::Result<Robj> {
-    match RefgetStore::on_disk(path) {
+pub fn on_disk_store(path: &str, packed: bool) -> extendr_api::Result<Robj> {
+    let store = if packed {
+        RefgetStore::on_disk_packed(path)
+    } else {
+        RefgetStore::on_disk(path)
+    };
+    match store {
         Ok(store) => {
             let ext_ptr = ExternalPtr::new(store);
             Ok(ext_ptr.into())
@@ -271,10 +277,23 @@ pub fn import_fasta_store(store_ptr: Robj, file_path: &str) -> extendr_api::Resu
 /// @param store_ptr External pointer to RefgetStore
 /// @param file_path Path to FASTA file
 /// @param force Whether to overwrite existing sequences/collections
+/// @param standalone_file_limit Most .seq files a standalone store may hold
+///   after the import (NULL for the default, 500,000)
 #[extendr]
-pub fn add_fasta_store(store_ptr: Robj, file_path: &str, force: bool) -> extendr_api::Result<List> {
+pub fn add_fasta_store(
+    store_ptr: Robj,
+    file_path: &str,
+    force: bool,
+    standalone_file_limit: Nullable<f64>,
+) -> extendr_api::Result<List> {
     with_store!(store_ptr, store, {
-        let opts = FastaImportOptions::new().force(force);
+        let mut opts = FastaImportOptions::new().force(force);
+        if let Nullable::NotNull(limit) = standalone_file_limit {
+            if !(limit.is_finite() && limit >= 0.0) {
+                return Err("standalone_file_limit must be a non-negative number or NULL".into());
+            }
+            opts = opts.standalone_file_limit(limit as usize);
+        }
         let result = store.add_sequence_collection_from_fasta(file_path, opts);
         result
             .map(|(metadata, was_new)| {
@@ -883,6 +902,24 @@ pub fn write_store(store_ptr: Robj) -> extendr_api::Result<()> {
         store
             .write()
             .map_err(|e| format!("Error writing store: {}", e).into())
+    })
+}
+
+/// Reclaim dead bytes in a packed store
+/// @param store_ptr External pointer to RefgetStore
+#[extendr]
+pub fn compact_store(store_ptr: Robj) -> extendr_api::Result<List> {
+    with_store!(store_ptr, store, {
+        store
+            .compact()
+            .map(|r| {
+                list!(
+                    packs_before = r.packs_before as i32,
+                    packs_after = r.packs_after as i32,
+                    bytes_reclaimed = r.bytes_reclaimed as f64
+                )
+            })
+            .map_err(|e| format!("Error compacting store: {}", e).into())
     })
 }
 
@@ -1682,6 +1719,7 @@ extendr_module! {
     // Write/export
     fn write_store_to_directory_store;
     fn write_store;
+    fn compact_store;
     fn export_fasta_store;
     fn get_seqs_bed_file_store;
     fn get_seqs_bed_file_to_vec_store;

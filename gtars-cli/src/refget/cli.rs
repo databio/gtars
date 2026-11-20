@@ -66,7 +66,14 @@ pub fn create_refget_cli() -> Command {
                     Arg::new("force")
                         .long("force")
                         .action(ArgAction::SetTrue)
-                        .help("Overwrite existing collections/sequences in the store"),
+                        .help("Overwrite existing collections/sequences in the store. Does not lift --standalone-file-limit."),
+                )
+                .arg(
+                    Arg::new("standalone_file_limit")
+                        .long("standalone-file-limit")
+                        .value_name("N")
+                        .value_parser(clap::value_parser!(usize))
+                        .help("Most .seq files a standalone store may hold after the import (default 500000). The import stops before writing anything if it would go over. 0 is not special; pass a large number to lift the limit. Packed stores ignore it."),
                 )
                 .arg(
                     Arg::new("collection_alias")

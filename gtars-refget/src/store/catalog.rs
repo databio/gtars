@@ -338,7 +338,7 @@ impl Catalog {
         (0..self.sha.len() as u32).filter(move |&r| !self.seq_dead.get(r as usize))
     }
 
-    #[cfg(test)]
+    /// Number of loaded collection members that point at this sequence.
     pub(crate) fn seq_refcount(&self, row: SeqRow) -> u32 {
         self.seq_refcount[row as usize]
     }

@@ -315,7 +315,7 @@ pub struct FastaImportOptions<'a> {
     /// Pre-flight ceiling on the number of `.seq` files a STANDALONE store may
     /// hold after this import. Checked before any bytes are written; a store
     /// that would exceed it errors, pointing the caller at the packed layout.
-    /// Packed stores bypass the gate; `force` overrides it. Default 500,000.
+    /// Packed stores bypass the gate; `force` does not. Default 500,000.
     pub(crate) standalone_file_limit: usize,
 }
 
@@ -381,7 +381,8 @@ impl<'a> FastaImportOptions<'a> {
     }
 
     /// Set the pre-flight ceiling on `.seq` file count for STANDALONE imports.
-    /// Packed stores bypass this gate; `force` overrides it.
+    /// Packed stores bypass this gate; `force` does not. 0 is not special: to
+    /// lift the limit, pass a large number.
     #[must_use]
     pub fn standalone_file_limit(mut self, limit: usize) -> Self {
         self.standalone_file_limit = limit;

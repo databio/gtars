@@ -147,6 +147,20 @@ fn create_temp_in(dir: &Path) -> Result<(File, PathBuf)> {
     anyhow::bail!("could not create a temp file in {:?} after 1024 attempts", dir)
 }
 
+/// A token that names one writer's temp files: process id, wall-clock
+/// nanoseconds and a per-process counter. Two writers in one process, or two
+/// hosts with the same pid on shared storage, do not get the same token.
+pub(crate) fn unique_temp_token() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    format!("{}.{}.{}", std::process::id(), nanos, n)
+}
+
 /// `fsync` a directory so a rename into it is durable.
 ///
 /// Best-effort: not every platform lets you open a directory for this (Windows

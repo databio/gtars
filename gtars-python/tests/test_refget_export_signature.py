@@ -83,7 +83,12 @@ def test_export_fasta_from_regions_label(tmp_path):
     bed.write_text("chr1\t2\t6\n")
     out = tmp_path / "r.fa"
 
-    summary = store.export_fasta_from_regions(digest, str(bed), str(out), label="name")
+    # The default label is the sequence name.
+    summary = store.export_fasta_from_regions(digest, str(bed), str(out))
 
     assert out.read_text() == ">chr1:2-6\nGTAC\n"
     assert summary["n_records"] == 1
+
+    store.export_fasta_from_regions(digest, str(bed), str(out), label="{seq}")
+    sha = store.get_collection(digest).sequences[0].metadata.sha512t24u
+    assert out.read_text() == f">SQ.{sha}:2-6\nGTAC\n"

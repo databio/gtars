@@ -22,7 +22,7 @@ pub fn run_refget(matches: &ArgMatches) -> Result<()> {
 
 fn run_compact(matches: &ArgMatches) -> Result<()> {
     let store_path = matches.get_one::<String>("store").expect("store is required");
-    let mut store = RefgetStore::on_disk(store_path)
+    let mut store = RefgetStore::open_local(store_path)
         .map_err(|e| anyhow::anyhow!("Failed to open store at {}: {}", store_path, e))?;
     let dead_before = store.packed_dead_bytes().unwrap_or(0);
     let report = store
@@ -94,6 +94,7 @@ fn run_build(matches: &ArgMatches) -> Result<()> {
     let force = matches.get_flag("force");
     let packed = matches.get_flag("packed");
     let pack_cap = matches.get_one::<u64>("pack_cap").copied();
+    let standalone_file_limit = matches.get_one::<usize>("standalone_file_limit").copied();
 
     // Parse --collection-alias NAMESPACE:ALIAS. Owned up front so the borrows
     // in FastaImportOptions outlive the builder chain.
@@ -157,6 +158,9 @@ fn run_build(matches: &ArgMatches) -> Result<()> {
         .jobs(jobs);
     if let Some((ns, alias)) = collection_alias.as_ref() {
         opts = opts.collection_alias(ns, alias);
+    }
+    if let Some(limit) = standalone_file_limit {
+        opts = opts.standalone_file_limit(limit);
     }
     let report = store
         .add_sequence_collections_from_fastas(&fastas, opts)

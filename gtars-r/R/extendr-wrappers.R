@@ -501,7 +501,8 @@ refget_store_raw <- function(mode) .Call(wrap__refget_store_raw, mode)
 #' Create a disk-backed RefgetStore
 #' @export
 #' @param path Path for storing sequences and metadata
-on_disk_store <- function(path) .Call(wrap__on_disk_store, path)
+#' @param packed Create the store with the packed layout (alpha)
+on_disk_store <- function(path, packed) .Call(wrap__on_disk_store, path, packed)
 
 #' Open store from local directory
 #' @export
@@ -566,7 +567,9 @@ import_fasta_store <- function(store_ptr, file_path) .Call(wrap__import_fasta_st
 #' @param store_ptr External pointer to RefgetStore
 #' @param file_path Path to FASTA file
 #' @param force Whether to overwrite existing sequences/collections
-add_fasta_store <- function(store_ptr, file_path, force) .Call(wrap__add_fasta_store, store_ptr, file_path, force)
+#' @param standalone_file_limit Most .seq files a standalone store may hold
+#'   after the import (NULL for the default, 500,000)
+add_fasta_store <- function(store_ptr, file_path, force, standalone_file_limit) .Call(wrap__add_fasta_store, store_ptr, file_path, force, standalone_file_limit)
 
 #' Get sequence by digest from store (supports SHA512t24u or MD5)
 #' @param store_ptr External pointer to RefgetStore
@@ -710,6 +713,10 @@ write_store_to_directory_store <- function(store_ptr, root_path, seqdata_path_te
 #' Write store using configured paths
 #' @param store_ptr External pointer to RefgetStore
 write_store <- function(store_ptr) .Call(wrap__write_store, store_ptr)
+
+#' Reclaim dead bytes in a packed store
+#' @param store_ptr External pointer to RefgetStore
+compact_store <- function(store_ptr) .Call(wrap__compact_store, store_ptr)
 
 #' Export sequences to FASTA (a file, or stdout with "-")
 #' @param store_ptr External pointer to RefgetStore
