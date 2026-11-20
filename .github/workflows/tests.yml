@@ -33,13 +33,34 @@ jobs:
       - name: Cache Rust build
         uses: Swatinem/rust-cache@v2
 
-      # Not enabling the `golden` feature: it is pinned to BLAST+ 2.17.0 and
-      # apt may ship another version. codecov.yml runs it via the docker image.
-      - name: Install BLAST+
-        run: sudo apt-get update && sudo apt-get install -y ncbi-blast+
+      # The `golden` tests are pinned to BLAST+ 2.17.0 (apt ships 2.12), so
+      # this job uses NCBI's release tarball. codecov.yml runs the same tests
+      # through the ncbi/blast:2.17.0 docker image instead.
+      - name: Cache BLAST+ 2.17.0
+        id: blast-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/blast
+          key: ncbi-blast-2.17.0-x64-linux
 
-      - name: Test gtars-rgblast (BLAST+ tests)
-        run: cargo test -p gtars-rgblast --features blastplus
+      - name: Download BLAST+ 2.17.0
+        if: steps.blast-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/blast && cd ~/blast
+          b=https://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/2.17.0
+          f=ncbi-blast-2.17.0+-x64-linux.tar.gz
+          curl -fsSL --retry 3 -O "$b/$f" -O "$b/$f.md5"
+          md5sum -c "$f.md5"
+          tar xzf "$f" ncbi-blast-2.17.0+/bin
+          rm "$f" "$f.md5"
+
+      - name: Put BLAST+ on PATH
+        run: |
+          echo "$HOME/blast/ncbi-blast-2.17.0+/bin" >> "$GITHUB_PATH"
+          "$HOME/blast/ncbi-blast-2.17.0+/bin/makeblastdb" -version
+
+      - name: Test gtars-rgblast (BLAST+ and golden tests)
+        run: cargo test -p gtars-rgblast --features golden
 
       - name: Test gtars blast CLI
         run: cargo test -p gtars-cli --test blast_cli
@@ -53,6 +74,9 @@ jobs:
   r:
     name: R tests
     runs-on: ubuntu-latest
+    env:
+      # Keep cargo's download cache in ~/.cargo (see gtars-r/src/Makevars).
+      NOT_CRAN: "true"
     steps:
       - uses: actions/checkout@v4
 
@@ -78,6 +102,7 @@ jobs:
         with:
           working-directory: gtars-r
           dependencies: '"all"'
+          extra-packages: any::rextendr any::roxygen2
 
       - name: Set R library path
         run: echo "LD_LIBRARY_PATH=$(R RHOME)/lib" >> "$GITHUB_ENV"
@@ -85,8 +110,20 @@ jobs:
       - name: Install R package
         run: R CMD INSTALL gtars-r
 
+      # Lists skipped tests so a silent skip (no python3, no blastn) shows.
       - name: Run R tests
-        run: Rscript -e 'testthat::test_dir("gtars-r/tests/testthat")'
+        run: |
+          Rscript -e 'r <- as.data.frame(testthat::test_dir("gtars-r/tests/testthat", stop_on_failure = TRUE));
+            s <- r[r$skipped, c("file", "test")]; cat(nrow(s), "skipped\n"); print(s, row.names = FALSE)'
+
+      # The wrappers and man pages must match what extendr and roxygen2
+      # generate (wrappers come from the installed library).
+      - name: Check generated R wrappers and docs
+        run: |
+          Rscript -e 'library(gtars); rextendr:::make_wrappers("gtars", "gtars", "gtars-r/R/extendr-wrappers.R", path = "gtars-r", use_symbols = TRUE)'
+          Rscript -e 'roxygen2::roxygenise("gtars-r", load_code = roxygen2::load_source)'
+          git diff --exit-code -- gtars-r/man gtars-r/NAMESPACE gtars-r/R/extendr-wrappers.R
+          test -z "$(git status --porcelain -- gtars-r/man)"
 
   python:
     name: Python tests

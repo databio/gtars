@@ -5,6 +5,7 @@ on:
     branches: [ "master" ]
   pull_request:
     branches: [ "master" ]
+  workflow_dispatch:
 
 # Cancel superseded runs on the same ref instead of queueing them.
 concurrency:
