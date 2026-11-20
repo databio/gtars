@@ -4139,18 +4139,18 @@ impl ReadonlyRefgetStore {
         }
         // Downloads are written to the cache, so every file is now on disk.
         let datas = self.fetch_meta_many(&rels, false)?;
+        if let Some((rel, _)) = rels.iter().zip(&datas).find(|(_, d)| d.is_none()) {
+            return Err(anyhow!(
+                "File not found locally and no remote source configured: {}",
+                rel
+            ));
+        }
 
         let local_path = self
             .local_path
             .clone()
             .ok_or_else(|| anyhow!("No local path configured"))?;
-        for ((given, _), (rel, data)) in need.iter().zip(rels.iter().zip(datas)) {
-            if data.is_none() {
-                return Err(anyhow!(
-                    "File not found locally and no remote source configured: {}",
-                    rel
-                ));
-            }
+        for ((given, _), rel) in need.iter().zip(rels.iter()) {
             self.load_collection_rgsi(&local_path.join(rel), Some(given))?;
         }
         Ok(())
