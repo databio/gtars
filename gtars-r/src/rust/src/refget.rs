@@ -6,8 +6,8 @@ use gtars_refget::digest::{
 use gtars_refget::digest::{md5, sha512t24u, AlphabetType};
 use gtars_refget::FhrMetadata;
 use gtars_refget::store::{
-    ExportOptions, ExportSelection, ExportSummary, FastaImportOptions, LabelTemplate, Molecule,
-    RefgetStore, RetrievedSequence, StorageMode,
+    CompactOptions, ExportOptions, ExportSelection, ExportSummary, FastaImportOptions,
+    LabelTemplate, Molecule, RefgetStore, RetrievedSequence, StorageMode,
 };
 
 // =========================================================================
@@ -907,16 +907,18 @@ pub fn write_store(store_ptr: Robj) -> extendr_api::Result<()> {
 
 /// Reclaim dead bytes in a packed store
 /// @param store_ptr External pointer to RefgetStore
+/// @param prune_unreferenced Also delete pack files no index entry points to
 #[extendr]
-pub fn compact_store(store_ptr: Robj) -> extendr_api::Result<List> {
+pub fn compact_store(store_ptr: Robj, prune_unreferenced: bool) -> extendr_api::Result<List> {
     with_store!(store_ptr, store, {
         store
-            .compact()
+            .compact_with(CompactOptions { prune_unreferenced })
             .map(|r| {
                 list!(
                     packs_before = r.packs_before as i32,
                     packs_after = r.packs_after as i32,
-                    bytes_reclaimed = r.bytes_reclaimed as f64
+                    bytes_reclaimed = r.bytes_reclaimed as f64,
+                    packs_pruned = r.packs_pruned as i32
                 )
             })
             .map_err(|e| format!("Error compacting store: {}", e).into())

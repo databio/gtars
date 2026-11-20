@@ -343,9 +343,11 @@ impl ReadonlyRefgetStore {
 
         // Every pack a new row points at must still be on disk. A writer whose
         // pack had the same content-hash name as an existing one reuses that
-        // file instead of writing its own, and another writer's removal can
-        // have unlinked it since. Packs are only unlinked under this lock, so a
-        // pack present now stays present through this commit.
+        // file instead of writing its own, and another writer can have
+        // unlinked it since. Removal and compaction unlink packs only under
+        // this lock, so against them a pack present now stays present through
+        // this commit. A failed import or a dropped handle unlinks packs it
+        // created without the lock (see `remove_uncommitted_packs`).
         let packs_dir = local_path.join("packs");
         let check_packs = |new_rows: &mut dyn Iterator<Item = &PackRow>| -> Result<()> {
             let mut seen: HashSet<&str> = HashSet::new();

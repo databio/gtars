@@ -75,7 +75,8 @@ test_that("packed store round-trips and compacts", {
   }
 
   report <- compact(reopened)
-  expect_setequal(names(report), c("packs_before", "packs_after", "bytes_reclaimed"))
+  expect_setequal(names(report), c("packs_before", "packs_after", "bytes_reclaimed", "packs_pruned"))
+  expect_equal(report$packs_pruned, 0L)
   for (rec in expected@sequences) {
     meta <- rec@metadata
     expect_equal(get_substring(reopened, meta@sha512t24u, 0, meta@length), bases[[meta@name]])
@@ -88,6 +89,33 @@ test_that("packed store round-trips and compacts", {
       meta <- rec@metadata
       expect_equal(get_substring(reopened, meta@sha512t24u, 0, meta@length), bases[[meta@name]])
     }
+  }
+})
+
+test_that("compact prunes unreferenced packs only on request", {
+  skip_if_no_fasta()
+  store_dir <- file.path(tempdir(), "test_packed_prune")
+  on.exit(unlink(store_dir, recursive = TRUE))
+
+  store <- refget_store_on_disk(store_dir, packed = TRUE)
+  set_quiet(store, TRUE)
+  import_fasta(store, fasta_path)
+  packs <- list.files(file.path(store_dir, "packs"), pattern = "\\.pack$", full.names = TRUE)
+  expect_length(packs, 1)
+  unlisted <- file.path(store_dir, "packs", "0123456789abcdef0123456789abcdef.pack")
+  expect_true(file.copy(packs[[1]], unlisted))
+
+  reopened <- refget_store_open_local(store_dir)
+  expect_equal(compact(reopened)$packs_pruned, 0L)
+  expect_true(file.exists(unlisted))
+
+  report <- compact(reopened, prune_unreferenced = TRUE)
+  expect_equal(report$packs_pruned, 1L)
+  expect_false(file.exists(unlisted))
+  bases <- c(chrX = "TTGGGGAA", chr1 = "GGAA", chr2 = "GCGC")
+  for (rec in digest_fasta(fasta_path)@sequences) {
+    meta <- rec@metadata
+    expect_equal(get_substring(reopened, meta@sha512t24u, 0, meta@length), bases[[meta@name]])
   }
 })
 

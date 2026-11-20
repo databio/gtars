@@ -107,12 +107,12 @@ fn check_range(start: usize, end: usize, length: usize) -> Result<()> {
 
 /// Batch size at which `get_substrings` against a *remote-only* sequence stops
 /// issuing one HTTP byte-range request per range and instead downloads the whole
-/// `.seq` once (cached locally, like `load_sequence`), then serves every range
-/// from the local file. Each remote range is a separate round-trip, so for bulk
-/// extraction (e.g. BED region sets) the per-request latency dominates and a
-/// single cached download wins; below the threshold, fetching only the touched
-/// bytes is cheaper than pulling a whole chromosome. Heuristic, count-based:
-/// small/ad-hoc reads stay lean, bulk reads promote.
+/// stored record once (cached locally as a `.seq`, like `load_sequence`), then
+/// serves every range from the local file. Each remote range is a separate
+/// round-trip, so for bulk extraction (e.g. BED region sets) the per-request
+/// latency dominates and a single cached download wins; below the threshold,
+/// fetching only the touched bytes is cheaper than pulling a whole chromosome.
+/// Heuristic, count-based: small/ad-hoc reads stay lean, bulk reads promote.
 const REMOTE_BULK_FETCH_THRESHOLD: usize = 16;
 
 /// Convert decoded sequence bytes into a `String` without re-validating UTF-8.
@@ -446,6 +446,10 @@ pub(crate) struct SessionPack {
     pub(crate) rows: Vec<(String, u64, u64)>,
     /// Sidecar rows of the packs this session already sealed.
     pub(crate) sealed: Vec<(String, super::packidx::PackRow)>,
+    /// Names of packs this session renamed into place and has not handed to
+    /// a commit yet. A pack that already existed under the same name is not
+    /// listed: another writer owns it.
+    pub(crate) created: Vec<String>,
 }
 
 impl SessionPack {
@@ -473,6 +477,11 @@ impl SessionPack {
         if self.len == 0 {
             return Ok(());
         }
+        // Cut off bytes past the tracked length (left by a failed append), so
+        // the sealed file is exactly the bytes that were hashed.
+        self.file
+            .set_len(self.len)
+            .context("truncating session pack to its written length")?;
         let _ = self.file.sync_all();
         let digest = self.hasher.clone().finalize();
         let name: String = digest[..16].iter().map(|b| format!("{:02x}", b)).collect();
@@ -484,6 +493,8 @@ impl SessionPack {
         } else if let Err(e) = std::fs::rename(&self.tmp_path, &final_path) {
             let _ = std::fs::remove_file(&next_tmp);
             return Err(e).with_context(|| format!("sealing session pack {}", final_path.display()));
+        } else {
+            self.created.push(name.clone());
         }
         if let Ok(dir) = File::open(&self.packs_dir) {
             let _ = dir.sync_all();
@@ -506,10 +517,40 @@ impl SessionPack {
 
 /// A session pack that is dropped without being sealed (the store handle went
 /// away before a commit) leaves no temp file behind. After a seal, `tmp_path`
-/// names the fresh empty temp, or a path already renamed away.
+/// names the fresh empty temp, or a path already renamed away. The packs it
+/// sealed but never handed to a commit (`created`) are deleted too, since no
+/// row will ever point at them.
 impl Drop for SessionPack {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.tmp_path);
+        remove_uncommitted_packs(&self.packs_dir, &self.created, &HashSet::new());
+    }
+}
+
+/// Delete each pack in `created` (packs a writer renamed into place whose
+/// rows never reached a commit) that neither `staged` nor the on-disk
+/// sidecar references. Deletes nothing if the sidecar cannot be read.
+///
+/// Runs without the store lock. Another writer may have reused one of these
+/// packs by name (same content hash). If it has committed, the sidecar lists
+/// the pack and it is kept. If it has not, its commit finds the pack gone and
+/// refuses to publish (see `commit_pack_idx`), a clear error rather than a
+/// bad read. A commit landing between the sidecar read here and the unlink is
+/// not caught: its rows then name a missing pack and their reads fail.
+pub(crate) fn remove_uncommitted_packs(
+    packs_dir: &Path,
+    created: &[String],
+    staged: &HashSet<String>,
+) {
+    if created.is_empty() {
+        return;
+    }
+    let Some(local_path) = packs_dir.parent() else { return };
+    let Ok(listed) = ReadonlyRefgetStore::sidecar_pack_names(local_path) else { return };
+    for name in created {
+        if !staged.contains(name) && !listed.contains(name) {
+            let _ = std::fs::remove_file(packs_dir.join(format!("{}.pack", name)));
+        }
     }
 }
 
@@ -536,6 +577,20 @@ pub struct CompactReport {
     pub packs_after: usize,
     /// Dead bytes reclaimed.
     pub bytes_reclaimed: u64,
+    /// Unreferenced pack files deleted by
+    /// [`CompactOptions::prune_unreferenced`]; 0 without it.
+    pub packs_pruned: usize,
+}
+
+/// Options for [`ReadonlyRefgetStore::compact_with`].
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CompactOptions {
+    /// Also delete every pack file that the new index does not reference,
+    /// including packs no index ever listed (left by a crashed writer, for
+    /// example). Such a pack can belong to another writer that has sealed it
+    /// but not committed yet, so set this only when no other process is
+    /// writing to the store.
+    pub prune_unreferenced: bool,
 }
 
 /// What this handle has actually created, modified, or deleted since its last
@@ -1316,20 +1371,59 @@ impl ReadonlyRefgetStore {
             SequenceRecord::Stub(metadata) => (metadata, None),
         };
 
+        let writes_bytes = self.persist_to_disk && self.local_path.is_some() && bytes.is_some();
+        // What the insert below changes, so a failed byte write can put it
+        // back: the prior label and bytes of a sequence already in the catalog
+        // (only a forced re-add gets here with one), and whether this handle
+        // had already staged the sequence or a removal of it.
+        let undo = writes_bytes.then(|| {
+            let prior = self
+                .catalog
+                .find_sha(&metadata.sha512t24u)
+                .map(|r| (self.catalog.seq(r).to_metadata(), self.loaded.get(&r).cloned()));
+            let p = self.pending.lock().unwrap();
+            (prior, p.sequences.contains(&key), p.removed_sequences.contains(&key))
+        });
+
         let (row, _) = self.insert_sequence(&metadata, bytes.clone(), true)?;
         self.record(|p| p.add_sequence(key));
 
-        if self.persist_to_disk && self.local_path.is_some() {
-            if let Some(sequence) = &bytes {
-                if self.layout == Layout::Packed {
-                    // Packed incremental write (panget's path): append to the
-                    // open session pack. The bytes stay loaded so mid-session
-                    // reads are served from RAM; on reopen the sequence is
-                    // resolved through the sidecar.
-                    self.session_pack_append(&metadata.sha512t24u, sequence)?;
-                    return Ok(());
+        if let (Some(sequence), Some((prior, was_staged, was_removed))) = (&bytes, undo) {
+            let packed = self.layout == Layout::Packed;
+            let written = if packed {
+                // Packed incremental write (panget's path): append to the open
+                // session pack. The bytes stay loaded so mid-session reads are
+                // served from RAM; on reopen the sequence is resolved through
+                // the sidecar.
+                self.session_pack_append(&metadata.sha512t24u, sequence)
+            } else {
+                self.write_sequence_to_disk_single(&metadata, sequence)
+            };
+            if let Err(e) = written {
+                // Undo the insert, so a later commit publishes no row whose
+                // bytes are not on disk. A sequence this call added is
+                // removed; one already in the catalog keeps its row and gets
+                // its prior label and bytes back.
+                match prior {
+                    None => self.remove_sequence_rows(&[row]),
+                    Some((meta, prior_bytes)) => {
+                        let _ = self.catalog.set_sequence_label(row, &meta);
+                        match prior_bytes {
+                            Some(b) => self.loaded.insert(row, b),
+                            None => self.loaded.remove(&row),
+                        };
+                    }
                 }
-                self.write_sequence_to_disk_single(&metadata, sequence)?;
+                let mut p = self.pending.lock().unwrap();
+                if !was_staged {
+                    p.sequences.remove(&key);
+                }
+                if was_removed {
+                    p.removed_sequences.insert(key);
+                }
+                return Err(e);
+            }
+            if !packed {
                 self.loaded.remove(&row);
             }
         }
@@ -2745,22 +2839,18 @@ impl ReadonlyRefgetStore {
                         .unwrap_or(false);
 
                 // Bulk remote extraction: one HTTP round-trip per range is slow
-                // for large batches. Past REMOTE_BULK_FETCH_THRESHOLD, download and
-                // cache the whole `.seq` once (needs a local cache dir + path
-                // template to write into), then read every range from the local
-                // file. Single / small-batch reads fall through to pure byte-range.
+                // for large batches. Past REMOTE_BULK_FETCH_THRESHOLD, fetch the
+                // whole stored record once, from the remote `.seq` or its span
+                // in a remote pack, and cache it as a local `.seq` (needs a
+                // local cache dir + path template to write into), then read
+                // every range from that file. Single / small-batch reads fall
+                // through to pure byte-range.
                 if !local_seq_exists
                     && self.local_path.is_some()
                     && self.seqdata_path_template.is_some()
                     && ranges.len() >= REMOTE_BULK_FETCH_THRESHOLD
                 {
-                    let relpath = self.resolve_seq_file_relpath(&meta.sha512t24u)?;
-                    let relpath_str = relpath
-                        .to_str()
-                        .ok_or_else(|| anyhow!("Non-UTF8 sequence path"))?;
-                    // persist_to_disk=true caches the file for this and future
-                    // reads; force_refresh=false reuses it if already present.
-                    Self::fetch_file(&self.local_path, &self.remote_source, relpath_str, true, false)?;
+                    self.read_stored_bytes(actual_key, true)?;
                     let mut out = Vec::with_capacity(ranges.len());
                     for &(start, end) in ranges {
                         // Zero-length range -> "" (see get_substring). Short-circuit
@@ -3179,7 +3269,6 @@ impl ReadonlyRefgetStore {
     /// sealing the current pack first if it would exceed the cap.
     pub(crate) fn session_pack_append(&self, digest: &str, bytes: &[u8]) -> Result<()> {
         use sha2::Digest as _;
-        use std::io::Write as _;
 
         let local_path = self
             .local_path
@@ -3203,6 +3292,7 @@ impl ReadonlyRefgetStore {
                 hasher: sha2::Sha256::new(),
                 rows: Vec::new(),
                 sealed: Vec::new(),
+                created: Vec::new(),
             });
         }
 
@@ -3212,8 +3302,21 @@ impl ReadonlyRefgetStore {
         if session.len > 0 && session.len + len > self.pack_cap_bytes {
             session.seal()?;
         }
+        // Write at the tracked offset, not at the file cursor: bytes a failed
+        // write left behind are overwritten here or cut off at seal, so they
+        // never shift this row or a later one.
         let offset = session.len;
-        session.file.write_all(bytes)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::FileExt;
+            session.file.write_all_at(bytes, offset)?;
+        }
+        #[cfg(not(unix))]
+        {
+            use std::io::{Seek, SeekFrom, Write};
+            session.file.seek(SeekFrom::Start(offset))?;
+            session.file.write_all(bytes)?;
+        }
         session.hasher.update(bytes);
         session.len += len;
         session.rows.push((digest.to_string(), offset, len));
@@ -3235,6 +3338,9 @@ impl ReadonlyRefgetStore {
             *guard = Some(session);
             return Err(e);
         }
+        // The rows go to the commit path now, so dropping the session must
+        // not delete their packs.
+        session.created.clear();
         Ok(std::mem::take(&mut session.sealed))
     }
 
@@ -3265,8 +3371,13 @@ impl ReadonlyRefgetStore {
     /// Rewrite the live spans of a packed store into fresh sealed packs,
     /// reclaiming dead bytes. Deterministic and locality-preserving (packs
     /// visited by name, rows by offset). Retrieval is byte-identical before and
-    /// after.
+    /// after. Same as [`Self::compact_with`] with default options.
     pub fn compact(&mut self) -> Result<CompactReport> {
+        self.compact_with(CompactOptions::default())
+    }
+
+    /// [`Self::compact`] with options; see [`CompactOptions`].
+    pub fn compact_with(&mut self, opts: CompactOptions) -> Result<CompactReport> {
         if self.layout != Layout::Packed {
             return Err(anyhow!("compact() only applies to a packed store"));
         }
@@ -3277,14 +3388,14 @@ impl ReadonlyRefgetStore {
         // A batch lock the caller already holds stays held.
         let held = self.holds_batch_lock();
         self.lock_for_batch("compact")?;
-        let result = self.compact_inner(&local_path);
+        let result = self.compact_inner(&local_path, opts);
         if !held {
             self.release_batch_lock();
         }
         result
     }
 
-    fn compact_inner(&self, local_path: &Path) -> Result<CompactReport> {
+    fn compact_inner(&self, local_path: &Path, opts: CompactOptions) -> Result<CompactReport> {
         use super::packidx::{read_pack_idx_rows, write_pack_idx, PackRow};
         use std::collections::BTreeMap;
 
@@ -3335,13 +3446,55 @@ impl ReadonlyRefgetStore {
 
         let new_pack_names: HashSet<String> =
             new_rows.values().map(|r| r.pack.to_string()).collect();
+        let packs_pruned = if opts.prune_unreferenced {
+            Self::remove_unreferenced_packs(&packs_dir, &new_pack_names)?
+        } else {
+            0
+        };
 
         let dead_after = self.packed_dead_bytes()?;
         Ok(CompactReport {
             packs_before,
             packs_after: new_pack_names.len(),
             bytes_reclaimed: dead_before.saturating_sub(dead_after),
+            packs_pruned,
         })
+    }
+
+    /// Unlink every sealed `*.pack` in `packs_dir` whose name is not in
+    /// `referenced`, and return how many were unlinked. Temp files
+    /// (`.rgstore.tmp.*`) are never touched. Called under the store lock
+    /// right after the index that `referenced` describes was published.
+    fn remove_unreferenced_packs(packs_dir: &Path, referenced: &HashSet<String>) -> Result<usize> {
+        use std::io::ErrorKind::NotFound;
+        let entries = match fs::read_dir(packs_dir) {
+            Ok(entries) => entries,
+            Err(e) if e.kind() == NotFound => return Ok(0),
+            Err(e) => return Err(e).with_context(|| format!("listing {}", packs_dir.display())),
+        };
+        let mut removed = 0;
+        for entry in entries {
+            let entry = entry?;
+            let file_name = entry.file_name();
+            let Some(name) = file_name.to_str() else { continue };
+            if name.starts_with(".rgstore.tmp.") {
+                continue;
+            }
+            let Some(pack) = name.strip_suffix(".pack") else { continue };
+            if referenced.contains(pack) || !entry.file_type()?.is_file() {
+                continue;
+            }
+            match fs::remove_file(entry.path()) {
+                Ok(()) => removed += 1,
+                Err(e) if e.kind() == NotFound => {}
+                Err(e) => {
+                    return Err(e).with_context(|| {
+                        format!("removing unreferenced pack {}", entry.path().display())
+                    })
+                }
+            }
+        }
+        Ok(removed)
     }
 
     /// Names of the packs the on-disk sidecar references.
@@ -4106,6 +4259,21 @@ mod remote_partial_read_tests {
     /// the requested byte slice (and 200 + full body if no Range is sent). The
     /// same `body` is served for every path. Returns (base_url, shutdown_fn).
     fn start_range_honoring_server(body: Vec<u8>) -> (String, impl FnOnce()) {
+        start_range_server(move |_| Some(body.clone()))
+    }
+
+    /// The same server, serving each file under `root` at its relative path
+    /// (404 for a path with no file), so a whole store directory is remote.
+    #[cfg(feature = "filesystem")]
+    fn start_store_dir_server(root: PathBuf) -> (String, impl FnOnce()) {
+        start_range_server(move |rel| std::fs::read(root.join(rel)).ok())
+    }
+
+    /// Range-honoring server whose body for a request path (without the
+    /// leading `/`) comes from `lookup`; `None` is a 404.
+    fn start_range_server(
+        lookup: impl Fn(&str) -> Option<Vec<u8>> + Send + 'static,
+    ) -> (String, impl FnOnce()) {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
         let port = listener.local_addr().unwrap().port();
         let base_url = format!("http://127.0.0.1:{}", port);
@@ -4119,6 +4287,18 @@ mod remote_partial_read_tests {
                         let mut buf = [0u8; 4096];
                         let n = stream.read(&mut buf).unwrap_or(0);
                         let req = String::from_utf8_lossy(&buf[..n]);
+                        let path = req
+                            .lines()
+                            .next()
+                            .and_then(|l| l.split_whitespace().nth(1))
+                            .unwrap_or("/")
+                            .trim_start_matches('/');
+                        let Some(body) = lookup(path) else {
+                            let _ = stream.write_all(
+                                b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                            );
+                            continue;
+                        };
                         // Parse "Range: bytes=START-END" (inclusive END).
                         let range = req.lines().find_map(|l| {
                             let l = l.trim();
@@ -4306,5 +4486,100 @@ mod remote_partial_read_tests {
         assert_eq!(on_disk, encoded, "cached file must be the full encoded sequence");
 
         let _ = std::fs::remove_dir_all(&cache_dir);
+    }
+
+    /// A packed store served over HTTP reads back through every remote read
+    /// path: one range and a small batch (byte ranges into the remote pack), a
+    /// bulk batch (whole record fetched once and cached as a local `.seq`), the
+    /// bulk batch again from that cache, `load_sequence`, and FASTA export.
+    #[cfg(feature = "filesystem")]
+    #[test]
+    fn remote_packed_store_reads() {
+        use crate::store::{ExportOptions, ExportSelection, LabelTemplate, RefgetStore};
+
+        let short = "GGGGCCCCAAAATTTT";
+        let long: String = (0..200usize).map(|i| b"ACGT"[(i * 7 + i / 5) % 4] as char).collect();
+        let with_n = "NNNNACGTACGTTTGGCCAANNNNACGT";
+        // chrLong is second, so its record starts at a non-zero pack offset.
+        let fasta = format!(">chrA\n{short}\n>chrLong\n{long}\n>chrN\n{with_n}\n");
+        let sha = |name: &str, bases: &str| {
+            digest_sequence(name, bases.as_bytes()).metadata().sha512t24u.clone()
+        };
+        let (long_sha, n_sha) = (sha("chrLong", &long), sha("chrN", with_n));
+        let wanted = |ranges: &[(usize, usize)]| -> Vec<String> {
+            ranges.iter().map(|&(s, e)| long[s..e].to_string()).collect()
+        };
+        let few: Vec<(usize, usize)> = vec![(0, 9), (10, 11), (37, 80), (150, 199), (5, 5)];
+        let bulk: Vec<(usize, usize)> = (0..20).map(|i| (i * 9 + 1, i * 9 + 8)).collect();
+        assert!(bulk.len() >= REMOTE_BULK_FETCH_THRESHOLD);
+
+        for mode in [StorageMode::Encoded, StorageMode::Raw, StorageMode::Zstd] {
+            let work = tempfile::tempdir().unwrap();
+            let fa = work.path().join("in.fa");
+            std::fs::write(&fa, &fasta).unwrap();
+            let served = work.path().join("served");
+            let coll_digest = {
+                let mut s = RefgetStore::on_disk_packed(&served).unwrap();
+                s.set_quiet(true);
+                s.set_encoding_mode(mode).unwrap();
+                let (meta, _) = s
+                    .add_sequence_collection_from_fasta(&fa, FastaImportOptions::new().jobs(1))
+                    .unwrap();
+                meta.digest
+            };
+            let pack_rows = super::super::packidx::read_pack_idx_rows(
+                &std::fs::read(served.join("sequences.pack.idx")).unwrap(),
+            )
+            .unwrap();
+            let long_row = &pack_rows[&long_sha];
+            assert!(long_row.offset > 0, "{mode:?}: chrLong should not start its pack");
+            let long_stored = std::fs::read(served.join(pack_relpath(&long_row.pack))).unwrap()
+                [long_row.offset as usize..(long_row.offset + long_row.len) as usize]
+                .to_vec();
+
+            let (url, shutdown) = start_store_dir_server(served.clone());
+            let mut store = RefgetStore::open_remote(work.path().join("cache"), &url).unwrap();
+            store.set_quiet(true);
+            store.load_sequence_index().unwrap();
+            assert_eq!(store.remote_layout, Layout::Packed);
+
+            // Zstd stores refuse remote partial reads by design.
+            if mode != StorageMode::Zstd {
+                let got = store.get_substring(&long_sha, 3, 50).unwrap();
+                assert_eq!(got, long[3..50], "{mode:?}: one range");
+                let got = store.get_substrings(&long_sha, &few).unwrap();
+                assert_eq!(got, wanted(&few), "{mode:?}: small batch");
+            }
+
+            let cached = store.sequence_file_path(&long_sha).unwrap();
+            assert!(!cached.exists(), "{mode:?}: nothing cached before the bulk batch");
+            let got = store
+                .get_substrings(&long_sha, &bulk)
+                .unwrap_or_else(|e| panic!("{mode:?}: bulk batch failed: {e:#}"));
+            assert_eq!(got, wanted(&bulk), "{mode:?}: bulk batch");
+            assert_eq!(
+                std::fs::read(&cached).unwrap(),
+                long_stored,
+                "{mode:?}: the cached .seq must be the record's bytes from the pack"
+            );
+            let got = store.get_substrings(&long_sha, &bulk).unwrap();
+            assert_eq!(got, wanted(&bulk), "{mode:?}: bulk batch from the cache");
+
+            store.load_sequence(&n_sha).unwrap();
+            assert!(store.get_sequence(&n_sha).unwrap().is_loaded());
+            let got = store.get_substring(&n_sha, 0, with_n.len()).unwrap();
+            assert_eq!(got, with_n, "{mode:?}: loaded sequence");
+
+            let out = work.path().join("out.fa");
+            let opts = ExportOptions {
+                label: LabelTemplate::parse("{name}").unwrap(),
+                molecule: None,
+                line_width: 0,
+            };
+            let sel = ExportSelection::Collections { digests: vec![coll_digest], names: None };
+            store.export_fasta(&sel, &out, &opts).unwrap();
+            shutdown();
+            assert_eq!(std::fs::read_to_string(&out).unwrap(), fasta, "{mode:?}: export");
+        }
     }
 }

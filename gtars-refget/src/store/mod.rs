@@ -167,7 +167,7 @@ mod nofs_tests {
 
 // Re-export public types from submodules
 pub use self::readonly::{PendingChanges, ReadonlyRefgetStore};
-pub use self::readonly::CompactReport;
+pub use self::readonly::{CompactOptions, CompactReport};
 pub use self::core::RefgetStore;
 pub use self::alias::{AliasKind, AliasManager};
 #[cfg(feature = "filesystem")]

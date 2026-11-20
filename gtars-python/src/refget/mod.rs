@@ -17,7 +17,7 @@ use gtars_refget::digest::{
 };
 use gtars_refget::digest::{md5, sha512t24u, strip_sq_prefix, AlphabetType};
 use gtars_refget::fasta::FaiRecord;
-use gtars_refget::store::{ExportOptions, ExportSelection, ExportSummary, FastaImportOptions, ImportReport, LabelError, LabelTemplate, Layout, Molecule, ReadonlyRefgetStore, RefgetStore, StorageMode, SyncStrategy, VerifyFailure, VerifyOptions, VerifyReport};
+use gtars_refget::store::{CompactOptions, ExportOptions, ExportSelection, ExportSummary, FastaImportOptions, ImportReport, LabelError, LabelTemplate, Layout, Molecule, ReadonlyRefgetStore, RefgetStore, StorageMode, SyncStrategy, VerifyFailure, VerifyOptions, VerifyReport};
 use gtars_refget::{expand_fasta_inputs, FastaInputs};
 // use gtars::refget::store::RetrievedSequence; // This is the Rust-native struct
 
@@ -2227,8 +2227,15 @@ impl PyRefgetStore {
     /// rewrites the live sequences into fresh packs and deletes the old ones.
     /// Reads return the same bases before and after.
     ///
+    /// Args:
+    ///     prune_unreferenced: Also delete pack files that no index entry
+    ///         points to, such as packs left by a crashed writer. Only use
+    ///         this when no other process is writing to the store: a pack
+    ///         another writer has sealed but not committed yet is deleted too.
+    ///
     /// Returns:
-    ///     dict: ``packs_before``, ``packs_after`` and ``bytes_reclaimed``.
+    ///     dict: ``packs_before``, ``packs_after``, ``bytes_reclaimed`` and
+    ///     ``packs_pruned`` (pack files deleted by ``prune_unreferenced``).
     ///
     /// Raises:
     ///     IOError: If the store is not a packed disk-backed store, or the
@@ -2237,14 +2244,21 @@ impl PyRefgetStore {
     /// Example:
     ///     >>> store = RefgetStore.open_local("/data/packed_store")
     ///     >>> store.compact()["bytes_reclaimed"]
-    fn compact<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, pyo3::types::PyDict>> {
-        let report = self.with_store(py, |s| s.compact()).map_err(|e| {
+    #[pyo3(signature = (prune_unreferenced=false))]
+    fn compact<'py>(
+        &self,
+        py: Python<'py>,
+        prune_unreferenced: bool,
+    ) -> PyResult<Bound<'py, pyo3::types::PyDict>> {
+        let opts = CompactOptions { prune_unreferenced };
+        let report = self.with_store(py, |s| s.compact_with(opts)).map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error compacting store: {}", e))
         })?;
         let d = pyo3::types::PyDict::new(py);
         d.set_item("packs_before", report.packs_before)?;
         d.set_item("packs_after", report.packs_after)?;
         d.set_item("bytes_reclaimed", report.bytes_reclaimed)?;
+        d.set_item("packs_pruned", report.packs_pruned)?;
         Ok(d)
     }
 

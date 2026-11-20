@@ -113,8 +113,13 @@ packed <- refget_store_on_disk(file.path(temp_dir, "packed_store"), packed = TRU
 add_fasta(packed, temp_fasta_path)
 
 # Removing collections leaves dead bytes in the packs; compact() reclaims them
-compact(packed)  # list(packs_before, packs_after, bytes_reclaimed)
+compact(packed)  # list(packs_before, packs_after, bytes_reclaimed, packs_pruned)
 ```
+
+`compact(store, prune_unreferenced = TRUE)` also deletes pack files that no
+index entry points to, such as packs left by a writer that crashed. Use it only
+when no other process is writing to the store: a pack another writer has sealed
+but not yet committed looks the same, and would be deleted too.
 
 A store's layout is fixed when it is created. Opening an existing standard
 store with `packed = TRUE` is an error; `refget_store_open_local` opens either

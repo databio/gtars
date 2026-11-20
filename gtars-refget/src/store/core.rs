@@ -422,6 +422,11 @@ impl RefgetStore {
         self.inner.compact()
     }
 
+    /// [`Self::compact`] with options. See [`super::CompactOptions`].
+    pub fn compact_with(&mut self, opts: super::CompactOptions) -> Result<super::CompactReport> {
+        self.inner.compact_with(opts)
+    }
+
     /// Enable 2-bit encoding for space efficiency.
     pub fn enable_encoding(&mut self) -> Result<()> {
         self.inner.enable_encoding()

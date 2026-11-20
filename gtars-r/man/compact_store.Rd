@@ -4,10 +4,12 @@
 \alias{compact_store}
 \title{Reclaim dead bytes in a packed store}
 \usage{
-compact_store(store_ptr)
+compact_store(store_ptr, prune_unreferenced)
 }
 \arguments{
 \item{store_ptr}{External pointer to RefgetStore}
+
+\item{prune_unreferenced}{Also delete pack files no index entry points to}
 }
 \description{
 Reclaim dead bytes in a packed store

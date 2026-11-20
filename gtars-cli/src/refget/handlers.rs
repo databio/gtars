@@ -4,8 +4,9 @@ use anyhow::Result;
 use clap::ArgMatches;
 
 use gtars_refget::store::{
-    ExportOptions, ExportSelection, FastaImportOptions, LabelTemplate, LockOptions, Molecule,
-    RefgetStore, StorageMode, VerifyOptions, VerifyReport, force_unlock, lock_status,
+    CompactOptions, ExportOptions, ExportSelection, FastaImportOptions, LabelTemplate,
+    LockOptions, Molecule, RefgetStore, StorageMode, VerifyOptions, VerifyReport, force_unlock,
+    lock_status,
 };
 use gtars_refget::{expand_fasta_inputs, FastaInputs};
 
@@ -24,9 +25,10 @@ fn run_compact(matches: &ArgMatches) -> Result<()> {
     let store_path = matches.get_one::<String>("store").expect("store is required");
     let mut store = RefgetStore::open_local(store_path)
         .map_err(|e| anyhow::anyhow!("Failed to open store at {}: {}", store_path, e))?;
+    let prune_unreferenced = matches.get_flag("prune_unreferenced");
     let dead_before = store.packed_dead_bytes().unwrap_or(0);
     let report = store
-        .compact()
+        .compact_with(CompactOptions { prune_unreferenced })
         .map_err(|e| anyhow::anyhow!("Failed to compact store: {}", e))?;
     eprintln!(
         "Compacted {}: packs {} -> {}, reclaimed {} dead byte(s) (was {}).",
@@ -36,6 +38,9 @@ fn run_compact(matches: &ArgMatches) -> Result<()> {
         report.bytes_reclaimed,
         dead_before,
     );
+    if prune_unreferenced {
+        eprintln!("Pruned {} unreferenced pack file(s).", report.packs_pruned);
+    }
     Ok(())
 }
 

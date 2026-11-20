@@ -716,7 +716,8 @@ write_store <- function(store_ptr) .Call(wrap__write_store, store_ptr)
 
 #' Reclaim dead bytes in a packed store
 #' @param store_ptr External pointer to RefgetStore
-compact_store <- function(store_ptr) .Call(wrap__compact_store, store_ptr)
+#' @param prune_unreferenced Also delete pack files no index entry points to
+compact_store <- function(store_ptr, prune_unreferenced) .Call(wrap__compact_store, store_ptr, prune_unreferenced)
 
 #' Turn the pack block cache on or off
 #' @param store_ptr External pointer to RefgetStore

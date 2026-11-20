@@ -736,11 +736,16 @@ setMethod('write_store', 'RefgetStore', function(store) {
 #' the same bases before and after. Errors on a store that is not packed.
 #'
 #' @param store A RefgetStore object created with \code{packed = TRUE}
-#' @return A named list: packs_before, packs_after, bytes_reclaimed
+#' @param prune_unreferenced Also delete pack files that no index entry points
+#'   to, such as packs left by a crashed writer. Only use this when no other
+#'   process is writing to the store: a pack another writer has sealed but not
+#'   committed yet is deleted too.
+#' @return A named list: packs_before, packs_after, bytes_reclaimed,
+#'   packs_pruned (pack files deleted by \code{prune_unreferenced})
 #' @export
-setGeneric('compact', function(store) standardGeneric('compact'))
-setMethod('compact', 'RefgetStore', function(store) {
-  .Call(wrap__compact_store, store@ptr)
+setGeneric('compact', function(store, prune_unreferenced = FALSE) standardGeneric('compact'))
+setMethod('compact', 'RefgetStore', function(store, prune_unreferenced = FALSE) {
+  .Call(wrap__compact_store, store@ptr, isTRUE(prune_unreferenced))
 })
 
 #' Turn the pack block cache on or off (alpha).

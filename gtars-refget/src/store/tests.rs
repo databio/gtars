@@ -6628,6 +6628,49 @@ mod packed_layout {
         assert!(!store.holds_batch_lock());
     }
 
+    /// `compact()` keeps a pack no index lists. `prune_unreferenced` deletes
+    /// it and reports it, and keeps temp files and every pack the index
+    /// references.
+    #[test]
+    fn compact_prunes_unreferenced_packs_only_on_request() {
+        let work = tempdir().unwrap();
+        let fasta = work.path().join("in.fa");
+        fs::write(&fasta, PACKED_FASTA).unwrap();
+        let dir = tempdir().unwrap();
+        drop(build_packed(dir.path(), &fasta, 1, false, None));
+        let packs = collect_packs(dir.path());
+        assert_eq!(packs.len(), 1, "the import should commit one pack");
+        let packs_dir = dir.path().join("packs");
+        let unlisted = "0123456789abcdef0123456789abcdef.pack";
+        fs::copy(packs_dir.join(packs.keys().next().unwrap()), packs_dir.join(unlisted)).unwrap();
+        let temp = ".rgstore.tmp.pack.session.other.0";
+        fs::write(packs_dir.join(temp), b"another writer's open pack").unwrap();
+
+        let mut store = RefgetStore::open_local(dir.path()).unwrap();
+        let report = store.compact().unwrap();
+        assert_eq!(report.packs_pruned, 0);
+        assert!(packs_dir.join(unlisted).exists(), "compact() deleted an unlisted pack");
+        assert!(store.packed_dead_bytes().unwrap() > 0);
+
+        let report = store.compact_with(CompactOptions { prune_unreferenced: true }).unwrap();
+        assert_eq!(report.packs_pruned, 1);
+        assert!(!packs_dir.join(unlisted).exists(), "the unlisted pack survived pruning");
+        assert!(packs_dir.join(temp).exists(), "pruning deleted a temp file");
+        assert_eq!(store.packed_dead_bytes().unwrap(), 0);
+        let on_disk: std::collections::BTreeSet<String> =
+            collect_packs(dir.path()).into_keys().collect();
+        let indexed: std::collections::BTreeSet<String> =
+            sidecar_packs(dir.path()).into_iter().map(|p| format!("{p}.pack")).collect();
+        assert_eq!(on_disk, indexed);
+
+        let reopened = RefgetStore::open_local(dir.path()).unwrap();
+        for record in PACKED_FASTA.split('>').filter(|r| !r.trim().is_empty()) {
+            let bases: String = record.lines().skip(1).collect();
+            let sha = sha512t24u(bases.as_bytes());
+            assert_eq!(reopened.get_substring(&sha, 0, bases.len()).unwrap(), bases);
+        }
+    }
+
     // a fully-dead pack is unlinked eagerly (small cap: one seq per pack).
     #[test]
     fn fully_dead_pack_unlinked() {
@@ -6891,12 +6934,15 @@ mod packed_layout {
 
     /// A packed import in which one file fails leaves a handle that commits a
     /// readable store: the good file's sequences keep their pack rows, and the
-    /// failed file's sequences are neither indexed nor given pack rows.
+    /// failed file's sequences are neither indexed nor given pack rows. With a
+    /// 1-byte cap each sequence gets its own pack, so the failed file's packs
+    /// hold only dropped rows; they are deleted, and `packs/` holds only packs
+    /// the index references.
     #[test]
     fn packed_import_partial_failure_stays_readable() {
         let expected: std::collections::HashMap<&str, &str> =
             [("a1", "ACGTACGTACGT"), ("a2", "GGGGCCCCAAAA")].into_iter().collect();
-        for jobs in [1, 2] {
+        for (jobs, cap) in [(1, None), (2, None), (1, Some(1)), (2, Some(1))] {
             let work = tempdir().unwrap();
             let fa = work.path().join("a.fa");
             let fb = work.path().join("b.fa");
@@ -6909,6 +6955,9 @@ mod packed_layout {
             {
                 let mut s = RefgetStore::on_disk_packed(dir.path()).unwrap();
                 s.set_quiet(true);
+                if let Some(cap) = cap {
+                    s.set_pack_cap_bytes(cap);
+                }
                 s.add_sequence_collections_from_fastas(
                     &[fa.clone(), fb.clone()],
                     FastaImportOptions::new().jobs(jobs),
@@ -6936,6 +6985,12 @@ mod packed_layout {
             let mut published: Vec<&String> = listed.iter().map(|m| &m.sha512t24u).collect();
             published.sort();
             assert_eq!(indexed, published, "jobs={jobs}: pack rows must match the index");
+
+            let referenced: std::collections::BTreeSet<String> =
+                rows.values().map(|r| format!("{}.pack", r.pack)).collect();
+            let on_disk: std::collections::BTreeSet<String> =
+                collect_packs(dir.path()).into_keys().collect();
+            assert_eq!(on_disk, referenced, "jobs={jobs} cap={cap:?}: unindexed packs left");
         }
     }
 
@@ -7135,6 +7190,52 @@ mod packed_layout {
         assert!(sidecar_packs(dir.path()).is_empty(), "no rows may be published");
     }
 
+    /// Dropping a handle deletes the packs it sealed but never committed, and
+    /// nothing else: packs committed by `write()` or by a successful import
+    /// stay, and read back, after their handle is dropped.
+    #[test]
+    fn dropping_a_handle_removes_its_uncommitted_sealed_packs() {
+        let dir = tempdir().unwrap();
+        RefgetStore::on_disk_packed(dir.path()).unwrap().write().unwrap();
+        let (a, _) = writer_with_sealed_uncommitted_pack(dir.path());
+        assert_eq!(collect_packs(dir.path()).len(), 1, "a1's pack should be sealed");
+        drop(a);
+        let left: Vec<_> = fs::read_dir(dir.path().join("packs"))
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name())
+            .collect();
+        assert!(left.is_empty(), "packs/ should be empty: {left:?}");
+
+        let (a, mut held) = writer_with_sealed_uncommitted_pack(dir.path());
+        a.write().unwrap();
+        drop(a);
+        let work = tempdir().unwrap();
+        let fasta = work.path().join("c.fa");
+        let imported = [("c1", "ACGTTGCAACGTTGCA"), ("c2", "CCCCGGGGAAAATTTT")];
+        let text: String = imported.iter().map(|(n, b)| format!(">{n}\n{b}\n")).collect();
+        fs::write(&fasta, text).unwrap();
+        {
+            let mut s = RefgetStore::open_local(dir.path()).unwrap();
+            s.set_quiet(true);
+            s.set_pack_cap_bytes(1);
+            s.add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new().jobs(1))
+                .unwrap();
+        }
+        held.extend(imported.iter().map(|(_, b)| (sha512t24u(b.as_bytes()), *b)));
+
+        let on_disk: std::collections::BTreeSet<String> =
+            collect_packs(dir.path()).into_keys().collect();
+        let indexed: std::collections::BTreeSet<String> =
+            sidecar_packs(dir.path()).into_iter().map(|p| format!("{p}.pack")).collect();
+        assert_eq!(on_disk.len(), 4, "one pack per sequence: {on_disk:?}");
+        assert_eq!(on_disk, indexed);
+        let store = RefgetStore::open_local(dir.path()).unwrap();
+        for (sha, bases) in &held {
+            assert_eq!(store.get_substring(sha, 0, bases.len()).unwrap(), *bases);
+        }
+    }
+
     /// A commit whose session seal fails keeps the session, so the rows of
     /// sub-packs it sealed earlier are committed by the next attempt.
     #[cfg(unix)]
@@ -7169,6 +7270,142 @@ mod packed_layout {
             let digest = sha2::Sha256::digest(&bytes);
             let want: String = digest[..16].iter().map(|b| format!("{:02x}", b)).collect();
             assert_eq!(name, format!("{want}.pack"));
+        }
+    }
+
+    /// Bytes a failed append left in the open pack are overwritten by the next
+    /// append and cut off at seal: later rows keep their offsets, and the pack
+    /// is named by the hash of exactly the bytes its rows cover.
+    #[cfg(unix)]
+    #[test]
+    fn append_after_partial_write_keeps_offsets_and_pack_name() {
+        use sha2::Digest as _;
+        use std::io::{Seek as _, SeekFrom, Write as _};
+        let dir = tempdir().unwrap();
+        let mut held = Vec::new();
+        {
+            let mut s = RefgetStore::on_disk_packed(dir.path()).unwrap();
+            s.set_quiet(true);
+            for (i, (name, bases)) in
+                [("a", "ACGTACGTTTTTGGGGCCCCAAAA"), ("b", "GGGGAAAATTTTCCCC")].into_iter().enumerate()
+            {
+                if i == 1 {
+                    // What a write that failed part way leaves behind: bytes
+                    // past the tracked length, and the file cursor after them.
+                    // They are longer than b's bytes, so some outlast b's write.
+                    let mut guard = s.inner.open_session_pack.lock().unwrap();
+                    let session = guard.as_mut().unwrap();
+                    session.file.seek(SeekFrom::Start(session.len)).unwrap();
+                    session.file.write_all(b"partial write").unwrap();
+                }
+                let record = encoded_record(name, bases.as_bytes());
+                held.push((record.metadata().sha512t24u.clone(), bases));
+                s.add_sequence_record(record, false).unwrap();
+            }
+            s.write().unwrap();
+        }
+
+        let store = RefgetStore::open_local(dir.path()).unwrap();
+        for (sha, bases) in &held {
+            assert_eq!(store.get_substring(sha, 0, bases.len()).unwrap(), *bases);
+        }
+        let rows = crate::store::packidx::read_pack_idx_rows(
+            &fs::read(dir.path().join("sequences.pack.idx")).unwrap(),
+        )
+        .unwrap();
+        let packs = collect_packs(dir.path());
+        assert_eq!(packs.len(), 1);
+        for (name, bytes) in packs {
+            let digest = sha2::Sha256::digest(&bytes);
+            let want: String = digest[..16].iter().map(|b| format!("{:02x}", b)).collect();
+            assert_eq!(name, format!("{want}.pack"), "pack name must hash its content");
+            let covered: u64 = rows
+                .values()
+                .filter(|r| format!("{}.pack", r.pack) == name)
+                .map(|r| r.len)
+                .sum();
+            assert_eq!(bytes.len() as u64, covered, "{name} holds bytes no row covers");
+        }
+    }
+
+    /// An `add_sequence_record` whose bytes cannot be written returns the
+    /// error and leaves nothing behind: a later `write()` publishes no row
+    /// for the sequence, a forced re-add of a stored sequence keeps it under
+    /// its old name, and the same record adds and reads back once the disk is
+    /// writable again. Packed and standalone layouts alike.
+    #[cfg(unix)]
+    #[test]
+    fn failed_record_write_leaves_no_trace() {
+        use std::os::unix::fs::PermissionsExt;
+        let listed = |store: &RefgetStore| -> std::collections::BTreeMap<String, String> {
+            store.sequence_metadata().map(|m| (m.sha512t24u, m.name)).collect()
+        };
+        let reads_back = |dir: &std::path::Path, held: &[(String, &str)]| {
+            let store = RefgetStore::open_local(dir).unwrap();
+            let names = listed(&store);
+            let want: std::collections::BTreeSet<&String> = held.iter().map(|(s, _)| s).collect();
+            assert_eq!(names.keys().collect::<std::collections::BTreeSet<_>>(), want);
+            for (sha, bases) in held {
+                assert_eq!(store.get_substring(sha, 0, bases.len()).unwrap(), *bases);
+            }
+            names
+        };
+        let (kept_bases, failed_bases) = ("ACGTACGTTTTTGGGG", "GGGGAAAATTTTCCCCACGT");
+        for packed in [true, false] {
+            let dir = tempdir().unwrap();
+            let mut s = if packed {
+                RefgetStore::on_disk_packed(dir.path())
+            } else {
+                RefgetStore::on_disk(dir.path())
+            }
+            .unwrap();
+            s.set_quiet(true);
+            let kept = encoded_record("kept", kept_bases.as_bytes());
+            let failed = encoded_record("failed", failed_bases.as_bytes());
+            let mut held = vec![(kept.metadata().sha512t24u.clone(), kept_bases)];
+            s.add_sequence_record(kept, false).unwrap();
+            s.write().unwrap();
+
+            // Make the directory the bytes go into, and its subdirectories,
+            // read-only, so no new file can be created there.
+            let data_dir = dir.path().join(if packed { "packs" } else { "sequences" });
+            fs::create_dir_all(&data_dir).unwrap();
+            let mut dirs = vec![data_dir.clone()];
+            dirs.extend(
+                fs::read_dir(&data_dir)
+                    .unwrap()
+                    .filter_map(|e| e.ok())
+                    .map(|e| e.path())
+                    .filter(|p| p.is_dir()),
+            );
+            let set_mode = |mode: u32| {
+                for d in &dirs {
+                    fs::set_permissions(d, fs::Permissions::from_mode(mode)).unwrap();
+                }
+            };
+            set_mode(0o555);
+            if fs::write(data_dir.join("probe"), b"x").is_ok() {
+                // Permissions are not enforced here (for example, running as root).
+                let _ = fs::remove_file(data_dir.join("probe"));
+                set_mode(0o755);
+                return;
+            }
+            let new_add = s.add_sequence_record(failed.clone(), false);
+            let renamed = encoded_record("renamed", kept_bases.as_bytes());
+            let forced_add = s.add_sequence_record(renamed, true);
+            set_mode(0o755);
+            new_add.expect_err("adding a record whose bytes cannot be written must fail");
+            forced_add.expect_err("a forced re-add whose bytes cannot be written must fail");
+            assert!(s.sequence_metadata().all(|m| m.name != "failed"), "packed={packed}");
+            s.write().unwrap();
+            let names = reads_back(dir.path(), &held);
+            assert_eq!(names[&held[0].0], "kept", "packed={packed}: the failed re-add renamed it");
+
+            s.add_sequence_record(failed, false).unwrap();
+            held.push((sha512t24u(failed_bases.as_bytes()), failed_bases));
+            s.write().unwrap();
+            drop(s);
+            reads_back(dir.path(), &held);
         }
     }
 }

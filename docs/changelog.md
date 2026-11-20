@@ -16,6 +16,11 @@ Component versions: `gtars-refget` 0.12.0, `gtars` Python package 0.12.0, `gtars
 - Add an opt-in block cache for packed-store reads, off by default (`set_pack_cache_mb`; Python and R `set_pack_cache`, CLI `gtars refget export --pack-cache-mb`); it helps clustered reads on a cold network file system
 - A packed import that fails part way leaves the store readable, and two writers on one packed store no longer share temp pack files
 - `compact()` keeps a batch lock the caller already holds; orphan cleanup in `remove_collection` no longer removes sequences that another loaded collection uses
+- `get_substrings` with 16 or more ranges works on a remote packed store
+- A write that fails part way no longer shifts the offsets of later sequences in the same pack
+- A packed import that fails, or a handle dropped before `write()`, deletes the packs it sealed
+- A failed `add_sequence_record` leaves nothing behind, so a later `write()` no longer publishes a sequence whose bytes are not on disk
+- Add `compact_with(CompactOptions { prune_unreferenced: true })`, which also deletes pack files no index lists (such as those a crashed writer left); use it only when no other process writes to the store
 - Stream FASTA export one sequence at a time; exporting all of remote hg38 peaks at about 188 MB and no longer copies sequences into the local cache
 - Add label templates for export headers (`{seq}`, `{seq:NS}`, `{col}`, `{col:NS}`, `{name}`), whole-store export, output to stdout, and a molecule filter
 - Refuse imports that would put more than 500,000 `.seq` files in a standalone store (use the packed layout, or raise `standalone_file_limit`; `force` does not skip it); sequences already in the store don't count
@@ -32,6 +37,7 @@ Component versions: `gtars-refget` 0.12.0, `gtars` Python package 0.12.0, `gtars
 - Replace `export_fasta` and `export_fasta_by_digests` with one streaming `export_fasta(output_path, collections=..., seq_digests=..., all=..., label=..., molecule=...)` (breaking; the default label is the digest, so pass `label="{name}"` for chromosome names)
 - Add `label` to `export_fasta_from_regions`; headers keep sequence names (`>chr1:0-10`) by default
 - Add `RefgetStore.on_disk(path, packed=True)` for the packed layout (alpha), `compact()`, and the `layout` property
+- Add `compact(prune_unreferenced=True)` to also delete pack files no index lists; the result has `packs_pruned`
 - Add `standalone_file_limit` to `add_sequence_collection_from_fasta` and `add_sequence_collections_from_fastas`; `force` does not skip the limit
 - Add `gtars.refget.compare_seqcols`
 - Accept a dict or path-like object for `RegionSet.to_bigbed` chromosome sizes; raise `ValueError` on an unreadable file
@@ -44,6 +50,7 @@ Component versions: `gtars-refget` 0.12.0, `gtars` Python package 0.12.0, `gtars
 
 ### CLI (`gtars-cli`)
 - Add `gtars refget build --packed [--pack-cap BYTES]` (alpha) and `gtars refget compact`, which errors on a path with no store instead of creating one
+- Add `gtars refget compact --prune-unreferenced` to also delete pack files no index lists
 - Add `--standalone-file-limit N` to `gtars refget build`; `--force` does not skip the limit
 - Add `gtars refget verify` to check stored sequences against their digests
 - Stream `gtars refget export` to stdout by default; add `--all`, repeatable `--collection`, `-l/--label` and `--molecule` (for example, `gtars refget export -s store --all | makeblastdb -in - -dbtype nucl`)
@@ -53,7 +60,7 @@ Component versions: `gtars-refget` 0.12.0, `gtars` Python package 0.12.0, `gtars
 - `gtars-uniwig` 0.10.0: bamqc functions take a `min_mapq` argument
 - `gtars-core` 0.5.8: add `try_get_chrom_sizes`, which returns an error instead of panicking
 - `gtars` crate 0.11.0 and `gtars-vrs` 0.7.3: depend on `gtars-refget` 0.12
-- R `gtars` 0.11.0: add `verify_store()`, `refget_store_on_disk(path, packed = TRUE)` (alpha), `compact()`, and `standalone_file_limit` on `add_fasta()`; replace `export_fasta_by_digests_store` with `export_fasta(label = ...)`; `get_seqs_bed_file` takes `label` and keeps name headers by default
+- R `gtars` 0.11.0: add `verify_store()`, `refget_store_on_disk(path, packed = TRUE)` (alpha), `compact(store, prune_unreferenced = FALSE)`, and `standalone_file_limit` on `add_fasta()`; replace `export_fasta_by_digests_store` with `export_fasta(label = ...)`; `get_seqs_bed_file` takes `label` and keeps name headers by default
 
 ## [0.11.2] -- 2026-11-03
 

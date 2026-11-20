@@ -1138,14 +1138,19 @@ impl ReadonlyRefgetStore {
         // Seal the session pack and stage a sidecar row for every new sequence
         // in a sealed pack. This runs before the error returns below: a
         // collection that finalized stays staged after a later file fails, and
-        // a later commit on this handle must publish its pack rows with it. A
-        // failed append can leave a partial write in the open pack, so after a
-        // write error that pack is dropped, temp file and all, instead of
-        // sealed. The rows of a pack that was not sealed point at bytes that
-        // are not on disk; their keys are kept so the error path can drop the
-        // sequence and every collection using it.
+        // a later commit on this handle must publish its pack rows with it.
+        // After a write error the open pack is dropped, temp file and all,
+        // instead of sealed: the failed sequence's bytes are not in it, and a
+        // failed import does not seal a partial pack. The rows of a pack that
+        // was not sealed point at bytes that are not on disk; their keys are
+        // kept so the error path can drop the sequence and every collection
+        // using it.
         let mut unwritten: HashSet<DigestKey> = HashSet::new();
         let mut seal_err: Option<anyhow::Error> = None;
+        // Packs the session created. Taken out of the session so dropping it
+        // does not delete them: on success their staged rows go to the next
+        // commit, and the error path deletes those no staged row uses.
+        let mut created: Vec<String> = Vec::new();
         let session = self.open_session_pack.get_mut().unwrap().take();
         if let Some(mut session) = session {
             let not_sealed = if write_err.lock().unwrap().is_some() {
@@ -1163,6 +1168,7 @@ impl ReadonlyRefgetStore {
             for (digest, row) in session.sealed.drain(..) {
                 pending.pack_rows.insert(digest.to_key(), row);
             }
+            created = std::mem::take(&mut session.created);
         }
         if !packed
             && writer_disk_backed
@@ -1186,12 +1192,28 @@ impl ReadonlyRefgetStore {
         // Helper: clean up orphan sequences on any failure path. Sequences of a
         // file that never finalized, and sequences whose bytes never reached
         // disk (with the collections that use them), are dropped along with
-        // their staged pack rows and aliases.
+        // their staged pack rows and aliases. Then each pack this import
+        // created that no staged row uses any more is deleted. Such a pack
+        // cannot be in the on-disk index yet (nothing was committed), so the
+        // staged rows are this handle's only references to it; see
+        // `remove_uncommitted_packs` for the risk from other writers.
+        let packs_dir = self.local_path.as_ref().map(|p| p.join("packs"));
         let cleanup_on_err = |store: &mut ReadonlyRefgetStore| {
             if !unwritten.is_empty() {
                 store.forget_collections_using(&unwritten);
             }
             store.remove_orphan_seq_files();
+            if let Some(packs_dir) = &packs_dir {
+                let still_staged: HashSet<String> = store
+                    .pending
+                    .lock()
+                    .unwrap()
+                    .pack_rows
+                    .values()
+                    .map(|r| r.pack.to_string())
+                    .collect();
+                super::readonly::remove_uncommitted_packs(packs_dir, &created, &still_staged);
+            }
         };
 
         // Surface scope errors (e.g. feeder/writer panics), then builder/writer errors.

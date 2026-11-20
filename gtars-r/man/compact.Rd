@@ -4,13 +4,19 @@
 \alias{compact}
 \title{Reclaim dead bytes in a packed store (alpha).}
 \usage{
-compact(store)
+compact(store, prune_unreferenced = FALSE)
 }
 \arguments{
 \item{store}{A RefgetStore object created with \code{packed = TRUE}}
+
+\item{prune_unreferenced}{Also delete pack files that no index entry points
+to, such as packs left by a crashed writer. Only use this when no other
+process is writing to the store: a pack another writer has sealed but not
+committed yet is deleted too.}
 }
 \value{
-A named list: packs_before, packs_after, bytes_reclaimed
+A named list: packs_before, packs_after, bytes_reclaimed,
+packs_pruned (pack files deleted by \code{prune_unreferenced})
 }
 \description{
 Removing collections leaves their bytes inside pack files. This rewrites

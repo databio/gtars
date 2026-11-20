@@ -581,15 +581,22 @@ class RefgetStore:
         """
         ...
 
-    def compact(self) -> Dict[str, int]:
+    def compact(self, prune_unreferenced: bool = False) -> Dict[str, int]:
         """Reclaim dead bytes in a packed store (alpha).
 
         Removing collections leaves their bytes inside pack files. This
         rewrites the live sequences into fresh packs and deletes the old ones.
         Reads return the same bases before and after.
 
+        Args:
+            prune_unreferenced: Also delete pack files that no index entry
+                points to, such as packs left by a crashed writer. Only use
+                this when no other process is writing to the store: a pack
+                another writer has sealed but not committed yet is deleted too.
+
         Returns:
-            Dict with ``packs_before``, ``packs_after`` and ``bytes_reclaimed``.
+            Dict with ``packs_before``, ``packs_after``, ``bytes_reclaimed``
+            and ``packs_pruned`` (pack files deleted by ``prune_unreferenced``).
 
         Raises:
             IOError: If the store is not a packed disk-backed store, or the

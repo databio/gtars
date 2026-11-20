@@ -33,10 +33,38 @@ def test_packed_store_roundtrip(tmp_path):
         assert reopened.get_substring(meta.sha512t24u, 0, meta.length) == bases
 
     report = reopened.compact()
-    assert set(report) == {"packs_before", "packs_after", "bytes_reclaimed"}
+    assert set(report) == {"packs_before", "packs_after", "bytes_reclaimed", "packs_pruned"}
+    assert report["packs_pruned"] == 0
     for name, bases in SEQS.items():
         meta = by_name[name]
         assert reopened.get_substring(meta.sha512t24u, 0, meta.length) == bases
+
+
+def test_compact_prune_unreferenced(tmp_path):
+    fasta = tmp_path / "in.fa"
+    fasta.write_text("".join(f">{n}\n{s}\n" for n, s in SEQS.items()))
+    store_dir = tmp_path / "store"
+    store = RefgetStore.on_disk(store_dir, packed=True)
+    store.set_quiet(True)
+    store.add_sequence_collection_from_fasta(fasta)
+    del store
+
+    packs = list((store_dir / "packs").glob("*.pack"))
+    assert len(packs) == 1
+    unlisted = store_dir / "packs" / "0123456789abcdef0123456789abcdef.pack"
+    unlisted.write_bytes(packs[0].read_bytes())
+
+    store = RefgetStore.open_local(store_dir)
+    assert store.compact()["packs_pruned"] == 0
+    assert unlisted.exists(), "compact() must keep a pack no index lists"
+
+    report = store.compact(prune_unreferenced=True)
+    assert report["packs_pruned"] == 1
+    assert not unlisted.exists()
+    by_name = {m.name: m for m in store.list_sequences()}
+    for name, bases in SEQS.items():
+        meta = by_name[name]
+        assert store.get_substring(meta.sha512t24u, 0, meta.length) == bases
 
 
 def test_set_pack_cache_reads_the_same_bases(tmp_path):

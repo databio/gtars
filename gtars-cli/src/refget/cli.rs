@@ -121,6 +121,12 @@ pub fn create_refget_cli() -> Command {
                     Arg::new("store")
                         .required(true)
                         .help("Path to an existing packed RefgetStore directory"),
+                )
+                .arg(
+                    Arg::new("prune_unreferenced")
+                        .long("prune-unreferenced")
+                        .action(ArgAction::SetTrue)
+                        .help("Also delete pack files no index entry points to. Only use when no other process is writing to the store."),
                 ),
         )
         .subcommand(

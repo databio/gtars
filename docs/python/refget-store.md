@@ -61,8 +61,13 @@ store.add_sequence_collection_from_fasta("genome.fa")
 print(store.layout)  # "packed"
 
 # Removing collections leaves dead bytes in the packs; compact() reclaims them
-store.compact()  # {"packs_before": ..., "packs_after": ..., "bytes_reclaimed": ...}
+store.compact()  # {"packs_before": ..., "packs_after": ..., "bytes_reclaimed": ..., "packs_pruned": 0}
 ```
+
+`store.compact(prune_unreferenced=True)` also deletes pack files that no index
+entry points to, such as packs left by a writer that crashed. Use it only when
+no other process is writing to the store: a pack another writer has sealed but
+not yet committed looks the same, and would be deleted too.
 
 A store's layout is fixed when it is created. Opening an existing standard
 store with `packed=True` raises an error; `open_local` opens either kind.
