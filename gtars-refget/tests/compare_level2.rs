@@ -96,6 +96,12 @@ fn unbalanced_duplicates_have_null_order() {
     let r = compare_level2_json(&a, &c, None, None).unwrap();
     assert_eq!(r.array_elements.a_and_b_count["lengths"], 3);
     assert_eq!(r.array_elements.a_and_b_same_order["lengths"], Some(false));
+
+    // Equal lengths but different counts per element are still unbalanced.
+    let d = json!({"lengths": [4, 8, 8]});
+    let r = compare_level2_json(&a, &d, None, None).unwrap();
+    assert_eq!(r.array_elements.a_and_b_count["lengths"], 3);
+    assert_eq!(r.array_elements.a_and_b_same_order["lengths"], None);
 }
 
 #[test]

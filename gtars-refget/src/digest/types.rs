@@ -792,8 +792,9 @@ impl SequenceCollection {
 /// Port of Python `_compare_elements()`:
 /// - Filter A to elements present in B, filter B to elements present in A
 /// - overlap = min of filtered lengths
-/// - same_order: None if fewer than 2 overlapping elements or unbalanced duplicates,
-///   otherwise filtered_a == filtered_b
+/// - same_order: None if fewer than 2 overlapping elements or unbalanced duplicates
+///   (the filtered arrays hold different counts of some element), otherwise
+///   filtered_a == filtered_b
 fn compare_elements(a: &[String], b: &[String]) -> (usize, Option<bool>) {
     use std::collections::HashSet;
 
@@ -806,10 +807,18 @@ fn compare_elements(a: &[String], b: &[String]) -> (usize, Option<bool>) {
 
     let overlap = filtered_a.len().min(filtered_b.len());
 
+    fn counts<'a>(v: &[&'a str]) -> HashMap<&'a str, usize> {
+        let mut m = HashMap::new();
+        for x in v {
+            *m.entry(*x).or_insert(0) += 1;
+        }
+        m
+    }
+
     let same_order = if overlap < 2 {
         None
-    } else if filtered_a.len() != filtered_b.len() || filtered_a.len() != overlap {
-        // Unbalanced duplicates
+    } else if counts(&filtered_a) != counts(&filtered_b) {
+        // Unbalanced duplicates (also catches equal lengths, e.g. [8,4,4] vs [4,8,8])
         None
     } else {
         Some(filtered_a == filtered_b)
@@ -1161,6 +1170,17 @@ pub fn parse_rgci_line(line: &str) -> Option<SequenceCollectionMetadata> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_compare_elements_unbalanced_duplicates() {
+        let v = |xs: &[&str]| xs.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(compare_elements(&v(&["8", "4", "4"]), &v(&["4", "8", "8"])), (3, None));
+        assert_eq!(compare_elements(&v(&["a", "a", "b"]), &v(&["a", "b", "b"])), (3, None));
+        assert_eq!(compare_elements(&v(&["a", "b", "a"]), &v(&["a", "b", "a"])), (3, Some(true)));
+        assert_eq!(compare_elements(&v(&["a", "b"]), &v(&["b", "a"])), (2, Some(false)));
+        // Fewer than 2 overlapping elements stays undefined
+        assert_eq!(compare_elements(&v(&["a", "x"]), &v(&["a", "y"])), (1, None));
+    }
 
     fn test_metadata() -> Vec<SequenceMetadata> {
         vec![
