@@ -2,9 +2,12 @@
 % Please edit documentation in R/refget.R
 \name{load_collections}
 \alias{load_collections}
+\alias{load_collections,RefgetStore-method}
 \title{Load several collections; a remote store downloads the missing files in parallel.}
 \usage{
 load_collections(store, digests)
+
+\S4method{load_collections}{RefgetStore}(store, digests)
 }
 \arguments{
 \item{store}{A RefgetStore.}

@@ -15,8 +15,9 @@
 \arguments{
 \item{x}{A RegionSet, GRanges, file path, or data.frame}
 
-\item{...}{Must include \code{chromSizes}: a named integer vector of
-chromosome sizes}
+\item{chromSizes}{A named integer vector of chromosome sizes}
+
+\item{...}{ignored}
 }
 \value{
 A RegionSet with trimmed regions

@@ -2,9 +2,18 @@
 % Please edit documentation in R/refget.R
 \name{get_seqs_bed_file}
 \alias{get_seqs_bed_file}
+\alias{get_seqs_bed_file,RefgetStore-method}
 \title{Export BED regions from a collection as FASTA.}
 \usage{
 get_seqs_bed_file(
+  store,
+  collection_digest,
+  bed_file_path,
+  output_file_path,
+  label = "{name}"
+)
+
+\S4method{get_seqs_bed_file}{RefgetStore}(
   store,
   collection_digest,
   bed_file_path,
@@ -21,7 +30,7 @@ get_seqs_bed_file(
 
 \item{output_file_path}{Output FASTA path, or "-" for stdout}
 
-\item{label}{Label template (default "{name}"); "{seq}" labels regions by
+\item{label}{Label template (default \code{"{name}"}); \code{"{seq}"} labels regions by
 sequence digest}
 }
 \value{

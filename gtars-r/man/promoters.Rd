@@ -19,6 +19,8 @@
 
 \item{downstream}{Bases downstream of start (default 200)}
 
+\item{use.names}{ignored}
+
 \item{...}{ignored}
 }
 \value{

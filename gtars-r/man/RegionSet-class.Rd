@@ -3,6 +3,8 @@
 \docType{class}
 \name{RegionSet-class}
 \alias{RegionSet-class}
+\alias{show,RegionSet-method}
+\alias{length,RegionSet-method}
 \alias{as.data.frame,RegionSet-method}
 \alias{[,RegionSet,ANY,ANY-method}
 \alias{union,RegionSet,RegionSet-method}
@@ -16,6 +18,10 @@
 \alias{setdiff,ANY,RegionSet-method}
 \title{RegionSet class}
 \usage{
+\S4method{show}{RegionSet}(object)
+
+\S4method{length}{RegionSet}(x)
+
 \S4method{as.data.frame}{RegionSet}(x, row.names = NULL, optional = FALSE, ...)
 
 \S4method{[}{RegionSet,ANY,ANY}(x, i, j, ..., drop = TRUE)
@@ -39,7 +45,11 @@
 \S4method{setdiff}{ANY,RegionSet}(x, y)
 }
 \arguments{
+\item{object}{A RegionSet}
+
 \item{x}{A RegionSet}
+
+\item{row.names, optional}{ignored}
 
 \item{...}{ignored}
 
@@ -48,6 +58,9 @@
 \item{j}{ignored}
 
 \item{drop}{ignored}
+
+\item{y}{A RegionSet, GRanges, file path, or data.frame (for
+\code{union}, \code{intersect} and \code{setdiff})}
 }
 \value{
 A RegionSet with selected regions

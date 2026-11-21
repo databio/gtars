@@ -2,9 +2,23 @@
 % Please edit documentation in R/refget.R
 \name{export_fasta}
 \alias{export_fasta}
+\alias{export_fasta,RefgetStore-method}
 \title{Export sequences as FASTA, to a file or to stdout.}
 \usage{
 export_fasta(
+  store,
+  output_path,
+  collections = NULL,
+  names = NULL,
+  seq_digests = NULL,
+  all = FALSE,
+  label = "{seq}",
+  molecule = NULL,
+  line_width = 80L,
+  write_cache = FALSE
+)
+
+\S4method{export_fasta}{RefgetStore}(
   store,
   output_path,
   collections = NULL,
@@ -30,7 +44,7 @@ export_fasta(
 
 \item{all}{Export every collection plus sequences in no collection}
 
-\item{label}{Label template (default "{seq}")}
+\item{label}{Label template (default \code{"{seq}"})}
 
 \item{molecule}{NULL, "dna" or "protein"}
 

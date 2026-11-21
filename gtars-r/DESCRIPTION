@@ -8,7 +8,7 @@ Description: Performance-critical tools to manipulate, analyze, and process geno
 License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
-Imports: methods, BiocGenerics, IRanges, data.table
+Imports: methods, utils, BiocGenerics, IRanges, data.table
 Suggests: GenomicRanges, jsonlite, sys, testthat (>= 3.0.0)
 Config/rextendr/version: 0.5.0
 SystemRequirements: Cargo (Rust's package manager), rustc

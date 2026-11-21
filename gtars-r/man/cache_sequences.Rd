@@ -2,9 +2,12 @@
 % Please edit documentation in R/refget.R
 \name{cache_sequences}
 \alias{cache_sequences}
+\alias{cache_sequences,RefgetStore-method}
 \title{Download sequences into the shared cache, in parallel, without loading them.}
 \usage{
 cache_sequences(store, digests, progress = TRUE)
+
+\S4method{cache_sequences}{RefgetStore}(store, digests, progress = TRUE)
 }
 \arguments{
 \item{store}{A RefgetStore.}

@@ -15,6 +15,8 @@
 \arguments{
 \item{x}{A RegionSet, GRanges, file path, or data.frame}
 
+\item{drop.empty.ranges}{ignored}
+
 \item{...}{ignored}
 }
 \value{

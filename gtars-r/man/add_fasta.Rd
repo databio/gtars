@@ -2,9 +2,12 @@
 % Please edit documentation in R/refget.R
 \name{add_fasta}
 \alias{add_fasta}
+\alias{add_fasta,RefgetStore-method}
 \title{Add a FASTA file to a store.}
 \usage{
 add_fasta(store, file_path, force = FALSE, standalone_file_limit = NULL)
+
+\S4method{add_fasta}{RefgetStore}(store, file_path, force = FALSE, standalone_file_limit = NULL)
 }
 \arguments{
 \item{store}{A RefgetStore object}

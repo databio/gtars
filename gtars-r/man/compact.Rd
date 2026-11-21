@@ -2,9 +2,12 @@
 % Please edit documentation in R/refget.R
 \name{compact}
 \alias{compact}
+\alias{compact,RefgetStore-method}
 \title{Reclaim dead bytes in a packed store (alpha).}
 \usage{
 compact(store, prune_unreferenced = FALSE)
+
+\S4method{compact}{RefgetStore}(store, prune_unreferenced = FALSE)
 }
 \arguments{
 \item{store}{A RefgetStore object created with \code{packed = TRUE}}

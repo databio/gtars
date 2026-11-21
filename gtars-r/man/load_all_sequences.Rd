@@ -2,9 +2,12 @@
 % Please edit documentation in R/refget.R
 \name{load_all_sequences}
 \alias{load_all_sequences}
+\alias{load_all_sequences,RefgetStore-method}
 \title{Download and cache every sequence in the store (flow 3, in bulk).}
 \usage{
 load_all_sequences(store)
+
+\S4method{load_all_sequences}{RefgetStore}(store)
 }
 \arguments{
 \item{store}{A RefgetStore.}

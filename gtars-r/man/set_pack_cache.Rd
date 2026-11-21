@@ -2,9 +2,12 @@
 % Please edit documentation in R/refget.R
 \name{set_pack_cache}
 \alias{set_pack_cache}
+\alias{set_pack_cache,RefgetStore-method}
 \title{Turn the pack block cache on or off (alpha).}
 \usage{
 set_pack_cache(store, megabytes)
+
+\S4method{set_pack_cache}{RefgetStore}(store, megabytes)
 }
 \arguments{
 \item{store}{A RefgetStore object}

@@ -2,9 +2,12 @@
 % Please edit documentation in R/refget.R
 \name{get_seqs_from_regions}
 \alias{get_seqs_from_regions}
+\alias{get_seqs_from_regions,RefgetStore-method}
 \title{Extract sequences for regions given as parallel vectors (flat structure-of-arrays).}
 \usage{
 get_seqs_from_regions(store, collection_digest, chroms, starts, ends)
+
+\S4method{get_seqs_from_regions}{RefgetStore}(store, collection_digest, chroms, starts, ends)
 }
 \arguments{
 \item{store}{A RefgetStore object}

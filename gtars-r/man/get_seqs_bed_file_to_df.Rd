@@ -2,9 +2,12 @@
 % Please edit documentation in R/refget.R
 \name{get_seqs_bed_file_to_df}
 \alias{get_seqs_bed_file_to_df}
+\alias{get_seqs_bed_file_to_df,RefgetStore-method}
 \title{Extract BED file sequences as a data.frame (flat structure-of-arrays).}
 \usage{
 get_seqs_bed_file_to_df(store, collection_digest, bed_file_path)
+
+\S4method{get_seqs_bed_file_to_df}{RefgetStore}(store, collection_digest, bed_file_path)
 }
 \arguments{
 \item{store}{A RefgetStore object}

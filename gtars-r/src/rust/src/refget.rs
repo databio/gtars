@@ -272,7 +272,6 @@ pub fn get_remote_url_store(store_ptr: Robj) -> extendr_api::Result<Robj> {
 /// Import FASTA file into store
 /// @param store_ptr External pointer to RefgetStore
 /// @param file_path Path to FASTA file
-/// @param force Whether to overwrite existing sequences/collections
 #[extendr]
 pub fn import_fasta_store(store_ptr: Robj, file_path: &str) -> extendr_api::Result<()> {
     with_store!(store_ptr, store, {
@@ -591,8 +590,7 @@ pub fn iter_sequences_store(store_ptr: Robj) -> extendr_api::Result<Robj> {
 /// @return A list with n_checked, n_ok, n_failed, and failures (a data.frame
 ///   with columns digest, name, alphabet, length, kind,
 ///   computed_sha512t24u, stored_md5, computed_md5, error).
-/// @export
-#[extendr]
+#[extendr(r_name = "verify_store_raw")]
 pub fn verify_store(
     store_ptr: Robj,
     digests: Nullable<Vec<String>>,
@@ -906,7 +904,7 @@ pub fn write_store_to_directory_store(
 
 /// Write store using configured paths
 /// @param store_ptr External pointer to RefgetStore
-#[extendr]
+#[extendr(r_name = "write_store_raw")]
 pub fn write_store(store_ptr: Robj) -> extendr_api::Result<()> {
     with_store_ref!(store_ptr, store, {
         store
@@ -1050,7 +1048,7 @@ pub fn clear_cache_raw(root: &str) -> extendr_api::Result<f64> {
 /// @param names Sequence names to keep in each collection (NULL for all)
 /// @param seq_digests Sequence digests (NULL unless selecting by digest)
 /// @param all Export every collection plus sequences in no collection
-/// @param label Label template, e.g. "{seq}", "{name}", "{col}/{name}"
+/// @param label Label template, e.g. `"{seq}"`, `"{name}"`, `"{col}/{name}"`
 /// @param molecule NULL, "dna" or "protein"
 /// @param line_width Bases per line (0 = unwrapped, negative = default 80)
 /// @param write_cache Write sequences downloaded from a remote store to the shared cache

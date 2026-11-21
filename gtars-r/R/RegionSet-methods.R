@@ -108,6 +108,8 @@ setMethod("chromosomeStatistics", "ANY", function(x, ...) {
 #'   GenomicDistributions::plotChromBins.
 #' @param x A RegionSet, GRanges, file path, or data.frame
 #' @param nBins Number of bins (default 250)
+#' @param chromSizes Optional named numeric vector of chromosome sizes. When
+#'   given, bins span each whole chromosome; otherwise they span the regions.
 #' @param ... ignored
 #' @return A data.table compatible with plotChromBins
 #' @export
@@ -173,8 +175,8 @@ setMethod("clusterRegions", "ANY", function(x, maxGap = 0L, ...) {
 #' @description Clips regions to fit within chromosome boundaries. Regions
 #'   on unknown chromosomes are dropped.
 #' @param x A RegionSet, GRanges, file path, or data.frame
-#' @param ... Must include \code{chromSizes}: a named integer vector of
-#'   chromosome sizes
+#' @param chromSizes A named integer vector of chromosome sizes
+#' @param ... ignored
 #' @return A RegionSet with trimmed regions
 #' @rdname trim
 #' @export
@@ -199,6 +201,7 @@ setMethod("trim", "data.frame", function(x, chromSizes, ...) {
 #' Merge overlapping and adjacent intervals
 #'
 #' @param x A RegionSet, GRanges, file path, or data.frame
+#' @param drop.empty.ranges ignored
 #' @param ... ignored
 #' @return A RegionSet with merged regions
 #' @rdname reduce
@@ -224,6 +227,7 @@ setMethod("reduce", "data.frame", function(x, ...) {
 #' @param x A RegionSet, GRanges, file path, or data.frame
 #' @param upstream Bases upstream of start (default 2000)
 #' @param downstream Bases downstream of start (default 200)
+#' @param use.names ignored
 #' @param ... ignored
 #' @return A RegionSet with promoter regions
 #' @rdname promoters
@@ -286,6 +290,7 @@ setMethod("shift", "data.frame", function(x, shift = 0L,
 #' @param start If TRUE (default), flank upstream of start; if FALSE,
 #'   flank downstream of end
 #' @param both If TRUE, flank on both sides
+#' @param use.names ignored
 #' @param ... ignored
 #' @return A RegionSet with flanking regions
 #' @rdname flank
@@ -321,6 +326,7 @@ setMethod("flank", "data.frame", function(x, width,
 #' @param x A RegionSet, GRanges, file path, or data.frame
 #' @param width New width in base pairs
 #' @param fix Anchor point: "start" (default), "end", or "center"
+#' @param use.names ignored
 #' @param ... ignored
 #' @return A RegionSet with resized regions
 #' @rdname resize
@@ -448,6 +454,8 @@ setMethod("gaps", "data.frame", function(x, start = NA, end = NA, chrom_sizes = 
 # BiocGenerics methods: binary (merge ops — strand lost)
 # =========================================================================
 
+#' @param y A RegionSet, GRanges, file path, or data.frame (for
+#'   \code{union}, \code{intersect} and \code{setdiff})
 #' @rdname RegionSet-class
 #' @export
 setMethod("union", c("RegionSet", "RegionSet"), function(x, y) {
@@ -510,11 +518,13 @@ setMethod("setdiff", c("ANY", "RegionSet"), function(x, y) {
 #'
 #' @param x A RegionSet, GRanges, file path, or data.frame
 #' @param y A RegionSet, GRanges, file path, or data.frame
+#' @param ... ignored
 #' @return A RegionSet with pairwise intersections
 #' @export
 setGeneric("pintersect", function(x, y, ...) standardGeneric("pintersect"))
 
 #' @rdname pintersect
+#' @aliases pintersect,ANY-method
 #' @export
 setMethod("pintersect", c("ANY", "ANY"), function(x, y, ...) {
   x <- RegionSet(x)

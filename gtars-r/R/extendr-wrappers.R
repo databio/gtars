@@ -58,6 +58,9 @@ r_chromosome_statistics <- function(rs_ptr) .Call(wrap__r_chromosome_statistics,
 #' @export
 #' @param rs_ptr External pointer to a RegionSet
 #' @param n_bins Number of bins (default 250)
+#' @param chrom_names Chromosome names for the bin layout, or NULL to use the
+#'   chromosomes and extents present in the regions
+#' @param chrom_lengths Chromosome lengths matching \code{chrom_names}, or NULL
 r_region_distribution <- function(rs_ptr, n_bins, chrom_names, chrom_lengths) .Call(wrap__r_region_distribution, rs_ptr, n_bins, chrom_names, chrom_lengths)
 
 #' Cluster nearby regions via single-linkage with a stitching radius.
@@ -301,7 +304,7 @@ r_calc_expected_partitions <- function(rs_ptr, partition_ptr, chrom_names, chrom
 #' @param values_flat Numeric vector of signal values (row-major, length = n_regions * n_conditions)
 #' @param n_regions Number of signal regions
 #' @param n_conditions Number of conditions
-r_calc_summary_signal <- function(rs_ptr, signal_region_ids, condition_names, values_flat, `_n_regions`, n_conditions) .Call(wrap__r_calc_summary_signal, rs_ptr, signal_region_ids, condition_names, values_flat, `_n_regions`, n_conditions)
+r_calc_summary_signal <- function(rs_ptr, signal_region_ids, condition_names, values_flat, n_regions, n_conditions) .Call(wrap__r_calc_summary_signal, rs_ptr, signal_region_ids, condition_names, values_flat, n_regions, n_conditions)
 
 #' Calculate absolute distance from each query region to nearest feature midpoint.
 #' Returns NA for regions on chromosomes without features.
@@ -610,7 +613,6 @@ get_remote_url_store <- function(store_ptr) .Call(wrap__get_remote_url_store, st
 #' Import FASTA file into store
 #' @param store_ptr External pointer to RefgetStore
 #' @param file_path Path to FASTA file
-#' @param force Whether to overwrite existing sequences/collections
 import_fasta_store <- function(store_ptr, file_path) .Call(wrap__import_fasta_store, store_ptr, file_path)
 
 #' Add a FASTA file with force option
@@ -723,8 +725,7 @@ stats_store <- function(store_ptr) .Call(wrap__stats_store, store_ptr)
 #' @return A list with n_checked, n_ok, n_failed, and failures (a data.frame
 #'   with columns digest, name, alphabet, length, kind,
 #'   computed_sha512t24u, stored_md5, computed_md5, error).
-#' @export
-verify_store <- function(store_ptr, digests, jobs, check_md5) .Call(wrap__verify_store, store_ptr, digests, jobs, check_md5)
+verify_store_raw <- function(store_ptr, digests, jobs, check_md5) .Call(wrap__verify_store, store_ptr, digests, jobs, check_md5)
 
 #' Get level 1 representation (attribute digests) for a collection
 #' @param store_ptr External pointer to RefgetStore
@@ -786,7 +787,7 @@ write_store_to_directory_store <- function(store_ptr, root_path, seqdata_path_te
 
 #' Write store using configured paths
 #' @param store_ptr External pointer to RefgetStore
-write_store <- function(store_ptr) .Call(wrap__write_store, store_ptr)
+write_store_raw <- function(store_ptr) .Call(wrap__write_store, store_ptr)
 
 #' Reclaim dead bytes in a packed store
 #' @param store_ptr External pointer to RefgetStore
@@ -805,7 +806,7 @@ set_pack_cache_store <- function(store_ptr, megabytes) .Call(wrap__set_pack_cach
 #' @param names Sequence names to keep in each collection (NULL for all)
 #' @param seq_digests Sequence digests (NULL unless selecting by digest)
 #' @param all Export every collection plus sequences in no collection
-#' @param label Label template, e.g. "{seq}", "{name}", "{col}/{name}"
+#' @param label Label template, e.g. `"{seq}"`, `"{name}"`, `"{col}/{name}"`
 #' @param molecule NULL, "dna" or "protein"
 #' @param line_width Bases per line (0 = unwrapped, negative = default 80)
 #' @param write_cache Write sequences downloaded from a remote store to the shared cache

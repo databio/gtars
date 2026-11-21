@@ -19,6 +19,8 @@
 
 \item{fix}{Anchor point: "start" (default), "end", or "center"}
 
+\item{use.names}{ignored}
+
 \item{...}{ignored}
 }
 \value{

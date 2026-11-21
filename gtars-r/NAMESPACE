@@ -263,4 +263,5 @@ importFrom(methods,
   setMethod,
   show
 )
+importFrom(utils,capture.output)
 useDynLib(gtars, .registration = TRUE)

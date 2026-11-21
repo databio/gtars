@@ -2,9 +2,12 @@
 % Please edit documentation in R/refget.R
 \name{load_sequence}
 \alias{load_sequence}
+\alias{load_sequence,RefgetStore-method}
 \title{Download and cache a single sequence's whole byte data (flow 3).}
 \usage{
 load_sequence(store, digest)
+
+\S4method{load_sequence}{RefgetStore}(store, digest)
 }
 \arguments{
 \item{store}{A RefgetStore.}

@@ -252,6 +252,9 @@ pub fn r_cluster(rs_ptr: Robj, max_gap: i32) -> extendr_api::Result<Vec<f64>> {
 /// @export
 /// @param rs_ptr External pointer to a RegionSet
 /// @param n_bins Number of bins (default 250)
+/// @param chrom_names Chromosome names for the bin layout, or NULL to use the
+///   chromosomes and extents present in the regions
+/// @param chrom_lengths Chromosome lengths matching \code{chrom_names}, or NULL
 #[extendr(r_name = "r_region_distribution")]
 pub fn r_region_distribution(rs_ptr: Robj, n_bins: i32, chrom_names: Robj, chrom_lengths: Robj) -> extendr_api::Result<List> {
     let n_bins_u32 = checked_u32(n_bins, "n_bins")?;
@@ -1033,9 +1036,11 @@ pub fn r_calc_summary_signal(
     signal_region_ids: Vec<String>,
     condition_names: Vec<String>,
     values_flat: Vec<f64>,
-    _n_regions: i32,
+    n_regions: i32,
     n_conditions: i32,
 ) -> extendr_api::Result<List> {
+    // The region count is implied by signal_region_ids; kept for the R API.
+    let _ = n_regions;
     with_regionset!(rs_ptr, rs, {
         let n_cond = n_conditions as usize;
 

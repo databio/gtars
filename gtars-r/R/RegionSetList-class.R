@@ -52,6 +52,8 @@ RegionSetList <- function(...) {
 # Basic S4 methods
 # =========================================================================
 
+#' @param object,x A RegionSetList
+#' @rdname RegionSetList-class
 #' @export
 setMethod("show", "RegionSetList", function(object) {
   n <- regionsetlist_length(object@ptr)
@@ -68,17 +70,22 @@ setMethod("show", "RegionSetList", function(object) {
   if (n > 5L) cat(sprintf("  ... and %d more\n", n - 5L))
 })
 
+#' @rdname RegionSetList-class
 #' @export
 setMethod("length", "RegionSetList", function(x) {
   regionsetlist_length(x@ptr)
 })
 
+#' @param i Index of the RegionSet to return
+#' @param j,... ignored
+#' @rdname RegionSetList-class
 #' @export
 setMethod("[[", "RegionSetList", function(x, i, j, ...) {
   ptr <- regionsetlist_get(x@ptr, as.integer(i))
   .rs_from_ptr(ptr)
 })
 
+#' @rdname RegionSetList-class
 #' @export
 setMethod("names", "RegionSetList", function(x) {
   regionsetlist_names(x@ptr)

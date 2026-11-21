@@ -2,9 +2,12 @@
 % Please edit documentation in R/refget.R
 \name{refget_store_open_local}
 \alias{refget_store_open_local}
+\alias{load_from_directory}
 \title{Open a local RefgetStore}
 \usage{
 refget_store_open_local(path)
+
+load_from_directory(path)
 }
 \arguments{
 \item{path}{Path to the RefgetStore directory}

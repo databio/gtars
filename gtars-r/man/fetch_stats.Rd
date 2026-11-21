@@ -2,9 +2,12 @@
 % Please edit documentation in R/refget.R
 \name{fetch_stats}
 \alias{fetch_stats}
+\alias{fetch_stats,RefgetStore-method}
 \title{Network and cache counters since the store opened (zeros for a local store).}
 \usage{
 fetch_stats(store)
+
+\S4method{fetch_stats}{RefgetStore}(store)
 }
 \arguments{
 \item{store}{A RefgetStore.}

@@ -10,6 +10,9 @@ regionDistribution(query, nBins = 250L, chromSizes = NULL)
 \item{query}{A GRanges object, file path, data.frame, or RegionSet}
 
 \item{nBins}{Number of bins (default 250)}
+
+\item{chromSizes}{Optional named numeric vector of chromosome sizes (see
+\code{\link{distribution}})}
 }
 \value{
 A data.table compatible with plotChromBins

@@ -3,6 +3,7 @@
 \name{pintersect}
 \alias{pintersect}
 \alias{pintersect,ANY,ANY-method}
+\alias{pintersect,ANY-method}
 \title{Pairwise intersection by position}
 \usage{
 pintersect(x, y, ...)
@@ -13,6 +14,8 @@ pintersect(x, y, ...)
 \item{x}{A RegionSet, GRanges, file path, or data.frame}
 
 \item{y}{A RegionSet, GRanges, file path, or data.frame}
+
+\item{...}{ignored}
 }
 \value{
 A RegionSet with pairwise intersections

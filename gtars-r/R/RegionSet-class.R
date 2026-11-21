@@ -83,6 +83,8 @@ RegionSet <- function(x) {
 # Basic S4 methods
 # =========================================================================
 
+#' @param object A RegionSet
+#' @rdname RegionSet-class
 #' @export
 setMethod("show", "RegionSet", function(object) {
   n <- .Call(wrap__r_regionset_length, .ptr(object))
@@ -105,11 +107,13 @@ setMethod("show", "RegionSet", function(object) {
   if (n > 5L) cat(sprintf("  ... and %d more regions\n", n - 5L))
 })
 
+#' @rdname RegionSet-class
 #' @export
 setMethod("length", "RegionSet", function(x) {
   .Call(wrap__r_regionset_length, .ptr(x))
 })
 
+#' @param row.names,optional ignored
 #' @rdname RegionSet-class
 #' @export
 setMethod("as.data.frame", "RegionSet", function(x, ...) {

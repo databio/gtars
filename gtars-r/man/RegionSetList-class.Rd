@@ -3,7 +3,27 @@
 \docType{class}
 \name{RegionSetList-class}
 \alias{RegionSetList-class}
+\alias{show,RegionSetList-method}
+\alias{length,RegionSetList-method}
+\alias{[[,RegionSetList-method}
+\alias{names,RegionSetList-method}
 \title{RegionSetList class}
+\usage{
+\S4method{show}{RegionSetList}(object)
+
+\S4method{length}{RegionSetList}(x)
+
+\S4method{[[}{RegionSetList}(x, i, j, ...)
+
+\S4method{names}{RegionSetList}(x)
+}
+\arguments{
+\item{object, x}{A RegionSetList}
+
+\item{i}{Index of the RegionSet to return}
+
+\item{j, ...}{ignored}
+}
 \description{
 S4 class representing a collection of RegionSets, backed by
 a Rust RegionSetList via externalptr. The gtars equivalent of GRangesList.

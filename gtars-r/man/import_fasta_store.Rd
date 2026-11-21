@@ -10,8 +10,6 @@ import_fasta_store(store_ptr, file_path)
 \item{store_ptr}{External pointer to RefgetStore}
 
 \item{file_path}{Path to FASTA file}
-
-\item{force}{Whether to overwrite existing sequences/collections}
 }
 \description{
 Import FASTA file into store

@@ -49,6 +49,8 @@ calcNearestNeighbors <- function(query) nearestNeighbors(query)
 #'
 #' @param query A GRanges object, file path, data.frame, or RegionSet
 #' @param nBins Number of bins (default 250)
+#' @param chromSizes Optional named numeric vector of chromosome sizes (see
+#'   \code{\link{distribution}})
 #' @return A data.table compatible with plotChromBins
 #'
 #' @export

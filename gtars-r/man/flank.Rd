@@ -22,6 +22,8 @@ flank downstream of end}
 
 \item{both}{If TRUE, flank on both sides}
 
+\item{use.names}{ignored}
+
 \item{...}{ignored}
 }
 \value{

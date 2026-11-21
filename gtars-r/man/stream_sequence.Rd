@@ -2,9 +2,12 @@
 % Please edit documentation in R/refget.R
 \name{stream_sequence}
 \alias{stream_sequence}
+\alias{stream_sequence,RefgetStore-method}
 \title{Stream a (sub)sequence's decoded bases (flow 2).}
 \usage{
 stream_sequence(store, seq_digest, start = NULL, end = NULL)
+
+\S4method{stream_sequence}{RefgetStore}(store, seq_digest, start = NULL, end = NULL)
 }
 \arguments{
 \item{store}{A RefgetStore.}

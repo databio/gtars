@@ -17,6 +17,9 @@ distribution(x, nBins = 250L, chromSizes = NULL, ...)
 
 \item{nBins}{Number of bins (default 250)}
 
+\item{chromSizes}{Optional named numeric vector of chromosome sizes. When
+given, bins span each whole chromosome; otherwise they span the regions.}
+
 \item{...}{ignored}
 }
 \value{

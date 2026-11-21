@@ -10,6 +10,11 @@ r_region_distribution(rs_ptr, n_bins, chrom_names, chrom_lengths)
 \item{rs_ptr}{External pointer to a RegionSet}
 
 \item{n_bins}{Number of bins (default 250)}
+
+\item{chrom_names}{Chromosome names for the bin layout, or NULL to use the
+chromosomes and extents present in the regions}
+
+\item{chrom_lengths}{Chromosome lengths matching \code{chrom_names}, or NULL}
 }
 \description{
 Calculate region distribution across chromosome bins
