@@ -3,7 +3,7 @@ name = "gtars-rgblast"
 version = "0.1.0"
 edition = "2024"
 description = "BLAST nucleotide databases built straight from a RefgetStore (rgmakeblastdb)"
-license = "BSD-2-Clause AND OLDAP-2.8"
+license = "MIT AND OLDAP-2.8"
 repository = "https://github.com/databio/gtars"
 # Not on crates.io yet. Lift this (and give the crate a crates.io version) before
 # a gtars release ships gtars-rgblast through gtars-cli: a published gtars-cli

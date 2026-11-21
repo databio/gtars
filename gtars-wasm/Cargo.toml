@@ -3,6 +3,7 @@ name = "gtars-js"
 version = "0.10.0"
 authors = ["Nathan LeRoy <NLeRoy917@gmail.com>"]
 edition = "2024"
+license = "MIT"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
