@@ -29,7 +29,7 @@ name: Build and publish R bindings binary package
 #     is empty for macOS, and the container-only / non-container steps are
 #     gated with `if:` conditions accordingly.
 #
-# macOS arch note: we build BOTH architectures. macos-14 = Apple Silicon /
+# macOS arch note: we build BOTH architectures. macos-latest = Apple Silicon /
 # arm64 (aarch64-apple-darwin, R 4.4's primary "big-sur-arm64" CRAN build) and
 # macos-13 = Intel (x86_64-apple-darwin). macos-13 is the last Intel runner
 # GitHub provides; if it is retired, the Intel entry must be dropped or moved.
@@ -63,7 +63,7 @@ jobs:
             # downstream consumers use, so the binary tarball stays loadable.
             container: bioconductor/bioconductor_docker:RELEASE_3_20
           - os-name: macos-arm64
-            runs-on: macos-14
+            runs-on: macos-latest
             r: '4.4'
             # No Linux container on macOS; deps come from r-lib/actions below.
             container: ''
