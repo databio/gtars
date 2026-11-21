@@ -3,7 +3,7 @@
 //! This module contains the FHR data types, sidecar JSON I/O functions,
 //! and RefgetStore bridge methods for managing FHR metadata.
 //!
-//! See: https://github.com/FAIR-bioHeaders/FHR-Specification
+//! See: https://github.com/FAIR-bioHeaders/FAIR-bioHeaders-Specification
 
 use super::*;
 use super::readonly::ReadonlyRefgetStore;
@@ -33,9 +33,11 @@ pub struct FhrMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schema: Option<String>,
 
-    /// FHR schema version (numeric per spec, e.g. 1 or 1.0)
+    /// FHR schema version. FHR 1 uses a number (`1` or `1.0`); FHR 2.x uses
+    /// a string (`"2.0"`). Stored as raw JSON so it is written back in the
+    /// same form it was read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub schema_version: Option<serde_json::Number>,
+    pub schema_version: Option<serde_json::Value>,
 
     /// Genome name (e.g., "Homo sapiens")
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -101,10 +103,6 @@ pub struct FhrMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub identifier: Option<Vec<String>>,
 
-    /// License information
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub license: Option<String>,
-
     /// Related URLs
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub related_link: Option<Vec<String>>,
@@ -144,30 +142,42 @@ pub struct FhrVitalStats {
     pub number_scaffolds: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub read_technology: Option<String>,
+    /// Catch-all for other keys (e.g. newer FHR fields)
+    #[serde(flatten)]
+    pub extra: HashMap<String, serde_json::Value>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct FhrTaxon {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub uri: Option<String>,
+    /// Catch-all for other keys (e.g. newer FHR fields)
+    #[serde(flatten)]
+    pub extra: HashMap<String, serde_json::Value>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct FhrAuthor {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub uri: Option<String>,
+    /// Catch-all for other keys (e.g. newer FHR fields)
+    #[serde(flatten)]
+    pub extra: HashMap<String, serde_json::Value>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, Default)]
 pub struct FhrIdentifier {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    /// Catch-all for other keys (e.g. newer FHR fields)
+    #[serde(flatten)]
+    pub extra: HashMap<String, serde_json::Value>,
 }
 
 // ============================================================================
@@ -509,11 +519,12 @@ mod tests {
     fn test_json_roundtrip() {
         let fhr = FhrMetadata {
             schema: Some("https://raw.githubusercontent.com/FAIR-bioHeaders/FHR-Specification/main/fhr.json".to_string()),
-            schema_version: Some(serde_json::Number::from_f64(1.0).unwrap()),
+            schema_version: Some(serde_json::json!(1.0)),
             genome: Some("Homo sapiens".to_string()),
             taxon: Some(FhrTaxon {
                 name: Some("Homo sapiens".to_string()),
                 uri: Some("https://identifiers.org/taxonomy:9606".to_string()),
+                ..Default::default()
             }),
             version: Some("GRCh38.p14".to_string()),
             masking: Some("soft-masked".to_string()),
@@ -523,6 +534,7 @@ mod tests {
             accession_id: Some(FhrIdentifier {
                 name: Some("GCA_000001405.29".to_string()),
                 url: Some("https://www.ncbi.nlm.nih.gov/assembly/GCA_000001405.29".to_string()),
+                ..Default::default()
             }),
             ..Default::default()
         };
@@ -556,7 +568,7 @@ mod tests {
     #[test]
     fn test_camel_case_serialization() {
         let fhr = FhrMetadata {
-            schema_version: Some(serde_json::Number::from_f64(1.0).unwrap()),
+            schema_version: Some(serde_json::json!(1.0)),
             genome_synonym: Some(vec!["hg38".to_string()]),
             date_created: Some("2024-01-01".to_string()),
             ..Default::default()
@@ -620,6 +632,7 @@ mod tests {
             accession_id: Some(FhrIdentifier {
                 name: Some("GCA_000001405.29".to_string()),
                 url: Some("https://ncbi.nlm.nih.gov".to_string()),
+                ..Default::default()
             }),
             ..Default::default()
         };
@@ -630,17 +643,58 @@ mod tests {
 
     #[test]
     fn test_schema_version_as_number() {
-        let json = r#"{"schemaVersion": 1}"#;
-        let fhr: FhrMetadata = serde_json::from_str(json).unwrap();
-        assert!(fhr.schema_version.is_some());
-        let ver = fhr.schema_version.unwrap();
-        assert_eq!(ver.to_string(), "1");
+        // FHR 1: a JSON number, written back unchanged
+        for input in [r#"{"schemaVersion":1}"#, r#"{"schemaVersion":1.0}"#] {
+            let fhr: FhrMetadata = serde_json::from_str(input).unwrap();
+            assert!(fhr.schema_version.as_ref().unwrap().is_number());
+            assert_eq!(serde_json::to_string(&fhr).unwrap(), input);
+        }
+    }
 
-        let json = r#"{"schemaVersion": 1.0}"#;
-        let fhr: FhrMetadata = serde_json::from_str(json).unwrap();
-        assert!(fhr.schema_version.is_some());
-        let ver = fhr.schema_version.unwrap();
-        assert_eq!(ver.to_string(), "1.0");
+    #[test]
+    fn test_schema_version_as_string() {
+        // FHR 2.x: a JSON string, written back unchanged
+        for input in [r#"{"schemaVersion":"2.0"}"#, r#"{"schemaVersion":"2.1"}"#] {
+            let fhr: FhrMetadata = serde_json::from_str(input).unwrap();
+            assert!(fhr.schema_version.as_ref().unwrap().is_string());
+            assert_eq!(serde_json::to_string(&fhr).unwrap(), input);
+        }
+    }
+
+    #[test]
+    fn test_load_sidecars_schema_version_string() {
+        let dir = tempdir().unwrap();
+        fs::write(
+            dir.path().join("abc123.fhr.json"),
+            r#"{"schemaVersion": "2.0", "genome": "Example"}"#,
+        )
+        .unwrap();
+        let map = load_sidecars(dir.path());
+        assert_eq!(map.len(), 1);
+        let fhr = map.get(&"abc123".to_key()).unwrap();
+        assert_eq!(fhr.schema_version, Some(serde_json::json!("2.0")));
+        assert_eq!(fhr.genome, Some("Example".to_string()));
+    }
+
+    #[test]
+    fn test_nested_unknown_fields_roundtrip() {
+        let input = serde_json::json!({
+            "schemaVersion": "2.0",
+            "genome": "Example",
+            "taxon": {"name": "Homo sapiens", "uri": "https://identifiers.org/taxonomy:9606", "rank": "species"},
+            "metadataAuthor": [{"name": "Jane Doe", "uri": "https://orcid.org/0000-0000-0000-0000", "nameType": "Personal"}],
+            "accessionID": {"name": "GCA_1", "url": "https://example.org", "source": "NCBI"},
+            "vitalStats": {"N50": 100, "N90": 16, "gcContent": 37.5, "scaffoldN50": 200},
+            "license": "CC0"
+        });
+        let fhr: FhrMetadata = serde_json::from_value(input.clone()).unwrap();
+        assert_eq!(fhr.metadata_author.as_ref().unwrap()[0].extra["nameType"], "Personal");
+        assert_eq!(fhr.vital_stats.as_ref().unwrap().n50, Some(100));
+        assert_eq!(fhr.vital_stats.as_ref().unwrap().extra["N90"], 16);
+        assert_eq!(fhr.vital_stats.as_ref().unwrap().extra["gcContent"], 37.5);
+        assert!(fhr.extra.contains_key("license"));
+        let output = serde_json::to_value(&fhr).unwrap();
+        assert_eq!(output, input);
     }
 
     #[test]
@@ -654,6 +708,7 @@ mod tests {
                 number_contigs: Some(500),
                 number_scaffolds: Some(24),
                 read_technology: Some("hifi".to_string()),
+                ..Default::default()
             }),
             ..Default::default()
         };

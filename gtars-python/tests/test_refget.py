@@ -1038,6 +1038,25 @@ def test_fhr_metadata_spec_fields():
     assert "seqcol_digest" not in d
 
 
+def test_fhr_metadata_schema_version_and_nested_fields():
+    """schemaVersion may be a number (FHR 1) or string (FHR 2.x); nested unknown keys survive."""
+    from gtars.refget import FhrMetadata
+
+    author = {"name": "Jane Doe", "uri": "https://orcid.org/0000-0000-0000-0000", "nameType": "Personal"}
+    base = {
+        "genome": "Example",
+        "version": "1.0",
+        "metadataAuthor": [author],
+        "vitalStats": {"N50": 100, "N90": 16, "gcContent": 37.5},
+    }
+    for sv in ["2.0", 1, 1.0]:
+        d = FhrMetadata(schemaVersion=sv, **base).to_dict()
+        assert d["schemaVersion"] == sv
+        assert type(d["schemaVersion"]) is type(sv)
+        assert d["metadataAuthor"] == [author]
+        assert d["vitalStats"] == base["vitalStats"]
+
+
 def test_add_sequence_collection_basic():
     """Test adding a pre-built SequenceCollection to a store."""
     fasta_path = "../tests/data/fasta/base.fa"

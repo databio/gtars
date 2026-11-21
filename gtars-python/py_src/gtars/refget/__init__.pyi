@@ -398,9 +398,11 @@ class StorageMode(Enum):
 class FhrMetadata:
     """FAIR Headers Reference genome metadata for a sequence collection.
 
-    Fields match the FHR 1.0 specification. All fields are optional.
-    Note: ``schema_version`` is a number (int or float) per spec, passed as
-    a Python numeric type and stored as ``serde_json::Number`` internally.
+    Fields follow the FHR specification. All fields are optional, and
+    unknown keys (top-level or nested) are kept as-is.
+    Note: ``schemaVersion`` may be a number (FHR 1, e.g. ``1`` or ``1.0``)
+    or a string (FHR 2.x, e.g. ``"2.0"``); it is written back in the same
+    form it was given.
     """
 
     genome: Optional[str]
